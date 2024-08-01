@@ -1,0 +1,37 @@
+﻿<client:ViewItemWpfUserControl x:Class="WebContent.Client.WebContentUserControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:client="clr-namespace:VideoOS.Platform.Client;assembly=VideoOS.Platform"
+             xmlns:fa="clr-namespace:FontAwesome.WPF;assembly=FontAwesome.WPF"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+             xmlns:local="clr-namespace:WebContent.Client"
+             mc:Ignorable="d" 
+             d:DesignHeight="600" d:DesignWidth="1200">
+    <UserControl.DataContext>
+        <local:WebContentViewModel />
+    </UserControl.DataContext>
+    <DockPanel Name="BrowserControl">
+        <DockPanel Name="Toolbar" DockPanel.Dock="Top" LastChildFill="True" Visibility="{Binding ToolbarVisibility, Mode=OneWay}" PreviewMouseDown="WebContentUserControl_PreviewMouseDown" Background="Transparent">
+            <Button Command="{Binding BackCommand}" Margin="5">
+                <fa:ImageAwesome Name="NavBack" Icon="ChevronLeft" Height="12"/>
+            </Button>
+            <Button Command="{Binding ForwardCommand}" Margin="5">
+                <fa:ImageAwesome Name="NavForward" Icon="ChevronRight" Height="12"/>
+            </Button>
+            <Button Command="{Binding ReloadCommand}" Margin="5">
+                <fa:ImageAwesome Name="NavRefresh" Icon="Refresh" Height="12"/>
+            </Button>
+            <Button Command="{Binding HomeCommand}" CommandParameter="{Binding Home}" Margin="5">
+                <fa:ImageAwesome Name="NavHome" Icon="Home" Height="12"/>
+            </Button>
+            <Button Command="{Binding PrintCommand}" Margin="5">
+                <fa:ImageAwesome Name="NavPrint" Icon="Print" Height="12"/>
+            </Button>
+            <Label Content="{Binding TrialText}" Visibility="{Binding TrialVisibility, Mode=OneWay}" FontWeight="Medium" />
+            <TextBox Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" FontWeight="Medium" Margin="5" Padding="5 0 0 0" IsEnabled="{Binding IsAddressEnabled}" />
+        </DockPanel>
+        <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown" />
+    </DockPanel>
+</client:ViewItemWpfUserControl>

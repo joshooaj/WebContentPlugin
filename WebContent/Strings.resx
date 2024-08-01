@@ -1,0 +1,192 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- 
+    Microsoft ResX Schema 
+    
+    Version 2.0
+    
+    The primary goals of this format is to allow a simple XML format 
+    that is mostly human readable. The generation and parsing of the 
+    various data types are done through the TypeConverter classes 
+    associated with the data types.
+    
+    Example:
+    
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+                
+    There are any number of "resheader" rows that contain simple 
+    name/value pairs.
+    
+    Each data row contains a name, and value. The row also contains a 
+    type or mimetype. Type corresponds to a .NET class that support 
+    text/value conversion through the TypeConverter architecture. 
+    Classes that don't support this are serialized and stored with the 
+    mimetype set.
+    
+    The mimetype is used for serialized objects, and tells the 
+    ResXResourceReader how to depersist the object. This is currently not 
+    extensible. For a given mimetype the value must be set accordingly:
+    
+    Note - application/x-microsoft.net.object.binary.base64 is the format 
+    that the ResXResourceWriter will generate, however the reader can 
+    read any of the formats listed below.
+    
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+    
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array 
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AllowAudioNotificationsLabel" xml:space="preserve">
+    <value>Allow audio notifications</value>
+  </data>
+  <data name="AllowAudioNotificationsToolTip" xml:space="preserve">
+    <value>Allow Smart Client notification messages to be shown at the top of the current view when this browser instance starts playing audio. These notifications can be used to mute the related browser instance. The web page title will be displayed in the notification to differentiate between multiple browser instances.</value>
+  </data>
+  <data name="AllowBackgroundBrowserLabel" xml:space="preserve">
+    <value>Allow browser to run in background</value>
+  </data>
+  <data name="AllowBackgroundBrowserToolTip" xml:space="preserve">
+    <value>Leave the browser instance open in the background to improve loading response time. Disabling this will close this browser instance preventing it from using resources in the background.</value>
+  </data>
+  <data name="ClearBrowsingDataNowLabel" xml:space="preserve">
+    <value>Clear history now</value>
+  </data>
+  <data name="ClearBrowsingDataOnExitLabel" xml:space="preserve">
+    <value>Clear history on exit</value>
+  </data>
+  <data name="ClearBrowsingDataOnExitToolTip" xml:space="preserve">
+    <value>Clear the browser history, cookies, and all other browsing data when closing Smart Client.</value>
+  </data>
+  <data name="EnableDevToolsLabel" xml:space="preserve">
+    <value>Enable developer tools (F12)</value>
+  </data>
+  <data name="EnableDevToolsToolTip" xml:space="preserve">
+    <value>Enable the browser developer tools which can be opened using the F12 keyboard shortcut or the context menu.</value>
+  </data>
+  <data name="HideAddressLabel" xml:space="preserve">
+    <value>Hide address</value>
+  </data>
+  <data name="HideAddressToolTip" xml:space="preserve">
+    <value>Hide the address in the toolbar. Enable this if you want access to the toolbar, but you do not want the user to have access to the address field.</value>
+  </data>
+  <data name="HideToolbarLabel" xml:space="preserve">
+    <value>Hide toolbar</value>
+  </data>
+  <data name="HideToolbarToolTip" xml:space="preserve">
+    <value>The toolbar is always visible in setup mode. Enable this to hide the toolbar when not in setup mode. Note that with the toolbar hidden, you will not have access to the address bar, or navigation buttons, and you cannot double-click anywhere to maximize the browser view item.</value>
+  </data>
+  <data name="HomeAddress" xml:space="preserve">
+    <value>https://www.cascadia.tech/</value>
+  </data>
+  <data name="HomeLabel" xml:space="preserve">
+    <value>Home</value>
+  </data>
+  <data name="IsolateBrowserInstancesLabel" xml:space="preserve">
+    <value>Isolate this browser instance</value>
+  </data>
+  <data name="IsolateBrowserInstancesToolTip" xml:space="preserve">
+    <value>Use a unique browser profile to isolate this browser instance from any others.</value>
+  </data>
+  <data name="MuteAudioLabel" xml:space="preserve">
+    <value>Mute audio</value>
+  </data>
+  <data name="MuteAudioToolTip" xml:space="preserve">
+    <value>Mute all audio for this browser instance.</value>
+  </data>
+  <data name="PurchaseLicenseLabel" xml:space="preserve">
+    <value>Purchase a license</value>
+  </data>
+  <data name="PurchaseLicenseUrl" xml:space="preserve">
+    <value>https://tinyurl.com/cbtxvv76</value>
+  </data>
+  <data name="RememberLastAddressLabel" xml:space="preserve">
+    <value>Remember last address</value>
+  </data>
+  <data name="RememberLastAddressToolTip" xml:space="preserve">
+    <value>Open this browser instance to the last address instead of the home page.</value>
+  </data>
+  <data name="ZoomLevelLabel" xml:space="preserve">
+    <value>Zoom level</value>
+  </data>
+</root>

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "nbgv": {
+      "version": "3.6.139",
+      "commands": [
+        "nbgv"
+      ],
+      "rollForward": false
+    },
+    "wix": {
+      "version": "5.0.1",
+      "commands": [
+        "wix"
+      ],
+      "rollForward": false
+    }
+  }
+}
