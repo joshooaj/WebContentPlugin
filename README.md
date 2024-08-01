@@ -9,6 +9,8 @@ will always be kept up to date without the need to upgrade the plugin. And
 because it is a Microsoft Edge browser, it will work with whatever content you
 need it for.
 
+![Screenshot of web content plugin in Smart Client](./docs/assets/images/screenshot1.png)
+
 ## Getting started
 
 ### Install the plugin
@@ -29,9 +31,16 @@ work with Milestone's OEM partners as well.
 2. Click the **Setup** button at the top right.
 3. Select an existing view, or create a new view.
 4. Locate **Cascadia Technology > Web Content** in the **System Overview** side panel, and drag it into the view.
-5. With the new Web View selected, scroll to the bottom of the side panel where you'll find the properties.
-6. Update the Home address, and any other options as needed.
-7. Click the **Setup** button again to exit setup mode.
+
+![Screenshot of plugin in system overview list](./docs/assets/images/systemoverview.png)
+
+### Configuration
+
+1. With the new Web View selected, scroll to the bottom of the side panel where you'll find the properties.
+2. Update the Home address, and any other options as needed.
+3. Click the **Setup** button again to exit setup mode.
+
+![Screenshot of web content view item properties](./docs/assets/images/properties.png)
 
 ## Licensing
 
