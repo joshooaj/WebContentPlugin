@@ -1,0 +1,29 @@
+<Project Sdk="WixToolset.Sdk/5.0.1">
+    <PropertyGroup>
+        <DefineConstants>Version=$(BuildVersion)</DefineConstants>
+        <OutputPath>..\..\output\Setup</OutputPath>
+        <OutputName>CascadiaWebContentPlugin.$(BuildVersion)</OutputName>
+        <SuppressIces>ICE61</SuppressIces>
+        <HarvestPath>..\..\output\WebContent</HarvestPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="WixToolset.Heat" Version="5.0.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../WebContent/WebContent.csproj" />
+        <HarvestDirectory Include="$(HarvestPath)">
+            <ComponentGroupName>WebContentAssemblies</ComponentGroupName>
+            <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
+            <SuppressRootDirectory>true</SuppressRootDirectory>
+            <SuppressRegistry>true</SuppressRegistry>
+            <Transforms>filter.xsl</Transforms>
+        </HarvestDirectory>
+    </ItemGroup>
+
+    <PropertyGroup>
+        <PreBuildEvent>
+        </PreBuildEvent>
+    </PropertyGroup>
+</Project>
