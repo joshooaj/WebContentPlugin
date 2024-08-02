@@ -17,6 +17,16 @@ need it for.
 
 Download and run the [CascadiaWebContentPlugin](https://store-h8e7b0cwapcxhvh5.z02.azurefd.net/downloads/CascadiaWebContentPlugin.0.1.9.15563.msi) installer.
 
+The installer is not currently signed and your browser will warn you about the file is potentially unsafe. You can
+validate the file hash against the SHA256 hash below.
+
+```plaintext
+SHA256: BB8815EB5825683276B99AC9214AC9B0ED6511A62BC7F0141D904D6569D77B7B
+```
+
+Click **Keep**, and if your browser asks again, click **Keep anyway**. The installation experience will improve when I
+get a code signing certificate setup.
+
 The installer is not interactive. It will install the Microsoft Edge WebView2 Runtime if necessary, and place the
    plugin files in `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\`. You will find **Cascadia Web Content Plugin**
    listed in **Programs and Features**.
@@ -24,6 +34,10 @@ The installer is not interactive. It will install the Microsoft Edge WebView2 Ru
 You should now see the plugin files in ``.
 The OEM-friendly VideoOS folder is used by default which means the plugin will
 work with Milestone's OEM partners as well.
+
+![Microsoft Edge download warning](./docs/assets/images/download-warning.png)
+
+![Microsoft Edge download warning](./docs/assets/images/download-warning2.png)
 
 ### Add Web Content to a view
 
