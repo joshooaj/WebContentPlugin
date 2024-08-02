@@ -15,13 +15,13 @@ need it for.
 
 ### Install the plugin
 
-1. Download [WebContentPlugin.zip](https://store-h8e7b0cwapcxhvh5.z02.azurefd.net/downloads/WebContentPlugin.zip)
-2. Unblock the file by right-clicking on **WebContentPlugin.zip** and selecting **Properties**. If you see an "Unblock" checkbox in toward the bottom of the properties window, check the box and click OK.
-3. Unzip **WebContentPlugin.zip** and run **setup.exe**
+Download and run the [CascadiaWebContentPlugin](https://store-h8e7b0cwapcxhvh5.z02.azurefd.net/downloads/CascadiaWebContentPlugin.0.1.9.15563.msi) installer.
 
-_Note: The **setup.exe** file will automatically install the WebView2 runtime if needed while **setup.msi** will not.
+The installer is not interactive. It will install the Microsoft Edge WebView2 Runtime if necessary, and place the
+   plugin files in `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\`. You will find **Cascadia Web Content Plugin**
+   listed in **Programs and Features**.
 
-You should now see the plugin files in `C:\Program Files\VideoOS\MIPPlugins\`.
+You should now see the plugin files in ``.
 The OEM-friendly VideoOS folder is used by default which means the plugin will
 work with Milestone's OEM partners as well.
 
