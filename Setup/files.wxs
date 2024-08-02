@@ -1,0 +1,9 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <Fragment>
+        <ComponentGroup Id="PluginContent" Directory="INSTALLFOLDER">
+            <Component>
+                <File Source="WebContent.dll" />
+            </Component>
+        </ComponentGroup>
+    </Fragment>
+</Wix>

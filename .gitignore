@@ -7,6 +7,7 @@
 *.exe
 *.msi
 *.zip
+output/
 
 # User-specific files
 *.rsuser

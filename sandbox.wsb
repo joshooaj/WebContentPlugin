@@ -1,0 +1,11 @@
+<Configuration>
+    <MappedFolders>
+        <MappedFolder>
+            <HostFolder>C:\repos\WebContentPlugin</HostFolder>
+            <SandboxFolder>C:\repos\WebContentPlugin</SandboxFolder>
+        </MappedFolder>
+    </MappedFolders>
+    <LogonCommand>
+        <Command>powershell -ExecutionPolicy Bypass -NoExit -File C:\repos\WebContentPlugin\install.ps1</Command>
+    </LogonCommand>
+</Configuration>

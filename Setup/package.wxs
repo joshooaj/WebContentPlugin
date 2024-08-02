@@ -1,0 +1,40 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <Package Name="Cascadia Web Content Plugin" Manufacturer="Cascadia Technology"
+        Version="$(Version)"
+        UpgradeCode="3AE48765-7EE5-454C-A804-3106ACE585B7">
+        <MajorUpgrade AllowDowngrades="yes" />
+        <MediaTemplate EmbedCab="yes" />
+
+        <Icon Id="CascadiaIcon" SourceFile="..\docs\assets\images\logo.ico" />
+        <Property Id="ARPPRODUCTICON" Value="CascadiaIcon" />
+
+        <StandardDirectory Id="ProgramFiles64Folder">
+            <Directory Name="VideoOS">
+                <Directory Name="MIPPlugins">
+                    <Directory Name="CascadiaWebContentPlugin" Id="INSTALLFOLDER" />
+                </Directory>
+            </Directory>
+        </StandardDirectory>
+
+        <Feature Id="Main">
+            <ComponentGroupRef Id="WebContentAssemblies" />
+        </Feature>
+
+
+        <!-- Chain the WebView2 Runtime installer -->
+        <Property Id="WVRTINSTALLED">
+            <RegistrySearch Id="WVRTInstalled" Root="HKLM"
+                Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                Name="pv" Type="raw" Bitness="always32" />
+        </Property>
+        <Binary Id="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+            SourceFile="..\output\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" />
+        <CustomAction Id="InvokeStandalone" BinaryRef="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+            Execute="deferred" ExeCommand=" /install" Return="check" />
+
+        <InstallExecuteSequence>
+            <Custom Action="InvokeStandalone" Before="InstallFinalize"
+                Condition="NOT(REMOVE OR WVRTINSTALLED)" />
+        </InstallExecuteSequence>
+    </Package>
+</Wix>
