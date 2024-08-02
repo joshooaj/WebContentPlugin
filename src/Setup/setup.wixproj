@@ -1,7 +1,8 @@
 <Project Sdk="WixToolset.Sdk/5.0.1">
     <PropertyGroup>
         <DefineConstants>Version=$(BuildVersion)</DefineConstants>
-        <OutputPath>..\..\output\Installer</OutputPath>
+        <OutputPath>..\..\output\Setup</OutputPath>
+        <OutputName>CascadiaWebContentPlugin.$(BuildVersion)</OutputName>
         <SuppressIces>ICE61</SuppressIces>
     </PropertyGroup>
 
