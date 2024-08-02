@@ -30,7 +30,7 @@
         <Binary Id="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
             SourceFile="MicrosoftEdgeWebView2RuntimeInstallerX64.exe" />
         <CustomAction Id="InvokeStandalone" BinaryRef="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-            Execute="deferred" ExeCommand=" /install" Return="check" />
+            Execute="deferred" ExeCommand=" /silent /install" Return="check" />
 
         <InstallExecuteSequence>
             <Custom Action="InvokeStandalone" Before="InstallFinalize"

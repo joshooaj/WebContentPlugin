@@ -21,6 +21,6 @@
         </xsl:copy>
     </xsl:template>
 
-    <xsl:template match="*[ self::wix:Component or self::wix:ComponentRef ][ key( 'FilterPdbs', @Id ) ]" />
+    <!-- <xsl:template match="*[ self::wix:Component or self::wix:ComponentRef ][ key( 'FilterPdbs', @Id ) ]" /> -->
     <xsl:template match="*[ self::wix:Component or self::wix:ComponentRef ][ key( 'FilterVideoOS', @Id ) ]" />
 </xsl:stylesheet>

@@ -95,9 +95,7 @@
     <Content Include="plugin.def">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="Resources\icon.ico">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
+    <None Include="Resources\icon.ico" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Admin\RootNodeUserControl.resx">
@@ -145,11 +143,15 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>
-    </PostBuildEvent>
+    <PreBuildEvent>
+      dotnet tool restore
+    </PreBuildEvent>
   </PropertyGroup>
   <PropertyGroup>
-    <PreBuildEvent>
-    </PreBuildEvent>
+    <PostBuildEvent>
+      del /s /q $(OutputPath)VideoOS*
+      for /R /D %%1 in ($(OutputPath)*) do rd "%%1"
+      dotnet tool run sbom-tool generate -b $(OutputPath) -bc .\ -pn CascadiaWebContentPlugin -pv $(BuildVersion) -ps "Cascadia Technology" -nsb https://cascadia.tech/joshooaj -V Warning
+    </PostBuildEvent>
   </PropertyGroup>
 </Project>

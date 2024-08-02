@@ -19,7 +19,8 @@ if (!(Test-Path $PSScriptRoot\src\Setup\MicrosoftEdgeWebView2RuntimeInstallerX64
 }
 
 if (!$PSCmdlet.MyInvocation.BoundParameters.ContainsKey('Version')) {
-    $Version = (dotnet nbgv get-version -f json | ConvertFrom-Json).SimpleVersion
+    #$Version = (dotnet nbgv get-version -f json | ConvertFrom-Json).SimpleVersion
+    $Version = (dotnet nbgv get-version -f json | ConvertFrom-Json).Version
 }
 
 & msbuild src/Setup/setup.wixproj /t:Rebuild /restore:True /p:Configuration=Release /p:Platform=x64 /p:BuildVersion=$Version

@@ -6,15 +6,19 @@
       "version": "3.6.139",
       "commands": [
         "nbgv"
-      ],
-      "rollForward": false
+      ]
     },
     "wix": {
       "version": "5.0.1",
       "commands": [
         "wix"
-      ],
-      "rollForward": false
+      ]
+    },
+    "microsoft.sbom.dotnettool": {
+      "version": "2.2.7",
+      "commands": [
+        "sbom-tool"
+      ]
     }
   }
 }

@@ -4,6 +4,7 @@
         <OutputPath>..\..\output\Setup</OutputPath>
         <OutputName>CascadiaWebContentPlugin.$(BuildVersion)</OutputName>
         <SuppressIces>ICE61</SuppressIces>
+        <HarvestPath>..\..\output\WebContent</HarvestPath>
     </PropertyGroup>
 
     <ItemGroup>
@@ -12,7 +13,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../WebContent/WebContent.csproj" />
-        <HarvestDirectory Include="../../output/WebContent">
+        <HarvestDirectory Include="$(HarvestPath)">
             <ComponentGroupName>WebContentAssemblies</ComponentGroupName>
             <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
             <SuppressRootDirectory>true</SuppressRootDirectory>
@@ -20,4 +21,9 @@
             <Transforms>filter.xsl</Transforms>
         </HarvestDirectory>
     </ItemGroup>
+
+    <PropertyGroup>
+        <PreBuildEvent>
+        </PreBuildEvent>
+    </PropertyGroup>
 </Project>
