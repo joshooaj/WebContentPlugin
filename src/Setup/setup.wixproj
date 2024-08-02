@@ -1,7 +1,7 @@
 <Project Sdk="WixToolset.Sdk/5.0.1">
     <PropertyGroup>
         <DefineConstants>Version=$(BuildVersion)</DefineConstants>
-        <OutputPath>..\output\Installer</OutputPath>
+        <OutputPath>..\..\output\Installer</OutputPath>
         <SuppressIces>ICE61</SuppressIces>
     </PropertyGroup>
 
@@ -11,7 +11,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../WebContent/WebContent.csproj" />
-        <HarvestDirectory Include="../output/WebContent">
+        <HarvestDirectory Include="../../output/WebContent">
             <ComponentGroupName>WebContentAssemblies</ComponentGroupName>
             <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
             <SuppressRootDirectory>true</SuppressRootDirectory>

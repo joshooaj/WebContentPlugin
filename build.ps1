@@ -1,17 +1,12 @@
 param(
     [Parameter()]
     [string]
-    $Version,
-
-    [Parameter()]
-    [switch]
-    $Force
+    $Version
 )
 # & dotnet wix build ./Installer/*.wxs -arch x64 -out output\installer\WebContent.msi
 # & dotnet wix msi validate output\installer\WebContent.msi -sice ICE61
 
-# OR
-
+& dotnet tool restore
 
 $null = New-Item $PSScriptRoot\output -ItemType Directory -Force
 
@@ -26,5 +21,4 @@ if (!$PSCmdlet.MyInvocation.BoundParameters.ContainsKey('Version')) {
     $Version = (dotnet nbgv get-version -f json | ConvertFrom-Json).SimpleVersion
 }
 
-$verb = if ($Force) { '/Rebuild' } else { '/Build' }
-& msbuild Setup/package.wixproj /t:Rebuild /restore:True /p:Configuration=Release /p:Platform=x64 /p:BuildVersion=$Version
+& msbuild src/Setup/setup.wixproj /t:Rebuild /restore:True /p:Configuration=Release /p:Platform=x64 /p:BuildVersion=$Version
