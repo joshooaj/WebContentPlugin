@@ -15,13 +15,13 @@ need it for.
 
 ### Install the plugin
 
-Download and run the [CascadiaWebContentPlugin](https://store-h8e7b0cwapcxhvh5.z02.azurefd.net/downloads/CascadiaWebContentPlugin.0.1.9.15563.msi) installer.
+Download and run the [CascadiaWebContentPlugin](https://download.cascadia.tech/software/CascadiaWebContentPlugin.0.1.13.61951.msi) installer.
 
 The installer is not currently signed and your browser will warn you about the file is potentially unsafe. You can
 validate the file hash against the SHA256 hash below.
 
 ```plaintext
-SHA256: BB8815EB5825683276B99AC9214AC9B0ED6511A62BC7F0141D904D6569D77B7B
+SHA256: 29F5DB4698BAAA807D166BAC8DD29D59048875FE6668578C448984FEF7A03151
 ```
 
 Click **Keep**, and if your browser asks again, click **Keep anyway**. The installation experience will improve when I
