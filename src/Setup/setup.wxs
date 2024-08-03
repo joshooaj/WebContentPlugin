@@ -1,4 +1,6 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+    xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
     <Package Name="Cascadia Web Content Plugin" Manufacturer="Cascadia Technology"
         Version="$(Version)"
         UpgradeCode="3AE48765-7EE5-454C-A804-3106ACE585B7">
@@ -36,5 +38,11 @@
             <Custom Action="InvokeStandalone" Before="InstallFinalize"
                 Condition="NOT(REMOVE OR WVRTINSTALLED)" />
         </InstallExecuteSequence>
+
+        <ui:WixUI Id="WixUI_Minimal" InstallDirectory="INSTALLFOLDER" />
+        <WixVariable
+            Id="WixUILicenseRtf"
+            Value="license.rtf"
+        />
     </Package>
 </Wix>

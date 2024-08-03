@@ -1,5 +1,6 @@
 <Project Sdk="WixToolset.Sdk/5.0.1">
     <PropertyGroup>
+        <BuildVersion>0.1.1</BuildVersion>
         <DefineConstants>Version=$(BuildVersion)</DefineConstants>
         <OutputPath>..\..\output\Setup</OutputPath>
         <OutputName>CascadiaWebContentPlugin.$(BuildVersion)</OutputName>
@@ -9,6 +10,7 @@
 
     <ItemGroup>
         <PackageReference Include="WixToolset.Heat" Version="5.0.1" />
+        <PackageReference Include="WixToolset.UI.wixext" Version="5.0.1" />
     </ItemGroup>
 
     <ItemGroup>

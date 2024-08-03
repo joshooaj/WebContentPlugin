@@ -5,6 +5,8 @@ VisualStudioVersion = 17.10.35027.167
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebContent", "WebContent\WebContent.csproj", "{01DD540B-2AF6-4F94-A4EE-CF4E32598513}"
 EndProject
+Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "setup", "Setup\setup.wixproj", "{AB6D7257-BF41-489E-A208-EBF6A3379715}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -15,6 +17,10 @@ Global
 		{01DD540B-2AF6-4F94-A4EE-CF4E32598513}.Debug|x64.Build.0 = Debug|x64
 		{01DD540B-2AF6-4F94-A4EE-CF4E32598513}.Release|x64.ActiveCfg = Release|x64
 		{01DD540B-2AF6-4F94-A4EE-CF4E32598513}.Release|x64.Build.0 = Release|x64
+		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Debug|x64.ActiveCfg = Debug|x64
+		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Debug|x64.Build.0 = Debug|x64
+		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Release|x64.ActiveCfg = Release|x64
+		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
