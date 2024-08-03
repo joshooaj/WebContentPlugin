@@ -27,13 +27,8 @@ SHA256: BB8815EB5825683276B99AC9214AC9B0ED6511A62BC7F0141D904D6569D77B7B
 Click **Keep**, and if your browser asks again, click **Keep anyway**. The installation experience will improve when I
 get a code signing certificate setup.
 
-The installer is not interactive. It will install the Microsoft Edge WebView2 Runtime if necessary, and place the
-   plugin files in `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\`. You will find **Cascadia Web Content Plugin**
-   listed in **Programs and Features**.
-
-You should now see the plugin files in ``.
-The OEM-friendly VideoOS folder is used by default which means the plugin will
-work with Milestone's OEM partners as well.
+The installer is very simple and has no options. Acknowledge the license, and then it will install the Microsoft Edge
+WebView2 Runtime if necessary, and place the plugin files in `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\`.
 
 ![Microsoft Edge download warning](./docs/assets/images/download-warning.png)
 
@@ -69,3 +64,24 @@ Once you have purchased a license from the [Cascadia Technology Store](https://w
 To apply the license to your VMS, perform a normal online (or offline) license activation using Management Client on a system where the plugin is installed.
 
 **Important:** The Web Content Plugin must be installed on the same system where Management Client is used to perform the activation, otherwise the Management Client won't include a license request from the plugin during the activation process.
+
+## Software Build of Materials
+
+You will find a software build of materials, also known as an SBOM (S-bomb), in the `_manifest` subdirectory of the
+plugin installation path at `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\_manifest\spdx_2.2\`. In this
+folder you will find the SBOM file `manifest.spdx.json` in SPDX:2.2 format, along with `manifest.spdx.json.sha256` which
+is a SHA256 hash of the SBOM file.
+
+These files are generated using Microsoft's [sbom-tool](https://github.com/microsoft/sbom-tool) and the same tool can be
+used to validate your own software installation. To do so, you would install `sbom-tool` per Microsoft's documentation
+and then run the following command.
+
+```plaintext
+dotnet sbom-tool validate -b C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\ -o .sbom-validation.txt -mi SPDX:2.2
+```
+
+Or, if the `sbom-tool` command is installed globally on `PATH` you can drop the leading `dotnet` cli command name.
+
+```plaintext
+sbom-tool validate -b C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\ -o .sbom-validation.txt -mi SPDX:2.2
+```
