@@ -76,7 +76,7 @@ jobs:
         shell: powershell
         run: |
           $installer = Get-ChildItem -Path .\output\Setup\en-US\*.msi
-          az storage blob upload -f $installer.FullName -c $env:AZURE_STORAGE_NAME -n $env:AZURE_BLOB_NAME --auth-mode login
+          az storage blob upload --file $installer.FullName --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name $installer.Name --auth-mode login
 
       - name: Upload as artifact
         uses: actions/upload-artifact@v3
