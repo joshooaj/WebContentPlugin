@@ -8,7 +8,7 @@ param(
 
 & dotnet tool restore
 
-$null = New-Item $PSScriptRoot\output -ItemType Directory -Force
+$null = New-Item $PSScriptRoot\output, .cache\ -ItemType Directory -Force
 Get-ChildItem $PSScriptRoot\output | Remove-Item -Recurse -Force
 
 # Download WebView2 runtime

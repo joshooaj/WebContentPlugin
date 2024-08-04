@@ -44,8 +44,8 @@ jobs:
         run: |
           $result = .\build.ps1
           $result | Format-Table
-          "INSTALLERNAME=CascadiaWebContentPlugin.$Version" | Add-Content "$($env:GITHUB_OUTPUT)"
-          "OUTPUTDIRECTORY=.\output\Setup\en-US\" | Add-Content "$($env:GITHUB_OUTPUT)"
+          "INSTALLERNAME=CascadiaWebContentPlugin.$Version" | Add-Content $env:GITHUB_OUTPUT
+          "OUTPUTDIRECTORY=.\output\Setup\en-US\" | Add-Content $env:GITHUB_OUTPUT
 
      
     #   - name: Azure login
