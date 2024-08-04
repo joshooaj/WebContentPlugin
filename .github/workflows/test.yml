@@ -45,6 +45,4 @@ jobs:
           AZURE_STORAGE_NAME: ${{ secrets.AZURE_STORAGE_NAME }}
           AZURE_BLOB_NAME: ${{ secrets.AZURE_BLOB_NAME }}
         shell: powershell
-        run: |
-          #az storage blob upload -f test.txt -c $env:AZURE_STORAGE_NAME -n $env:AZURE_BLOB_NAME --auth-mode login
-          [convert]::tobase64string([text.encoding]::utf8.getbytes((az account show)))
+        run: az storage blob upload --file test.txt --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name test.txt --auth-mode login
