@@ -35,19 +35,19 @@ jobs:
         id: cache-webview
         uses: actions/cache@v4
         with:
-          path: .\cache
+          path: .\.cache
           key: ${{ runner.os }}-webview
 
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
-        
+
       - name: Build
         id: build
         shell: powershell
         run: |
           $result = .\build.ps1
           $result | Format-Table
-          "INSTALLERNAME=CascadiaWebContentPlugin.$Version" | Add-Content $env:GITHUB_OUTPUT
+          "INSTALLERNAME=CascadiaWebContentPlugin.$($result.Version)" | Add-Content $env:GITHUB_OUTPUT
           "OUTPUTDIRECTORY=.\output\Setup\en-US\" | Add-Content $env:GITHUB_OUTPUT
 
      
