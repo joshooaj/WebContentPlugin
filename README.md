@@ -15,7 +15,7 @@ need it for.
 
 ### Install the plugin
 
-Download and run the [CascadiaWebContentPlugin](https://download.cascadia.tech/software/CascadiaWebContentPlugin.0.1.13.61951.msi) installer.
+Download and run the [CascadiaWebContentPlugin](https://download.cascadia.tech/software/CascadiaWebContentPlugin.msi) installer.
 
 The installer is not currently signed and your browser will warn you about the file is potentially unsafe. You can
 validate the file hash against the SHA256 hash below.
