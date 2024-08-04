@@ -18,11 +18,7 @@ need it for.
 Download and run the [CascadiaWebContentPlugin](https://download.cascadia.tech/software/CascadiaWebContentPlugin.msi) installer.
 
 The installer is not currently signed and your browser will warn you about the file is potentially unsafe. You can
-validate the file hash against the SHA256 hash below.
-
-```plaintext
-SHA256: 29F5DB4698BAAA807D166BAC8DD29D59048875FE6668578C448984FEF7A03151
-```
+validate the file hash against the [SHA256 hash](https://download.cascadia.tech/software/CascadiaWebContentPlugin.msi.sha256.txt).
 
 Click **Keep**, and if your browser asks again, click **Keep anyway**. The installation experience will improve when I
 get a code signing certificate setup.
