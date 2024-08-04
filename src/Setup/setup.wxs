@@ -30,7 +30,7 @@
                 Name="pv" Type="raw" Bitness="always32" />
         </Property>
         <Binary Id="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-            SourceFile="MicrosoftEdgeWebView2RuntimeInstallerX64.exe" />
+            SourceFile="..\..\.cache\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" />
         <CustomAction Id="InvokeStandalone" BinaryRef="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
             Execute="deferred" ExeCommand=" /silent /install" Return="check" />
 
