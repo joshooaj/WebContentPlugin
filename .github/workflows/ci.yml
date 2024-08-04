@@ -76,6 +76,7 @@ jobs:
           AZURE_BLOB_NAME: ${{ secrets.AZURE_BLOB_NAME }}
         shell: powershell
         run: |
+          $installer = Get-ChildItem -Path .\output\Setup\en-US\*.msi
           az storage blob upload --file $installer.FullName --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name CascadiaWebContentPlugin.msi --auth-mode login
 
       - name: Upload as artifact
