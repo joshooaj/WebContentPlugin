@@ -1,4 +1,4 @@
-name: CI
+name: Test
 on:
   workflow_dispatch:
   push:
@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   build:
-    name: Build
+    name: Test Azure Login
     runs-on: windows-latest
     steps:
       - name: Azure login
@@ -46,4 +46,5 @@ jobs:
           AZURE_BLOB_NAME: ${{ secrets.AZURE_BLOB_NAME }}
         shell: powershell
         run: |
-          az storage blob upload -f test.txt -c $env:AZURE_STORAGE_NAME -n $env:AZURE_BLOB_NAME --auth-mode login
+          #az storage blob upload -f test.txt -c $env:AZURE_STORAGE_NAME -n $env:AZURE_BLOB_NAME --auth-mode login
+          az account show
