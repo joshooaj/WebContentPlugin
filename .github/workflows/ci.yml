@@ -38,6 +38,9 @@ jobs:
           path: .\cache
           key: ${{ runner.os }}-webview
 
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        
       - name: Build
         id: build
         shell: powershell
