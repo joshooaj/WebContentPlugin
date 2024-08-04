@@ -13,10 +13,10 @@ on:
   pull_request:
     branches:
       - 'main'
-      paths-ignore:
-        - 'docs/**'
-        - '*.md'
-        - 'mkdocs*.yml'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'mkdocs*.yml'
 
 permissions:
   id-token: write
