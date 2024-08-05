@@ -11,6 +11,18 @@ need it for.
 
 ![Screenshot of web content plugin in Smart Client](./docs/assets/images/screenshot1.png)
 
+## Features
+
+- **Evergreen** browser based on Microsoft Edge WebView2 Runtime. Browser stays up to date even if the plugin does not.
+- **Runs in Background** when enabled. Your browser session isn't lost if you switch views and come back.
+- **Isolate browser sessions** for improved security. Each browser instance can use its own "profile" reducing the risk
+  of exposing data between instances.
+- **Remember the last address** instead of always navigating to the configured home address on startup.
+- **Automatically clear history** when the client is closed if you don't want to leave sensitive browser history on disk.
+- **Hide the toolbar** or even just the address field to minimize misuse of the browser or simply regain some of that precious screen real estate.
+- **Easily mute unexpected audio** from a browser in a previous view that is no longer displayed. If a background browser
+    should start playing sound, you'll see a notification with the name of the web page and a button to mute that browser instance.
+
 ## Getting started
 
 ### Install the plugin
