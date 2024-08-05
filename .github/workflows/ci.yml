@@ -80,6 +80,8 @@ jobs:
           (Get-FileHash $installer.FullName -Algorithm SHA256).Hash | Set-Content CascadiaWebContentPlugin.msi.sha256.txt
           az storage blob upload --file $installer.FullName --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name CascadiaWebContentPlugin.msi --overwrite --auth-mode login
           az storage blob upload --file CascadiaWebContentPlugin.msi.sha256.txt --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name CascadiaWebContentPlugin.msi.sha256.txt --overwrite --auth-mode login
+          az storage blob upload --file $installer.FullName --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name $installer.Name --overwrite --auth-mode login
+          az storage blob upload --file CascadiaWebContentPlugin.msi.sha256.txt --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name "$($installer.Name).sha256.txt" --overwrite --auth-mode login
 
       - name: Upload as artifact
         uses: actions/upload-artifact@v3
