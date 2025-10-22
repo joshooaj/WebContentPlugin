@@ -71,6 +71,7 @@ jobs:
       #       .\build.ps1 -Task SignWithAzureSignTool
 
       - name: Upload to Azure
+        if: github.ref == 'refs/heads/main'
         env:
           AZURE_STORAGE_NAME: ${{ secrets.AZURE_STORAGE_NAME }}
           AZURE_BLOB_NAME: ${{ secrets.AZURE_BLOB_NAME }}
