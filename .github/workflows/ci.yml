@@ -84,7 +84,7 @@ jobs:
           az storage blob upload --file CascadiaWebContentPlugin.msi.sha256.txt --account-name $env:AZURE_STORAGE_NAME --container-name $env:AZURE_BLOB_NAME --name "$($installer.Name).sha256.txt" --overwrite --auth-mode login
 
       - name: Upload as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.INSTALLERNAME }}
           path: ${{ steps.build.outputs.OUTPUTDIRECTORY }}
