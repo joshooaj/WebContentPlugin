@@ -130,13 +130,13 @@
       <Version>4.7.0.9</Version>
     </PackageReference>
     <PackageReference Include="Microsoft.Web.WebView2">
-      <Version>1.0.2592.51</Version>
+      <Version>1.0.3537.50</Version>
     </PackageReference>
     <PackageReference Include="MilestoneSystems.VideoOS.Platform">
-      <Version>24.1.1</Version>
+      <Version>25.2.3</Version>
     </PackageReference>
     <PackageReference Include="Nerdbank.GitVersioning">
-      <Version>3.6.139</Version>
+      <Version>3.8.118</Version>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
