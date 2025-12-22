@@ -14,23 +14,23 @@
     </UserControl.DataContext>
     <DockPanel Name="BrowserControl">
         <DockPanel Name="Toolbar" DockPanel.Dock="Top" LastChildFill="True" Visibility="{Binding ToolbarVisibility, Mode=OneWay}" PreviewMouseDown="WebContentUserControl_PreviewMouseDown" Background="Transparent">
-            <Button Command="{Binding BackCommand}" Margin="5">
+            <Button Command="{Binding BackCommand}" Margin="2">
                 <fa:ImageAwesome Name="NavBack" Icon="ChevronLeft" Height="12"/>
             </Button>
-            <Button Command="{Binding ForwardCommand}" Margin="5">
+            <Button Command="{Binding ForwardCommand}" Margin="2">
                 <fa:ImageAwesome Name="NavForward" Icon="ChevronRight" Height="12"/>
             </Button>
-            <Button Command="{Binding ReloadCommand}" Margin="5">
+            <Button Command="{Binding ReloadCommand}" Margin="2">
                 <fa:ImageAwesome Name="NavRefresh" Icon="Refresh" Height="12"/>
             </Button>
-            <Button Command="{Binding HomeCommand}" CommandParameter="{Binding Home}" Margin="5">
+            <Button Command="{Binding HomeCommand}" CommandParameter="{Binding Home}" Margin="2">
                 <fa:ImageAwesome Name="NavHome" Icon="Home" Height="12"/>
             </Button>
-            <Button Command="{Binding PrintCommand}" Margin="5">
+            <Button Command="{Binding PrintCommand}" Margin="2">
                 <fa:ImageAwesome Name="NavPrint" Icon="Print" Height="12"/>
             </Button>
             <Label Content="{Binding TrialText}" Visibility="{Binding TrialVisibility, Mode=OneWay}" FontWeight="Medium" />
-            <TextBox Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" FontWeight="Medium" Margin="5" Padding="5 0 0 0" IsEnabled="{Binding IsAddressEnabled}" />
+            <TextBox Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" FontWeight="Medium" Margin="2" Padding="5 0 0 0" IsEnabled="{Binding IsAddressEnabled}" />
         </DockPanel>
         <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown" />
     </DockPanel>

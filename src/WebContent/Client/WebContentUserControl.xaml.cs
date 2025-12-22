@@ -14,7 +14,8 @@ namespace WebContent.Client
     public partial class WebContentUserControl : ViewItemWpfUserControl
     {
         private WebContentViewModel _viewModel;
-
+        public override bool ShowToolbar => false;
+        public override bool Selectable => false;
         public WebContentUserControl()
         {
             InitializeComponent();
