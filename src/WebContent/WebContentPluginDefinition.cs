@@ -16,7 +16,12 @@ namespace WebContent
     public class WebContentPluginDefinition : PluginDefinition
     {
         internal static List<Task> Tasks = new List<Task>();
-        public override Guid Id => new Guid(Resources.PluginId);
+
+        internal static Guid PluginId = new Guid(Resources.PluginId);
+        
+        internal static Guid WorkspaceKind = new Guid("ba41d989-23e5-4095-ab69-0ebade554aed");
+
+        public override Guid Id => PluginId;
 
         public override string Name => Resources.PluginName;
 
@@ -42,8 +47,6 @@ namespace WebContent
 
         public override List<ViewItemPlugin> ViewItemPlugins { get; } = new List<ViewItemPlugin>();
 
-        public override List<ItemNode> ItemNodes { get; } = new List<ItemNode>();
-
         public override Collection<LicenseInformation> PluginLicenseRequest => SiteLicenseHandler.GetLicenseRequest();
 
         public override bool IncludeInExport => true;
@@ -55,6 +58,35 @@ namespace WebContent
         public override string SharedNodeName => Resources.PluginCompany;
 
         public override Guid SharedNodeId => new Guid(Resources.SharedNodeId);
+
+        private List<ItemNode> _itemNodes;
+
+        public override List<ItemNode> ItemNodes
+        {
+            get
+            {
+                if (_itemNodes != null) return _itemNodes;
+                var securityActions = new List<SecurityAction>
+                {
+                    new SecurityAction("GENERIC_READ", "View Web Content Workspace"),
+                    new SecurityAction("GENERIC_WRITE", "Manage Web Content Workspace"),
+                };
+                _itemNodes = new List<ItemNode>
+                {
+                    new ItemNode(
+                        WorkspaceKind,
+                        Guid.Empty,
+                        "Web Content Workspace", Icon,
+                        "Web Content Workspaces", Icon,
+                        Category.Text, true,
+                        ItemsAllowed.Many,
+                        new WorkspaceItemManager(WorkspaceKind),
+                        null,
+                        securityActions)
+                };
+                return _itemNodes;
+            }
+        }
 
         public override void Init()
         {
