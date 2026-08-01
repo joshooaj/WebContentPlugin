@@ -189,4 +189,7 @@
   <data name="ZoomLevelLabel" xml:space="preserve">
     <value>Zoom level</value>
   </data>
+  <data name="WorkspaceLabel" xml:space="preserve">
+    <value>Workspace</value>
+  </data>
 </root>

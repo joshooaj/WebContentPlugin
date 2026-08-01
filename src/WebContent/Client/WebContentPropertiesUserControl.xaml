@@ -7,11 +7,20 @@
              xmlns:local="clr-namespace:WebContent.Client"
              mc:Ignorable="d" 
              d:DesignHeight="450" d:DesignWidth="800">
-    <UserControl.DataContext>
-        <local:WebContentSettings />
-    </UserControl.DataContext>
-    <Grid>
+     <UserControl.DataContext>
+         <local:WebContentSettings />
+     </UserControl.DataContext>
+     <UserControl.Resources>
+         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+     </UserControl.Resources>
+     <Grid>
         <StackPanel>
+            <TextBlock Margin="5,5,5,0" FontWeight="Bold" Text="{Binding WorkspaceLabel, Mode=OneTime}"/>
+            <ComboBox Margin="5" ItemsSource="{Binding WorkspaceOptions}" 
+                      SelectedIndex="{Binding SelectedWorkspaceIndex, Mode=TwoWay}"
+                      DisplayMemberPath="Name"
+                      Visibility="{Binding HasWorkspaces, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+            
             <TextBlock Margin="5" FontWeight="Bold" Text="{Binding HomeLabel, Mode=OneTime}"/>
             <TextBox Margin="5" Text="{Binding HomeAddress, Mode=TwoWay}"/>
 
