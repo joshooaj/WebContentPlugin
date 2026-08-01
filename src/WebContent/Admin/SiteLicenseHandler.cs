@@ -50,16 +50,32 @@ namespace WebContent.Admin
                 if (EnvironmentManager.Instance.SmartClientInOfflineMode) return true;
                 if (string.IsNullOrEmpty(_productName))
                 {
-                    var item = Configuration.Instance.GetItem(EnvironmentManager.Instance.CurrentSite);
-                    if (item.Properties.ContainsKey("ProductName"))
+                    try
+                    {
+                        var siteFqid = EnvironmentManager.Instance?.CurrentSite;
+                        if (siteFqid == null)
+                        {
+                            _productName = "NotAvailable";
+                            Logger.Log("CurrentSite is null, skipping product name check.");
+                            return _isFree;
+                        }
+
+                        var item = Configuration.Instance.GetItem(siteFqid);
+                    if (item?.Properties != null && item.Properties.ContainsKey("ProductName"))
                     {
                         _productName = item.Properties["ProductName"];
                         _isFree = _isFreeRegex.IsMatch(item.Properties["ProductName"]);
+                        Logger.Log($"Product name detected: \"{_productName}\", free={_isFree}");
                     }
                     else
                     {
-                        Logger.Log("ProductName property not found in site properties.");
                         _productName = "NotAvailable";
+                    }
+                    }
+                    catch (Exception ex)
+                    {
+                        _productName = "NotAvailable";
+                        Logger.Log($"Error checking product name: {ex.Message}");
                     }
                 }
                 return _isFree;

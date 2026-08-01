@@ -43,7 +43,7 @@ namespace WebContent
             }
         }
 
-        public override AdminPlacementHint AdminPlacementHint => AdminPlacementHint.Hidden;
+        public override AdminPlacementHint AdminPlacementHint => AdminPlacementHint.Default;
 
         public override List<ViewItemPlugin> ViewItemPlugins { get; } = new List<ViewItemPlugin>();
 
