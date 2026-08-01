@@ -71,19 +71,21 @@ namespace WebContent
                     new SecurityAction("GENERIC_READ", "View Web Content Workspace"),
                     new SecurityAction("GENERIC_WRITE", "Manage Web Content Workspace"),
                 };
-                _itemNodes = new List<ItemNode>
-                {
-                    new ItemNode(
-                        WorkspaceKind,
-                        Guid.Empty,
-                        "Web Content Workspace", Icon,
-                        "Web Content Workspaces", Icon,
-                        Category.Text, true,
-                        ItemsAllowed.Many,
-                        new WorkspaceItemManager(WorkspaceKind),
-                        null,
-                        securityActions)
-                };
+                var itemNode = new ItemNode(
+                    WorkspaceKind,
+                    Guid.Empty,
+                    "Web Content Workspace", Icon,
+                    "Web Content Workspaces", Icon,
+                    Category.Text, true,
+                    ItemsAllowed.Many,
+                    new WorkspaceItemManager(WorkspaceKind),
+                    null,
+                    securityActions,
+                    null,
+                    null,
+                    AdminPlacementHint.Root);
+                itemNode.SortKey = 500;
+                _itemNodes = new List<ItemNode> { itemNode };
                 return _itemNodes;
             }
         }
