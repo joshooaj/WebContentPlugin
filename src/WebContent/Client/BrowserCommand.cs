@@ -12,6 +12,7 @@ namespace WebContent.Client
         private BrowserAction _action;
         private WebContentViewModel _viewModel;
         private BrowserInstance _instance;
+        private WebView2 _subscribedWebView;
 
         private bool _enabled = true;
         public bool Enabled {
@@ -38,10 +39,7 @@ namespace WebContent.Client
             EnvironmentManager.Instance.Log(false, nameof(BrowserCommand), $"Initializing command {_action} for browser {_instance.Id}.");
             try
             {
-                _instance.WebView.ContentLoading += _browser_ContentLoading;
-                _instance.WebView.Loaded += _browser_Loaded;
-                _instance.WebView.NavigationStarting += WebView_NavigationStarting;
-                _instance.WebView.NavigationCompleted += WebView_NavigationCompleted;
+                AttachWebViewEvents(_instance.WebView);
             }
             catch (Exception ex)
             {
@@ -53,15 +51,41 @@ namespace WebContent.Client
         {
             try
             {
-                _instance.WebView.ContentLoading -= _browser_ContentLoading;
-                _instance.WebView.Loaded -= _browser_Loaded;
-                _instance.WebView.NavigationStarting -= WebView_NavigationStarting;
-                _instance.WebView.NavigationCompleted -= WebView_NavigationCompleted;
+                DetachWebViewEvents();
             }
             catch (Exception ex)
             {
                 EnvironmentManager.Instance.ExceptionHandler($"{nameof(BrowserCommand)}.Dispose({_action})", ex);
             }
+        }
+
+        private void AttachWebViewEvents(WebView2 webView)
+        {
+            DetachWebViewEvents();
+            if (webView == null)
+            {
+                return;
+            }
+
+            _subscribedWebView = webView;
+            _subscribedWebView.ContentLoading += _browser_ContentLoading;
+            _subscribedWebView.Loaded += _browser_Loaded;
+            _subscribedWebView.NavigationStarting += WebView_NavigationStarting;
+            _subscribedWebView.NavigationCompleted += WebView_NavigationCompleted;
+        }
+
+        private void DetachWebViewEvents()
+        {
+            if (_subscribedWebView == null)
+            {
+                return;
+            }
+
+            _subscribedWebView.ContentLoading -= _browser_ContentLoading;
+            _subscribedWebView.Loaded -= _browser_Loaded;
+            _subscribedWebView.NavigationStarting -= WebView_NavigationStarting;
+            _subscribedWebView.NavigationCompleted -= WebView_NavigationCompleted;
+            _subscribedWebView = null;
         }
 
         private void WebView_NavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -91,17 +115,17 @@ namespace WebContent.Client
             switch (_action)
             {
                 case BrowserAction.NavigateBack:
-                    return _instance?.WebView.CanGoBack ?? false;
+                    return _instance?.WebView?.CanGoBack ?? false;
                 case BrowserAction.NavigateForward:
-                    return _instance?.WebView.CanGoForward ?? false;
+                    return _instance?.WebView?.CanGoForward ?? false;
                 case BrowserAction.NavigateHome:
-                    return _instance?.WebView.IsLoaded ?? false;
+                    return _instance?.WebView?.IsLoaded ?? false;
                 case BrowserAction.NavigateTo:
-                    return _instance?.WebView.IsLoaded ?? false;
+                    return _instance?.WebView?.IsLoaded ?? false;
                 case BrowserAction.Refresh:
-                    return _instance?.WebView.IsLoaded ?? false;
+                    return _instance?.WebView?.IsLoaded ?? false;
                 case BrowserAction.Print:
-                    return _instance?.WebView.IsLoaded ?? false;
+                    return _instance?.WebView?.IsLoaded ?? false;
                 default:
                     throw new InvalidOperationException($"BrowserAction not supported: {_action}");
             }
@@ -115,10 +139,10 @@ namespace WebContent.Client
                 switch (_action)
                 {
                     case BrowserAction.NavigateBack:
-                        _instance?.WebView.GoBack();
+                        _instance?.WebView?.GoBack();
                         break;
                     case BrowserAction.NavigateForward:
-                        _instance?.WebView.GoForward();
+                        _instance?.WebView?.GoForward();
                         break;
                     case BrowserAction.NavigateHome:
                         if (parameter is string address && _instance != null)
@@ -129,10 +153,10 @@ namespace WebContent.Client
                     case BrowserAction.NavigateTo:
                         break;
                     case BrowserAction.Refresh:
-                        _instance?.WebView.Reload();
+                        _instance?.WebView?.Reload();
                         break;
                     case BrowserAction.Print:
-                        _instance?.WebView.CoreWebView2?.ShowPrintUI();
+                        _instance?.WebView?.CoreWebView2?.ShowPrintUI();
                         break;
                     default:
                         EnvironmentManager.Instance.Log(true, nameof(BrowserCommand), $"Unsupported BrowserAction: {_action}");

@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.Messaging;
+using WebContent;
 
 namespace WebContent.Client
 {
@@ -54,26 +55,42 @@ namespace WebContent.Client
             try
             {
                 _isClosed = false;
-                _viewModel.Init();
-                RegisterActiveControl(_viewModel.Browser.Id);
-                
-                var needsRecreation = _viewModel.Browser.NeedsRecreation;
+                var browser = _viewModel.Browser;
+                if (browser == null)
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Failed to resolve browser for view item {_viewModel.Id}.");
+                    return;
+                }
+
+                var needsRecreation = browser.NeedsRecreation;
                 if (needsRecreation)
                 {
                     var address = _viewModel.ViewItemManager.Settings.RememberLastAddress && !string.IsNullOrWhiteSpace(_viewModel.ViewItemManager.Settings.LastAddress)
                         ? _viewModel.ViewItemManager.Settings.LastAddress
                         : _viewModel.Home;
+
                     EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Browser needs recreation for {_viewModel.Id}. Address: {address}");
-                    _viewModel.Browser.RecreateWebView(new Uri(address), _viewModel.ViewItemManager.Settings.IsolateBrowserInstances);
+                    browser.RecreateWebView(
+                        WebContentConfiguration.CreateNavigationUri(address, _viewModel.Home),
+                        _viewModel.ViewItemManager.Settings.IsolateBrowserInstances);
+                }
+
+                _viewModel.Init();
+                RegisterActiveControl(browser.Id);
+
+                if (browser.WebView == null)
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Browser {_viewModel.Id} does not have an available WebView after initialization.");
+                    return;
                 }
                 
                 var binding = new Binding("BrowserVisibility")
                 {
                     Source = _viewModel
                 };
-                _viewModel.Browser.WebView.SetBinding(VisibilityProperty, binding);
+                browser.WebView.SetBinding(VisibilityProperty, binding);
 
-                if (!Panel.Children.Contains(_viewModel.Browser.WebView) || needsRecreation)
+                if (!Panel.Children.Contains(browser.WebView) || needsRecreation)
                 {
                     AddWebViewToPanel();
                 }
@@ -88,6 +105,11 @@ namespace WebContent.Client
         private void AddWebViewToPanel()
         {
             var webView = _viewModel.Browser.WebView;
+            if (webView == null)
+            {
+                return;
+            }
+
             EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Adding WebView to panel for browser {_viewModel.Browser.Id}.");
             var parent = System.Windows.Media.VisualTreeHelper.GetParent(webView);
             if (parent != null)

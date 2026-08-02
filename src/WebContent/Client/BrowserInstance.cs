@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using VideoOS.Platform;
 using VideoOS.Platform.Messaging;
+using WebContent;
 
 namespace WebContent.Client
 {
@@ -16,11 +17,13 @@ namespace WebContent.Client
         
         public WebView2 WebView { get; set; }
 
+        private readonly object _sync = new object();
         private object _audioNotificationClickReceiver;
+        private bool _requiresRecreation;
 
         public bool IsInitialized { get; set; }
 
-        public bool NeedsRecreation => IsInitialized && (WebView?.CoreWebView2 == null);
+        public bool NeedsRecreation => _requiresRecreation || WebView == null || (IsInitialized && WebView?.CoreWebView2 == null);
 
         public string Address
         {
@@ -47,7 +50,10 @@ namespace WebContent.Client
             get => WebView?.ZoomFactor ?? 1.0;
             set
             {
-                WebView.ZoomFactor = value;
+                if (WebView != null)
+                {
+                    WebView.ZoomFactor = value;
+                }
             }
         }
 
@@ -70,7 +76,7 @@ namespace WebContent.Client
             set
             {
                 _allowDevTools = value;
-                if (WebView.CoreWebView2 != null) {
+                if (WebView?.CoreWebView2 != null) {
                     WebView.CoreWebView2.Settings.AreDevToolsEnabled = value;
                 }
                 OnPropertyChanged();
@@ -88,13 +94,19 @@ namespace WebContent.Client
             }
         }
 
+        private bool _isMuted;
         public bool IsMuted
         {
-            get => WebView.CoreWebView2?.IsMuted ?? false;
+            get => _isMuted;
             set
             {
-                if (WebView.CoreWebView2 == null) return;
-                WebView.CoreWebView2.IsMuted = value;
+                if (_isMuted == value) return;
+                _isMuted = value;
+                if (WebView?.CoreWebView2 != null)
+                {
+                    WebView.CoreWebView2.IsMuted = value;
+                }
+
                 OnPropertyChanged();
             }
         }
@@ -112,43 +124,68 @@ namespace WebContent.Client
 
         public void Initialize()
         {
-            if (IsInitialized) return;
-            try
+            lock (_sync)
             {
-                WebView.CoreWebView2InitializationCompleted += WebView_CoreWebView2InitializationCompleted;
-                WebView.SourceChanged += SourceChangedEventHandler;
-                _audioNotificationClickReceiver = EnvironmentManager.Instance.RegisterReceiver(Notification_Clicked, new MessageIdFilter(MessageId.SmartClient.SmartClientMessageButtonClickedIndication));
-                IsInitialized = true;
-                _ = WebView.EnsureCoreWebView2Async();
-            }
-            catch (Exception ex)
-            {
-                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Call to EnsureCoreWebView2Async failed. {ex.Message}\r\n{ex.StackTrace}");
+                if (IsInitialized || _requiresRecreation) return;
+
+                if (WebView == null)
+                {
+                    _requiresRecreation = true;
+                    EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Cannot initialize browser {Id} because the WebView is unavailable.");
+                    return;
+                }
+
+                try
+                {
+                    WebView.CoreWebView2InitializationCompleted += WebView_CoreWebView2InitializationCompleted;
+                    WebView.SourceChanged += SourceChangedEventHandler;
+
+                    if (_audioNotificationClickReceiver == null)
+                    {
+                        _audioNotificationClickReceiver = EnvironmentManager.Instance.RegisterReceiver(Notification_Clicked, new MessageIdFilter(MessageId.SmartClient.SmartClientMessageButtonClickedIndication));
+                    }
+
+                    IsInitialized = true;
+                    _ = WebView.EnsureCoreWebView2Async();
+                }
+                catch (Exception ex)
+                {
+                    IsInitialized = false;
+                    EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Call to EnsureCoreWebView2Async failed. {ex.Message}\r\n{ex.StackTrace}");
+                }
             }
         }
 
         private void WebView_CoreWebView2InitializationCompleted(object sender, Microsoft.Web.WebView2.Core.CoreWebView2InitializationCompletedEventArgs e)
         {
-            WebView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
+            var webView = WebView;
+            if (webView == null)
+            {
+                return;
+            }
+
+            webView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
             if (!e.IsSuccess)
             {
                 EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"CoreWebView2 initialization failed. InitializationException: {e.InitializationException?.Message}");
                 return;
             }
-            if (WebView.CoreWebView2 == null)
+            if (webView.CoreWebView2 == null)
             {
                 EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), "CoreWebView2 is null after successful initialization.");
                 return;
             }
-            WebView.CoreWebView2.Settings.AreDevToolsEnabled = AllowDevTools;
-            WebView.CoreWebView2.IsDocumentPlayingAudioChanged += WebView_IsDocumentPlayingAudioChanged;
-            WebView.CoreWebView2.IsMuted = IsMuted;
+            webView.CoreWebView2.Settings.AreDevToolsEnabled = AllowDevTools;
+            webView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
+            webView.CoreWebView2.IsDocumentPlayingAudioChanged += WebView_IsDocumentPlayingAudioChanged;
+            webView.CoreWebView2.IsMuted = _isMuted;
         }
 
         private CancellationTokenSource _cancellationTokenSource;
         private void WebView_IsDocumentPlayingAudioChanged(object sender, object e)
         {
             if (!AllowAudioNotifications) return;
+            if (WebView?.CoreWebView2 == null) return;
             if (WebView.IsVisible) return;
 
             if (!IsMuted && WebView.CoreWebView2.IsDocumentPlayingAudio)
@@ -174,9 +211,9 @@ namespace WebContent.Client
             {
                 MessageId = Id.ToString(),
                 IsClosable = true,
-                Message = $"Audio source: {WebView.CoreWebView2.DocumentTitle}",
+                Message = $"Audio source: {WebView?.CoreWebView2?.DocumentTitle}",
                 MessageType = SmartClientMessageDataType.None,
-                ButtonText = WebView.CoreWebView2.IsMuted ? "Unmute" : "Mute"
+                ButtonText = IsMuted ? "Unmute" : "Mute"
             }));
         }
 
@@ -193,10 +230,10 @@ namespace WebContent.Client
 
         private object Notification_Clicked(Message message, FQID destination, FQID sender)
         {
-            if (WebView.CoreWebView2 == null) return null;
+            if (WebView?.CoreWebView2 == null) return null;
             if (!(message.Data is string messageId) || messageId != Id.ToString()) return null;
 
-            WebView.CoreWebView2.IsMuted = !WebView.CoreWebView2.IsMuted;
+            IsMuted = !IsMuted;
             SendAudioPlayingMessage();
             return null;
         }
@@ -211,21 +248,15 @@ namespace WebContent.Client
             if (WebView == null) return;
             try
             {
-                var uri = new Uri(url, UriKind.RelativeOrAbsolute);
-                var uribuilder = new UriBuilder(url);
-                if (!uri.IsAbsoluteUri)
-                {
-                    uribuilder.Scheme = "https";
-                    uribuilder.Port = 443;
-                }
+                var uri = WebContentConfiguration.CreateNavigationUri(url, Strings.HomeAddress);
                 if (WebView.CoreWebView2 != null)
                 {
-                    WebView.CoreWebView2.Navigate(uribuilder.Uri.ToString());
+                    WebView.CoreWebView2.Navigate(uri.ToString());
                     WebView.Focus();
                 }
                 else
                 {
-                    WebView.Source = uribuilder.Uri;
+                    WebView.Source = uri;
                 }
             }
             catch (Exception ex)
@@ -237,30 +268,62 @@ namespace WebContent.Client
         public void ClearBrowsingData()
         {
             EnvironmentManager.Instance.Log(false, nameof(ClearBrowsingData), $"Clearing browser data for browser with id {Id}.");
-            _ = WebView.CoreWebView2?.Profile.ClearBrowsingDataAsync();
+            if (WebView?.CoreWebView2?.Profile != null)
+            {
+                _ = WebView.CoreWebView2.Profile.ClearBrowsingDataAsync();
+            }
         }
 
         public void Close(bool clearData, bool disposeWebView = true)
         {
             EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Closing browser {Id}. clearData={clearData}, disposeWebView={disposeWebView}.");
-            try
+            lock (_sync)
             {
-                EnvironmentManager.Instance.UnRegisterReceiver(_audioNotificationClickReceiver);
-                RemoveAudioPlayingMessage();
-
-                WebView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
-                WebView.SourceChanged -= SourceChangedEventHandler;
-                if (WebView.CoreWebView2 != null)
+                try
                 {
-                    WebView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
-                }
+                    _cancellationTokenSource?.Cancel();
+                    _cancellationTokenSource?.Dispose();
+                    _cancellationTokenSource = null;
 
-                if (clearData) ClearBrowsingData();
-                if (disposeWebView) WebView?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                EnvironmentManager.Instance.ExceptionHandler(nameof(Close), ex);
+                    if (_audioNotificationClickReceiver != null)
+                    {
+                        EnvironmentManager.Instance.UnRegisterReceiver(_audioNotificationClickReceiver);
+                        _audioNotificationClickReceiver = null;
+                    }
+
+                    RemoveAudioPlayingMessage();
+
+                    if (WebView != null)
+                    {
+                        WebView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
+                        WebView.SourceChanged -= SourceChangedEventHandler;
+                        if (WebView.CoreWebView2 != null)
+                        {
+                            WebView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
+                        }
+                    }
+
+                    if (clearData)
+                    {
+                        ClearBrowsingData();
+                    }
+
+                    if (disposeWebView)
+                    {
+                        WebView?.Dispose();
+                        _requiresRecreation = true;
+                    }
+                    else
+                    {
+                        _requiresRecreation = false;
+                    }
+
+                    IsInitialized = false;
+                }
+                catch (Exception ex)
+                {
+                    EnvironmentManager.Instance.ExceptionHandler(nameof(Close), ex);
+                }
             }
         }
 
@@ -273,6 +336,8 @@ namespace WebContent.Client
         public void RecreateWebView(Uri initialAddress, bool isolateInstances)
         {
             EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Recreating WebView for browser {Id}. isolateInstances={isolateInstances}, address={initialAddress}.");
+            Close(clearData: false, disposeWebView: true);
+
             var userDataFolder = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "SmartClient.WebContentData");
@@ -284,8 +349,10 @@ namespace WebContent.Client
                     UserDataFolder = userDataFolder,
                     ProfileName = isolateInstances ? Id.ToString() : string.Empty,
                 },
-                Source = initialAddress,
+                Source = initialAddress ?? WebContentConfiguration.CreateNavigationUri(Strings.HomeAddress),
             };
+
+            _requiresRecreation = false;
             IsInitialized = false;
             Initialize();
         }
