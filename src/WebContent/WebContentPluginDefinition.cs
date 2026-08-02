@@ -91,9 +91,7 @@ namespace WebContent
                 var securityActions = new List<SecurityAction>
                 {
                     new SecurityAction("GENERIC_READ", "View Web Content Workspace"),
-                    new SecurityAction("GENERIC_WRITE", "Manage Web Content Workspace"),
-                    new SecurityAction("VIEW", "View Web Content Workspace"),
-                    new SecurityAction("MANAGE", "Manage Web Content Workspace")
+                    new SecurityAction("GENERIC_WRITE", "Manage Web Content Workspace")
                 };
                 var itemNode = new ItemNode(
                     WorkspaceKind,
