@@ -97,11 +97,20 @@ namespace WebContent.Client
 
         public static void DestroyBrowser(BrowserInstance browser)
         {
-            if (_browsers.TryRemove(browser.Id, out BrowserInstance b))
-            {
-                _browserReferenceCounts.TryRemove(browser.Id, out _);
-                b.Dispose();
-            }
+            RemoveBrowserTracking(browser.Id);
+            browser.Dispose();
+        }
+
+        /// <summary>
+        /// Removes the tracking entry for a browser without disposing it. Callers are
+        /// expected to have already disposed their own WebView via <see cref="BrowserInstance.Close"/>.
+        /// This keeps <see cref="_browsers"/> from growing unboundedly across many
+        /// view navigation and closure cycles in a long-lived session.
+        /// </summary>
+        public static void RemoveBrowserTracking(Guid id)
+        {
+            _browsers.TryRemove(id, out _);
+            _browserReferenceCounts.TryRemove(id, out _);
         }
     }
 }

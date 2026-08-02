@@ -1,6 +1,5 @@
 ﻿using Microsoft.Web.WebView2.Wpf;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -15,8 +14,6 @@ namespace WebContent.Client
 
     public class WebContentViewModel : INotifyPropertyChanged, IDisposable
     {
-        private readonly static Dictionary<Guid, WebView2> Browsers = new Dictionary<Guid, WebView2>();
-        
         public event PropertyChangedEventHandler PropertyChanged;
 
         #region Properties
@@ -336,6 +333,13 @@ namespace WebContent.Client
                 {
                     var allowBackground = _viewItemManager?.Settings.AllowBackgroundBrowser ?? false;
                     Browser.Close(clearData: false, disposeWebView: !allowBackground);
+                    if (!allowBackground)
+                    {
+                        // WebView was disposed; stop tracking the shell so the
+                        // shared registry does not grow across long sessions.
+                        BrowserManager.RemoveBrowserTracking(Id);
+                        WebContentViewItemPlugin.BrowsersToDispose.TryRemove(Id, out _);
+                    }
                 }
 
                 IsInitialized = false;
