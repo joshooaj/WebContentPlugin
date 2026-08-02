@@ -91,6 +91,7 @@
     </Compile>
     <Compile Include="Admin\WebContentLicenseManager.cs" />
     <Compile Include="Client\WebContentExportManager.cs" />
+    <Compile Include="WebContentConfiguration.cs" />
     <Compile Include="WebContentPluginDefinition.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ResourceLoader.cs" />

@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Windows.Forms;
 using VideoOS.Platform;
 using VideoOS.Platform.Admin;
 using VideoOS.Platform.Messaging;
+using WebContent;
 using Message = VideoOS.Platform.Messaging.Message;
 
 namespace WebContent.Admin
@@ -24,6 +24,7 @@ namespace WebContent.Admin
         {
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), "Initializing WorkspaceItemManager.");
             EnvironmentManager.Instance.EnableConfigurationChangedService = true;
+            SiteLicenseHandler.Init();
         }
 
         public override void Close()
@@ -34,6 +35,8 @@ namespace WebContent.Admin
                 EnvironmentManager.Instance.UnRegisterReceiver(_messageRegistrationObject);
                 _messageRegistrationObject = null;
             }
+
+            SiteLicenseHandler.Close();
         }
 
         private void RefreshTreeView()
@@ -44,8 +47,38 @@ namespace WebContent.Admin
 
         public static List<Item> GetWorkspaces()
         {
-            return Configuration.Instance.GetItemConfigurations(WebContentPluginDefinition.PluginId, null, WebContentPluginDefinition.WorkspaceKind)
-                ?? new List<Item>();
+            return TryGetWorkspaces(out var workspaces, out _) ? workspaces : new List<Item>();
+        }
+
+        public static bool TryGetWorkspaces(out List<Item> workspaces, out Exception error)
+        {
+            workspaces = new List<Item>();
+            error = null;
+
+            try
+            {
+                var configuration = Configuration.Instance;
+                if (configuration == null)
+                {
+                    error = new InvalidOperationException("Configuration service is not available.");
+                    return false;
+                }
+
+                var result = configuration.GetItemConfigurations(WebContentPluginDefinition.PluginId, null, WebContentPluginDefinition.WorkspaceKind);
+                if (result == null)
+                {
+                    error = new InvalidOperationException("Workspace configuration is temporarily unavailable.");
+                    return false;
+                }
+
+                workspaces = result;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+                return false;
+            }
         }
 
         public static Item GetWorkspace(Guid workspaceId)
@@ -81,31 +114,23 @@ namespace WebContent.Admin
             
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
+            var properties = item?.Properties;
+
             _userControl.WorkspaceName = item.Name;
-            _userControl.HomeAddress = GetProperty(item, "Address", string.Empty);
-            _userControl.RememberLastAddress = GetProperty(item, "RememberLastAddress", false);
-            _userControl.HideToolbar = GetProperty(item, "HideToolbar", false);
-            _userControl.HideAddress = GetProperty(item, "HideAddress", false);
-            _userControl.ZoomLevel = double.TryParse(GetProperty(item, "ZoomLevel", "100"), out var z) ? z : 100;
-            _userControl.ClearBrowsingDataOnExit = GetProperty(item, "ClearBrowsingDataOnExit", false);
-            _userControl.AllowBackgroundBrowser = GetProperty(item, "AllowBackgroundBrowser", true);
-            _userControl.AllowAudioNotifications = GetProperty(item, "AllowAudioNotifications", true);
-            _userControl.MuteAudio = GetProperty(item, "MuteAudio", false);
-            _userControl.IsolateBrowserInstances = GetProperty(item, "IsolateBrowserInstances", false);
-            _userControl.EnableDevTools = GetProperty(item, "EnableDevTools", false);
+
+            _userControl.HomeAddress = WebContentConfiguration.NormalizeHomeAddress(
+                WebContentConfiguration.GetString(properties, Strings.HomeAddress, "Address", "HomeAddress"));
+            _userControl.RememberLastAddress = WebContentConfiguration.GetBoolean(properties, false, "RememberLastAddress");
+            _userControl.HideToolbar = WebContentConfiguration.GetBoolean(properties, false, "HideToolbar");
+            _userControl.HideAddress = WebContentConfiguration.GetBoolean(properties, false, "HideAddress") && !_userControl.HideToolbar;
+            _userControl.ZoomLevel = WebContentConfiguration.GetZoomLevel(properties, WebContentConfiguration.DefaultZoomLevel, "ZoomLevel");
+            _userControl.ClearBrowsingDataOnExit = WebContentConfiguration.GetBoolean(properties, false, "ClearBrowsingDataOnExit");
+            _userControl.AllowBackgroundBrowser = WebContentConfiguration.GetBoolean(properties, true, "AllowBackgroundBrowser");
+            _userControl.AllowAudioNotifications = WebContentConfiguration.GetBoolean(properties, true, "AllowAudioNotifications");
+            _userControl.MuteAudio = WebContentConfiguration.GetBoolean(properties, false, "MuteAudio");
+            _userControl.IsolateBrowserInstances = WebContentConfiguration.GetBoolean(properties, false, "IsolateBrowserInstances");
+            _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
             _userControl.FillContent();
-        }
-
-        private string GetProperty(Item item, string key, string defaultValue)
-        {
-            return item.Properties.ContainsKey(key) ? item.Properties[key] : defaultValue;
-        }
-
-        private bool GetProperty(Item item, string key, bool defaultValue)
-        {
-            if (item.Properties.ContainsKey(key) && bool.TryParse(item.Properties[key], out var value))
-                return value;
-            return defaultValue;
         }
 
         public override string GetItemName()
@@ -127,17 +152,23 @@ namespace WebContent.Admin
             
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Saving workspace configuration for item: {CurrentItem.Name} (FQID: {CurrentItem.FQID}).");
             CurrentItem.Name = _userControl?.WorkspaceName ?? CurrentItem.Name;
-            SetOrRemoveProperty(CurrentItem, "Address", _userControl?.HomeAddress ?? string.Empty);
-            SetOrRemoveProperty(CurrentItem, "RememberLastAddress", _userControl.RememberLastAddress.ToString());
-            SetOrRemoveProperty(CurrentItem, "HideToolbar", _userControl.HideToolbar.ToString());
-            SetOrRemoveProperty(CurrentItem, "HideAddress", _userControl.HideAddress.ToString());
-            SetOrRemoveProperty(CurrentItem, "ZoomLevel", _userControl.ZoomLevel.ToString("F0"));
-            SetOrRemoveProperty(CurrentItem, "ClearBrowsingDataOnExit", _userControl.ClearBrowsingDataOnExit.ToString());
-            SetOrRemoveProperty(CurrentItem, "AllowBackgroundBrowser", _userControl.AllowBackgroundBrowser.ToString());
-            SetOrRemoveProperty(CurrentItem, "AllowAudioNotifications", _userControl.AllowAudioNotifications.ToString());
-            SetOrRemoveProperty(CurrentItem, "MuteAudio", _userControl.MuteAudio.ToString());
-            SetOrRemoveProperty(CurrentItem, "IsolateBrowserInstances", _userControl.IsolateBrowserInstances.ToString());
-            SetOrRemoveProperty(CurrentItem, "EnableDevTools", _userControl.EnableDevTools.ToString());
+
+            var homeAddress = WebContentConfiguration.NormalizeHomeAddress(_userControl?.HomeAddress);
+            var hideToolbar = _userControl?.HideToolbar ?? false;
+            var hideAddress = !hideToolbar && (_userControl?.HideAddress ?? false);
+
+            SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
+            SetOrRemoveProperty(CurrentItem, "HomeAddress", homeAddress);
+            SetOrRemoveProperty(CurrentItem, "RememberLastAddress", WebContentConfiguration.FormatBoolean(_userControl?.RememberLastAddress ?? false));
+            SetOrRemoveProperty(CurrentItem, "HideToolbar", WebContentConfiguration.FormatBoolean(hideToolbar));
+            SetOrRemoveProperty(CurrentItem, "HideAddress", WebContentConfiguration.FormatBoolean(hideAddress));
+            SetOrRemoveProperty(CurrentItem, "ZoomLevel", WebContentConfiguration.FormatZoomLevel(_userControl?.ZoomLevel ?? WebContentConfiguration.DefaultZoomLevel));
+            SetOrRemoveProperty(CurrentItem, "ClearBrowsingDataOnExit", WebContentConfiguration.FormatBoolean(_userControl?.ClearBrowsingDataOnExit ?? false));
+            SetOrRemoveProperty(CurrentItem, "AllowBackgroundBrowser", WebContentConfiguration.FormatBoolean(_userControl?.AllowBackgroundBrowser ?? true));
+            SetOrRemoveProperty(CurrentItem, "AllowAudioNotifications", WebContentConfiguration.FormatBoolean(_userControl?.AllowAudioNotifications ?? true));
+            SetOrRemoveProperty(CurrentItem, "MuteAudio", WebContentConfiguration.FormatBoolean(_userControl?.MuteAudio ?? false));
+            SetOrRemoveProperty(CurrentItem, "IsolateBrowserInstances", WebContentConfiguration.FormatBoolean(_userControl?.IsolateBrowserInstances ?? false));
+            SetOrRemoveProperty(CurrentItem, "EnableDevTools", WebContentConfiguration.FormatBoolean(_userControl?.EnableDevTools ?? false));
             
             Configuration.Instance.SaveItemConfiguration(WebContentPluginDefinition.PluginId, CurrentItem);
             RefreshTreeView();
