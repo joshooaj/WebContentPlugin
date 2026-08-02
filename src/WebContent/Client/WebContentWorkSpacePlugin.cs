@@ -40,7 +40,14 @@ namespace WebContent.Client
 
         public override void Init()
         {
-            LoadProperties(true);
+            try
+            {
+                LoadProperties(true);
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Failed to load workspace properties for {_workspaceName} ({_workspaceId}): {ex.Message}");
+            }
 
             ViewAndLayoutItem.Name = _workspaceName;
 
@@ -128,7 +135,7 @@ namespace WebContent.Client
             }
             catch (Exception ex)
             {
-                EnvironmentManager.Instance.ExceptionDialog("WebContentWorkSpace:PopulateViewItem", ex);
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Failed to populate workspace {_workspaceName} ({_workspaceId}): {ex.Message}");
             }
         }
     }

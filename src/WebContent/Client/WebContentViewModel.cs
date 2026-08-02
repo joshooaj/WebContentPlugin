@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Input;
 using VideoOS.Platform;
 using VideoOS.Platform.Messaging;
+using WebContent;
 using WebContent.Admin;
 
 namespace WebContent.Client
@@ -109,7 +110,10 @@ namespace WebContent.Client
 
         public BrowserInstance Browser
         {
-            get => BrowserManager.GetBrowser(Id, new Uri(Home), ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
+            get => BrowserManager.GetBrowser(
+                Id,
+                WebContentConfiguration.CreateNavigationUri(Home, Strings.HomeAddress),
+                ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
         } 
 
         private BrowserCommand _backCommand;
@@ -220,6 +224,7 @@ namespace WebContent.Client
                 _viewItemManager.PropertyChangedEvent += ViewItemManager_PropertyChangedEvent;
                 _viewItemManager.ClearBrowsingDataRequest += ClearBrowsingDataRequestHandler;
                 _workspaceStateChangedReceiver = EnvironmentManager.Instance.RegisterReceiver(WorkspaceStateChangeHandler, new MessageIdFilter(MessageId.SmartClient.WorkSpaceStateChangedIndication));
+                SiteLicenseHandler.LicenseActivated += SiteLicenseHandler_LicenseActivated;
 
                 Browser.AllowDevTools = ViewItemManager.Settings.EnableDevTools;
                 Browser.AllowAudioNotifications = ViewItemManager.Settings.AllowAudioNotifications;
@@ -227,11 +232,7 @@ namespace WebContent.Client
                 Browser.PropertyChanged += Browser_PropertyChanged;
                 try
                 {
-                    TrialText = $"Trial expires on {SiteLicenseHandler.Expires.ToLocalTime().Date:d}";
-                    if (SiteLicenseHandler.IsExpired)
-                    {
-                        TrialText = TrialText.Replace("expires", "expired");
-                    }
+                    UpdateTrialState();
 
                     if (!Browser.IsInitialized)
                     {
@@ -267,6 +268,7 @@ namespace WebContent.Client
             }
             catch (Exception ex)
             {
+                SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
                 if (browserReferenceAdded)
                 {
                     BrowserManager.ReleaseReference(Id);
@@ -320,6 +322,7 @@ namespace WebContent.Client
 
                 _viewItemManager.PropertyChangedEvent -= ViewItemManager_PropertyChangedEvent;
                 _viewItemManager.ClearBrowsingDataRequest -= ClearBrowsingDataRequestHandler;
+                SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
                 Browser.PropertyChanged -= Browser_PropertyChanged;
 
                 _backCommand?.Dispose();
@@ -424,22 +427,55 @@ namespace WebContent.Client
                 case WorkSpaceState.Normal:
                     ToolbarVisibility = _viewItemManager.Settings.HideToolbar ? Visibility.Collapsed : Visibility.Visible;
                     BrowserVisibility = Visibility.Visible;
-                    _backCommand.Enabled = true;
-                    _forwardCommand.Enabled = true;
-                    _homeCommand.Enabled = true;
-                    _printCommand.Enabled = true;
-                    _reloadCommand.Enabled = true;
+                    if (_backCommand != null) _backCommand.Enabled = true;
+                    if (_forwardCommand != null) _forwardCommand.Enabled = true;
+                    if (_homeCommand != null) _homeCommand.Enabled = true;
+                    if (_printCommand != null) _printCommand.Enabled = true;
+                    if (_reloadCommand != null) _reloadCommand.Enabled = true;
                     break;
                 case WorkSpaceState.Setup:
                     ToolbarVisibility = Visibility.Visible;
                     BrowserVisibility = Visibility.Hidden;
-                    _backCommand.Enabled = false;
-                    _forwardCommand.Enabled = false;
-                    _homeCommand.Enabled = false;
-                    _printCommand.Enabled = false;
-                    _reloadCommand.Enabled = false;
+                    if (_backCommand != null) _backCommand.Enabled = false;
+                    if (_forwardCommand != null) _forwardCommand.Enabled = false;
+                    if (_homeCommand != null) _homeCommand.Enabled = false;
+                    if (_printCommand != null) _printCommand.Enabled = false;
+                    if (_reloadCommand != null) _reloadCommand.Enabled = false;
                     break;
             }
+        }
+
+        private void UpdateTrialState()
+        {
+            var trialText = $"Trial expires on {SiteLicenseHandler.Expires.ToLocalTime().Date:d}";
+            if (SiteLicenseHandler.IsExpired)
+            {
+                trialText = trialText.Replace("expires", "expired");
+            }
+
+            TrialText = trialText;
+            OnPropertyChanged(nameof(TrialVisibility));
+        }
+
+        private void ExecuteOnUiThread(Action action)
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            dispatcher.BeginInvoke(action);
+        }
+
+        private void SiteLicenseHandler_LicenseActivated(object sender, EventArgs e)
+        {
+            ExecuteOnUiThread(() =>
+            {
+                UpdateTrialState();
+                ApplyWorkspaceState(ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal);
+            });
         }
 
         private void ReloadProperties()
@@ -452,7 +488,7 @@ namespace WebContent.Client
             Browser.AllowAudioNotifications = ViewItemManager.Settings.AllowAudioNotifications;
             Browser.IsMuted = ViewItemManager.Settings.MuteAudio;
 
-            if (Browser.WebView.CoreWebView2 != null)
+            if (Browser.WebView?.CoreWebView2 != null)
             {
                 Browser.WebView.CoreWebView2.Settings.AreDevToolsEnabled = ViewItemManager.Settings.EnableDevTools;
             }

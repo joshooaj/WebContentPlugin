@@ -1,13 +1,15 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Threading;
 using System.Threading.Tasks;
 using VideoOS.Platform;
 using VideoOS.Platform.Admin;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.License;
+using VideoOS.Platform.Messaging;
 using WebContent.Admin;
 using WebContent.Client;
 
@@ -18,8 +20,19 @@ namespace WebContent
         internal static List<Task> Tasks = new List<Task>();
 
         internal static Guid PluginId = new Guid(Resources.PluginId);
-        
+
         internal static Guid WorkspaceKind = new Guid("ba41d989-23e5-4095-ab69-0ebade554aed");
+
+        private readonly object _workspaceSync = new object();
+        private readonly List<object> _workspaceMessageRegistrations = new List<object>();
+        private readonly List<WorkSpacePlugin> _workSpacePlugins = new List<WorkSpacePlugin>();
+
+        private DateTime _nextWorkspaceRetryUtc = DateTime.MinValue;
+        private DateTime _lastWorkspaceFailureLogUtc = DateTime.MinValue;
+        private int _workspaceLoadFailureCount;
+        private int _emptyWorkspaceLoadCount;
+        private bool _workspaceLoadSucceeded;
+        private Timer _workspaceRetryTimer;
 
         public override Guid Id => PluginId;
 
@@ -47,62 +60,13 @@ namespace WebContent
 
         public override List<ViewItemPlugin> ViewItemPlugins { get; } = new List<ViewItemPlugin>();
 
-        private List<WorkSpacePlugin> _workSpacePlugins;
         public override List<WorkSpacePlugin> WorkSpacePlugins
         {
             get
             {
-                if (_workSpacePlugins != null) return _workSpacePlugins;
-
-                _workSpacePlugins = new List<WorkSpacePlugin>();
-                try
-                {
-                    var workspaces = WorkspaceItemManager.GetWorkspaces();
-                    foreach (var workspace in workspaces)
-                    {
-                        var properties = BuildWorkspaceProperties(workspace);
-                        _workSpacePlugins.Add(new WebContentWorkSpacePlugin(
-                            workspace.FQID.ObjectId,
-                            workspace.Name,
-                            properties));
-                    }
-                }
-                catch
-                {
-                    // Configuration may not be ready yet; return empty list
-                }
+                EnsureWorkspacesLoaded(force: false, reason: "WorkSpacePlugins property");
                 return _workSpacePlugins;
             }
-        }
-
-        private static Dictionary<string, string> BuildWorkspaceProperties(Item workspace)
-        {
-            var properties = new Dictionary<string, string>
-            {
-                { "WorkspaceId", workspace.FQID.ObjectId.ToString() },
-                { "WorkspaceName", workspace.Name }
-            };
-
-            CopyProperty(workspace, properties, "Address", "HomeAddress");
-            CopyProperty(workspace, properties, "HideToolbar");
-            CopyProperty(workspace, properties, "HideAddress");
-            CopyProperty(workspace, properties, "ZoomLevel");
-            CopyProperty(workspace, properties, "RememberLastAddress");
-            CopyProperty(workspace, properties, "ClearBrowsingDataOnExit");
-            CopyProperty(workspace, properties, "AllowBackgroundBrowser");
-            CopyProperty(workspace, properties, "AllowAudioNotifications");
-            CopyProperty(workspace, properties, "MuteAudio");
-            CopyProperty(workspace, properties, "IsolateBrowserInstances");
-            CopyProperty(workspace, properties, "EnableDevTools");
-
-            return properties;
-        }
-
-        private static void CopyProperty(Item workspace, Dictionary<string, string> properties, string sourceKey, string targetKey = null)
-        {
-            targetKey = targetKey ?? sourceKey;
-            if (workspace.Properties.ContainsKey(sourceKey))
-                properties[targetKey] = workspace.Properties[sourceKey];
         }
 
         public override Collection<LicenseInformation> PluginLicenseRequest => SiteLicenseHandler.GetLicenseRequest();
@@ -150,19 +114,21 @@ namespace WebContent
 
         public override void Init()
         {
-            switch (EnvironmentManager.Instance.EnvironmentType)    
+            SiteLicenseHandler.Init();
+
+            switch (EnvironmentManager.Instance.EnvironmentType)
             {
                 case EnvironmentType.Administration:
                     break;
                 case EnvironmentType.SmartClient:
                     ViewItemPlugins.Add(new WebContentViewItemPlugin());
+                    RegisterWorkspaceRecoveryReceivers();
+                    StartWorkspaceRetryTimer();
+                    EnsureWorkspacesLoaded(force: false, reason: "Smart Client Init");
                     break;
                 case EnvironmentType.Standalone:
-                    break;
                 case EnvironmentType.Service:
-                    break;
                 case EnvironmentType.ManagementServer:
-                    break;
                 default:
                     break;
             }
@@ -170,8 +136,20 @@ namespace WebContent
 
         public override async void Close()
         {
+            SiteLicenseHandler.Close();
+            StopWorkspaceRetryTimer();
+            UnregisterWorkspaceRecoveryReceivers();
+
             ViewItemPlugins.Clear();
-            _workSpacePlugins?.Clear();
+            lock (_workspaceSync)
+            {
+                _workSpacePlugins.Clear();
+                _workspaceLoadSucceeded = false;
+                _workspaceLoadFailureCount = 0;
+                _emptyWorkspaceLoadCount = 0;
+                _nextWorkspaceRetryUtc = DateTime.MinValue;
+            }
+
             foreach (var task in Tasks)
             {
                 try
@@ -183,6 +161,201 @@ namespace WebContent
                     EnvironmentManager.Instance.ExceptionHandler(nameof(Close), ex);
                 }
             }
+        }
+
+        private void RegisterWorkspaceRecoveryReceivers()
+        {
+            _workspaceMessageRegistrations.Add(EnvironmentManager.Instance.RegisterReceiver(
+                WorkspaceConfigurationMessageReceiver,
+                new MessageIdFilter(MessageId.Server.ConfigurationChangedIndication)));
+
+            _workspaceMessageRegistrations.Add(EnvironmentManager.Instance.RegisterReceiver(
+                WorkspaceConfigurationMessageReceiver,
+                new MessageIdFilter(MessageId.System.SystemConfigurationChangedIndication)));
+
+            _workspaceMessageRegistrations.Add(EnvironmentManager.Instance.RegisterReceiver(
+                WorkspaceConfigurationMessageReceiver,
+                new MessageIdFilter(MessageId.SmartClient.ShownWorkSpaceChangedIndication)));
+        }
+
+        private void UnregisterWorkspaceRecoveryReceivers()
+        {
+            foreach (var registration in _workspaceMessageRegistrations)
+            {
+                try
+                {
+                    EnvironmentManager.Instance.UnRegisterReceiver(registration);
+                }
+                catch (Exception ex)
+                {
+                    EnvironmentManager.Instance.ExceptionHandler(nameof(UnregisterWorkspaceRecoveryReceivers), ex);
+                }
+            }
+
+            _workspaceMessageRegistrations.Clear();
+        }
+
+        private object WorkspaceConfigurationMessageReceiver(Message message, FQID destination, FQID sender)
+        {
+            EnsureWorkspacesLoaded(force: false, reason: $"message:{message?.MessageId}");
+            return null;
+        }
+
+        private void StartWorkspaceRetryTimer()
+        {
+            if (_workspaceRetryTimer != null)
+            {
+                return;
+            }
+
+            _workspaceRetryTimer = new Timer(WorkspaceRetryTimerCallback, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        }
+
+        private void StopWorkspaceRetryTimer()
+        {
+            var timer = _workspaceRetryTimer;
+            if (timer == null)
+            {
+                return;
+            }
+
+            _workspaceRetryTimer = null;
+            timer.Dispose();
+        }
+
+        private void WorkspaceRetryTimerCallback(object state)
+        {
+            EnsureWorkspacesLoaded(force: false, reason: "retry-timer");
+        }
+
+        private void EnsureWorkspacesLoaded(bool force, string reason)
+        {
+            if (EnvironmentManager.Instance.EnvironmentType != EnvironmentType.SmartClient)
+            {
+                return;
+            }
+
+            lock (_workspaceSync)
+            {
+                if (_workspaceLoadSucceeded)
+                {
+                    return;
+                }
+
+                var now = DateTime.UtcNow;
+                if (!force && now < _nextWorkspaceRetryUtc)
+                {
+                    return;
+                }
+
+                if (!WorkspaceItemManager.TryGetWorkspaces(out var workspaces, out var error))
+                {
+                    _workspaceLoadFailureCount++;
+                    var retryDelay = GetRetryDelay(_workspaceLoadFailureCount);
+                    _nextWorkspaceRetryUtc = now.Add(retryDelay);
+                    LogWorkspaceLoadFailure(reason, error, retryDelay);
+                    return;
+                }
+
+                if (workspaces.Count == 0 && !_workspaceLoadSucceeded && _emptyWorkspaceLoadCount < 3)
+                {
+                    _emptyWorkspaceLoadCount++;
+                    _nextWorkspaceRetryUtc = now.Add(TimeSpan.FromSeconds(15));
+                    if (_emptyWorkspaceLoadCount == 1)
+                    {
+                        EnvironmentManager.Instance.Log(false, nameof(WebContentPluginDefinition), "Workspace configuration returned zero entries during startup; scheduling retry.");
+                    }
+
+                    return;
+                }
+
+                _workSpacePlugins.Clear();
+                foreach (var workspace in workspaces)
+                {
+                    var properties = BuildWorkspaceProperties(workspace);
+                    _workSpacePlugins.Add(new WebContentWorkSpacePlugin(
+                        workspace.FQID.ObjectId,
+                        workspace.Name,
+                        properties));
+                }
+
+                if (_workspaceLoadFailureCount > 0)
+                {
+                    EnvironmentManager.Instance.Log(false, nameof(WebContentPluginDefinition), $"Recovered workspace provisioning and loaded {_workSpacePlugins.Count} workspaces.");
+                }
+
+                _workspaceLoadFailureCount = 0;
+                _emptyWorkspaceLoadCount = 0;
+                _workspaceLoadSucceeded = true;
+                _nextWorkspaceRetryUtc = DateTime.MinValue;
+            }
+        }
+
+        private void LogWorkspaceLoadFailure(string reason, Exception error, TimeSpan retryDelay)
+        {
+            var now = DateTime.UtcNow;
+            var shouldLog = _workspaceLoadFailureCount == 1 || now - _lastWorkspaceFailureLogUtc >= TimeSpan.FromMinutes(1);
+            if (!shouldLog)
+            {
+                return;
+            }
+
+            var errorText = error == null ? "Unknown error." : error.Message;
+            EnvironmentManager.Instance.Log(
+                true,
+                nameof(WebContentPluginDefinition),
+                $"Workspace provisioning attempt failed (reason={reason}, attempts={_workspaceLoadFailureCount}, retry={retryDelay.TotalSeconds:F0}s). {errorText}");
+            _lastWorkspaceFailureLogUtc = now;
+        }
+
+        private static TimeSpan GetRetryDelay(int failureCount)
+        {
+            var cappedFailures = Math.Min(Math.Max(failureCount, 1), 6);
+            return TimeSpan.FromSeconds(Math.Pow(2, cappedFailures));
+        }
+
+        private static Dictionary<string, string> BuildWorkspaceProperties(Item workspace)
+        {
+            var properties = new Dictionary<string, string>
+            {
+                { "WorkspaceId", workspace.FQID.ObjectId.ToString() },
+                { "WorkspaceName", workspace.Name }
+            };
+
+            var sourceProperties = workspace.Properties;
+            var homeAddress = WebContentConfiguration.NormalizeHomeAddress(
+                WebContentConfiguration.GetString(sourceProperties, Strings.HomeAddress, "HomeAddress", "Address"));
+
+            properties[nameof(WebContentSettings.InstanceId)] = WebContentConfiguration.GetGuid(sourceProperties, workspace.FQID.ObjectId, nameof(WebContentSettings.InstanceId)).ToString();
+            properties[nameof(WebContentSettings.HomeAddress)] = homeAddress;
+            properties[nameof(WebContentSettings.HideToolbar)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.HideToolbar)));
+
+            var hideAddress = WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.HideAddress));
+            if (WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.HideToolbar)))
+            {
+                hideAddress = false;
+            }
+
+            properties[nameof(WebContentSettings.HideAddress)] = WebContentConfiguration.FormatBoolean(hideAddress);
+            properties[nameof(WebContentSettings.ZoomLevel)] = WebContentConfiguration.FormatZoomLevel(
+                WebContentConfiguration.GetZoomLevel(sourceProperties, WebContentConfiguration.DefaultZoomLevel, nameof(WebContentSettings.ZoomLevel)));
+            properties[nameof(WebContentSettings.RememberLastAddress)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.RememberLastAddress)));
+            properties[nameof(WebContentSettings.ClearBrowsingDataOnExit)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.ClearBrowsingDataOnExit)));
+            properties[nameof(WebContentSettings.AllowBackgroundBrowser)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, true, nameof(WebContentSettings.AllowBackgroundBrowser)));
+            properties[nameof(WebContentSettings.AllowAudioNotifications)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, true, nameof(WebContentSettings.AllowAudioNotifications)));
+            properties[nameof(WebContentSettings.MuteAudio)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.MuteAudio)));
+            properties[nameof(WebContentSettings.IsolateBrowserInstances)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.IsolateBrowserInstances)));
+            properties[nameof(WebContentSettings.EnableDevTools)] = WebContentConfiguration.FormatBoolean(
+                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.EnableDevTools)));
+
+            return properties;
         }
     }
 }

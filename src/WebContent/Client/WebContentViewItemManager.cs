@@ -24,6 +24,8 @@ namespace WebContent.Client
         public override void Close()
         {
             EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Closing ViewItemManager for plugin {Resources.PluginName}.");
+            Settings.PropertyChanged -= WebContentViewItemManager_PropertyChangedEvent;
+            Settings.Dispose();
             base.Close();
         }
 
