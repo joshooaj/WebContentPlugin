@@ -9,6 +9,7 @@ namespace WebContent.Client
     public static class BrowserManager
     {
         private static readonly ConcurrentDictionary<Guid, BrowserInstance> _browsers = new ConcurrentDictionary<Guid, BrowserInstance>();
+        private static readonly ConcurrentDictionary<Guid, int> _browserReferenceCounts = new ConcurrentDictionary<Guid, int>();
         private static string _userDataFolder;
 
         static BrowserManager()
@@ -24,6 +25,7 @@ namespace WebContent.Client
         {
             return GetBrowser(id, new Uri(string.Empty), false);
         }
+
         public static BrowserInstance GetBrowser(Guid id, Uri initialAddress, bool isIsolated)
         {
             try
@@ -57,10 +59,47 @@ namespace WebContent.Client
             return null;
         }
 
+        public static int AddReference(Guid id)
+        {
+            return _browserReferenceCounts.AddOrUpdate(id, 1, (key, count) => count + 1);
+        }
+
+        public static int ReleaseReference(Guid id)
+        {
+            while (true)
+            {
+                if (!_browserReferenceCounts.TryGetValue(id, out var count))
+                {
+                    return 0;
+                }
+
+                if (count <= 1)
+                {
+                    if (_browserReferenceCounts.TryRemove(id, out _))
+                    {
+                        return 0;
+                    }
+
+                    continue;
+                }
+
+                if (_browserReferenceCounts.TryUpdate(id, count - 1, count))
+                {
+                    return count - 1;
+                }
+            }
+        }
+
+        public static int GetReferenceCount(Guid id)
+        {
+            return _browserReferenceCounts.TryGetValue(id, out var count) ? count : 0;
+        }
+
         public static void DestroyBrowser(BrowserInstance browser)
         {
             if (_browsers.TryRemove(browser.Id, out BrowserInstance b))
             {
+                _browserReferenceCounts.TryRemove(browser.Id, out _);
                 b.Dispose();
             }
         }

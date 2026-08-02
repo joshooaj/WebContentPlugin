@@ -1,4 +1,5 @@
-﻿using VideoOS.Platform.Client;
+﻿using VideoOS.Platform;
+using VideoOS.Platform.Client;
 
 namespace WebContent.Client
 {
@@ -6,6 +7,7 @@ namespace WebContent.Client
     {
         public WebContentExportManager(ExportParameters exportParameters) : base(exportParameters)
         {
+            EnvironmentManager.Instance.Log(false, nameof(WebContentExportManager), "ExportManager created.");
         }
 
         public override int Progress => 100;
@@ -14,22 +16,22 @@ namespace WebContent.Client
 
         public override void ExportCancelled()
         {
-            // No-op
+            EnvironmentManager.Instance.Log(false, nameof(WebContentExportManager), "Export cancelled.");
         }
 
         public override void ExportComplete()
         {
-            // No-op
+            EnvironmentManager.Instance.Log(false, nameof(WebContentExportManager), "Export complete.");
         }
 
         public override void ExportFailed()
         {
-            // No-op
+            EnvironmentManager.Instance.Log(true, nameof(WebContentExportManager), $"Export failed. Error: {LastErrorMessage}");
         }
 
         public override void ExportStarting()
         {
-            // No-op
+            EnvironmentManager.Instance.Log(false, nameof(WebContentExportManager), "Export starting.");
         }
     }
 }

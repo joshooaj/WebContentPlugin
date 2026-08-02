@@ -4,6 +4,8 @@ using System.Linq;
 using System.Windows.Forms;
 using VideoOS.Platform;
 using VideoOS.Platform.Admin;
+using VideoOS.Platform.Messaging;
+using Message = VideoOS.Platform.Messaging.Message;
 
 namespace WebContent.Admin
 {
@@ -11,10 +13,33 @@ namespace WebContent.Admin
     {
         private readonly Guid _kind;
         private WorkspaceUserControl _userControl;
+        private object _messageRegistrationObject;
 
         public WorkspaceItemManager(Guid kind) : base()
         {
             _kind = kind;
+        }
+
+        public override void Init()
+        {
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), "Initializing WorkspaceItemManager.");
+            EnvironmentManager.Instance.EnableConfigurationChangedService = true;
+        }
+
+        public override void Close()
+        {
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), "Closing WorkspaceItemManager.");
+            if (_messageRegistrationObject != null)
+            {
+                EnvironmentManager.Instance.UnRegisterReceiver(_messageRegistrationObject);
+                _messageRegistrationObject = null;
+            }
+        }
+
+        private void RefreshTreeView()
+        {
+            EnvironmentManager.Instance.SendMessage(
+                new Message(MessageId.System.ApplicationRefreshTreeViewCommand) { Data = _kind });
         }
 
         public static List<Item> GetWorkspaces()
@@ -31,12 +56,13 @@ namespace WebContent.Admin
         public override UserControl GenerateDetailUserControl()
         {
             _userControl = new WorkspaceUserControl();
+            _userControl.ConfigurationChangedByUser += ConfigurationChangedByUserHandler;
             return _userControl;
         }
 
         public override ItemNodeUserControl GenerateOverviewUserControl()
         {
-            return new VideoOS.Platform.UI.HelpUserControl(Resources.CompanyLogo, "Web Content Workspace", "Create dedicated workspaces for hosting web content in Smart Client.");
+            return new VideoOS.Platform.UI.HelpUserControl(ResourceLoader.CompanyLogo, "Web Content Workspace", "Create dedicated workspaces for hosting web content in Smart Client.");
         }
 
         public override void ClearUserControl()
@@ -44,17 +70,42 @@ namespace WebContent.Admin
             _userControl?.ClearUserControl();
         }
 
+        public override void ReleaseUserControl()
+        {
+            _userControl = null;
+        }
+
         public override void FillUserControl(Item item)
         {
             if (_userControl == null) return;
             
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
             _userControl.WorkspaceName = item.Name;
-            if (item.Properties.ContainsKey("Address"))
-            {
-                _userControl.Address = item.Properties["Address"];
-            }
+            _userControl.HomeAddress = GetProperty(item, "Address", string.Empty);
+            _userControl.RememberLastAddress = GetProperty(item, "RememberLastAddress", false);
+            _userControl.HideToolbar = GetProperty(item, "HideToolbar", false);
+            _userControl.HideAddress = GetProperty(item, "HideAddress", false);
+            _userControl.ZoomLevel = double.TryParse(GetProperty(item, "ZoomLevel", "100"), out var z) ? z : 100;
+            _userControl.ClearBrowsingDataOnExit = GetProperty(item, "ClearBrowsingDataOnExit", false);
+            _userControl.AllowBackgroundBrowser = GetProperty(item, "AllowBackgroundBrowser", true);
+            _userControl.AllowAudioNotifications = GetProperty(item, "AllowAudioNotifications", true);
+            _userControl.MuteAudio = GetProperty(item, "MuteAudio", false);
+            _userControl.IsolateBrowserInstances = GetProperty(item, "IsolateBrowserInstances", false);
+            _userControl.EnableDevTools = GetProperty(item, "EnableDevTools", false);
             _userControl.FillContent();
+        }
+
+        private string GetProperty(Item item, string key, string defaultValue)
+        {
+            return item.Properties.ContainsKey(key) ? item.Properties[key] : defaultValue;
+        }
+
+        private bool GetProperty(Item item, string key, bool defaultValue)
+        {
+            if (item.Properties.ContainsKey(key) && bool.TryParse(item.Properties[key], out var value))
+                return value;
+            return defaultValue;
         }
 
         public override string GetItemName()
@@ -74,10 +125,36 @@ namespace WebContent.Admin
         {
             if (CurrentItem == null) return false;
             
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Saving workspace configuration for item: {CurrentItem.Name} (FQID: {CurrentItem.FQID}).");
             CurrentItem.Name = _userControl?.WorkspaceName ?? CurrentItem.Name;
-            CurrentItem.Properties["Address"] = _userControl?.Address ?? string.Empty;
+            SetOrRemoveProperty(CurrentItem, "Address", _userControl?.HomeAddress ?? string.Empty);
+            SetOrRemoveProperty(CurrentItem, "RememberLastAddress", _userControl.RememberLastAddress.ToString());
+            SetOrRemoveProperty(CurrentItem, "HideToolbar", _userControl.HideToolbar.ToString());
+            SetOrRemoveProperty(CurrentItem, "HideAddress", _userControl.HideAddress.ToString());
+            SetOrRemoveProperty(CurrentItem, "ZoomLevel", _userControl.ZoomLevel.ToString("F0"));
+            SetOrRemoveProperty(CurrentItem, "ClearBrowsingDataOnExit", _userControl.ClearBrowsingDataOnExit.ToString());
+            SetOrRemoveProperty(CurrentItem, "AllowBackgroundBrowser", _userControl.AllowBackgroundBrowser.ToString());
+            SetOrRemoveProperty(CurrentItem, "AllowAudioNotifications", _userControl.AllowAudioNotifications.ToString());
+            SetOrRemoveProperty(CurrentItem, "MuteAudio", _userControl.MuteAudio.ToString());
+            SetOrRemoveProperty(CurrentItem, "IsolateBrowserInstances", _userControl.IsolateBrowserInstances.ToString());
+            SetOrRemoveProperty(CurrentItem, "EnableDevTools", _userControl.EnableDevTools.ToString());
+            
             Configuration.Instance.SaveItemConfiguration(WebContentPluginDefinition.PluginId, CurrentItem);
+            RefreshTreeView();
             return true;
+        }
+
+        private void SetOrRemoveProperty(Item item, string key, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                if (item.Properties.ContainsKey(key))
+                    item.Properties.Remove(key);
+            }
+            else
+            {
+                item.Properties[key] = value;
+            }
         }
 
         public override Item CreateItem(Item parentItem, FQID suggestedFQID)
@@ -89,7 +166,9 @@ namespace WebContent.Admin
             };
 
             CurrentItem = new Item(fqid, "Enter a name");
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Creating new workspace item. FQID: {fqid}.");
             Configuration.Instance.SaveItemConfiguration(WebContentPluginDefinition.PluginId, CurrentItem);
+            RefreshTreeView();
 
             return CurrentItem;
         }
@@ -97,7 +176,9 @@ namespace WebContent.Admin
         public override void DeleteItem(Item item)
         {
             if (item == null) return;
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Deleting workspace item: {item.Name} (FQID: {item.FQID}).");
             Configuration.Instance.DeleteItemConfiguration(WebContentPluginDefinition.PluginId, item);
+            RefreshTreeView();
         }
 
         public override List<Item> GetItems()

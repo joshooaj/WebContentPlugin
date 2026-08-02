@@ -14,15 +14,27 @@ namespace WebContent.Client
     {
         public Guid Id { get; }
         
-        public WebView2 WebView { get; }
+        public WebView2 WebView { get; set; }
 
         private object _audioNotificationClickReceiver;
 
         public bool IsInitialized { get; set; }
 
+        public bool NeedsRecreation => IsInitialized && (WebView?.CoreWebView2 == null);
+
         public string Address
         {
-            get => WebView?.Source?.ToString() ?? Strings.HomeAddress;
+            get
+            {
+                try
+                {
+                    return WebView?.CoreWebView2?.Source?.ToString() ?? WebView?.Source?.ToString() ?? Strings.HomeAddress;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return WebView?.Source?.ToString() ?? Strings.HomeAddress;
+                }
+            }
             set
             {
                 NavigateTo(value);
@@ -104,10 +116,10 @@ namespace WebContent.Client
             try
             {
                 WebView.CoreWebView2InitializationCompleted += WebView_CoreWebView2InitializationCompleted;
-                Application.Current?.Dispatcher.InvokeAsync(async () => await WebView.EnsureCoreWebView2Async()).Wait();
                 WebView.SourceChanged += SourceChangedEventHandler;
                 _audioNotificationClickReceiver = EnvironmentManager.Instance.RegisterReceiver(Notification_Clicked, new MessageIdFilter(MessageId.SmartClient.SmartClientMessageButtonClickedIndication));
                 IsInitialized = true;
+                _ = WebView.EnsureCoreWebView2Async();
             }
             catch (Exception ex)
             {
@@ -117,6 +129,17 @@ namespace WebContent.Client
 
         private void WebView_CoreWebView2InitializationCompleted(object sender, Microsoft.Web.WebView2.Core.CoreWebView2InitializationCompletedEventArgs e)
         {
+            WebView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
+            if (!e.IsSuccess)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"CoreWebView2 initialization failed. InitializationException: {e.InitializationException?.Message}");
+                return;
+            }
+            if (WebView.CoreWebView2 == null)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), "CoreWebView2 is null after successful initialization.");
+                return;
+            }
             WebView.CoreWebView2.Settings.AreDevToolsEnabled = AllowDevTools;
             WebView.CoreWebView2.IsDocumentPlayingAudioChanged += WebView_IsDocumentPlayingAudioChanged;
             WebView.CoreWebView2.IsMuted = IsMuted;
@@ -185,7 +208,7 @@ namespace WebContent.Client
 
         private void NavigateTo(string url)
         {
-            if (!WebView?.IsInitialized ?? false) return;
+            if (WebView == null) return;
             try
             {
                 var uri = new Uri(url, UriKind.RelativeOrAbsolute);
@@ -195,8 +218,15 @@ namespace WebContent.Client
                     uribuilder.Scheme = "https";
                     uribuilder.Port = 443;
                 }
-                WebView?.CoreWebView2.Navigate(uribuilder.Uri.ToString());
-                WebView?.Focus();
+                if (WebView.CoreWebView2 != null)
+                {
+                    WebView.CoreWebView2.Navigate(uribuilder.Uri.ToString());
+                    WebView.Focus();
+                }
+                else
+                {
+                    WebView.Source = uribuilder.Uri;
+                }
             }
             catch (Exception ex)
             {
@@ -207,25 +237,57 @@ namespace WebContent.Client
         public void ClearBrowsingData()
         {
             EnvironmentManager.Instance.Log(false, nameof(ClearBrowsingData), $"Clearing browser data for browser with id {Id}.");
-            Application.Current?.Dispatcher.InvokeAsync(async () => await WebView.CoreWebView2?.Profile.ClearBrowsingDataAsync()).Wait();
+            _ = WebView.CoreWebView2?.Profile.ClearBrowsingDataAsync();
         }
 
-        public void Close(bool clearData)
-        {            
-            EnvironmentManager.Instance.UnRegisterReceiver(_audioNotificationClickReceiver);
-            RemoveAudioPlayingMessage();
+        public void Close(bool clearData, bool disposeWebView = true)
+        {
+            EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Closing browser {Id}. clearData={clearData}, disposeWebView={disposeWebView}.");
+            try
+            {
+                EnvironmentManager.Instance.UnRegisterReceiver(_audioNotificationClickReceiver);
+                RemoveAudioPlayingMessage();
 
-            WebView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
-            WebView.SourceChanged -= SourceChangedEventHandler;
-            WebView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
+                WebView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
+                WebView.SourceChanged -= SourceChangedEventHandler;
+                if (WebView.CoreWebView2 != null)
+                {
+                    WebView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
+                }
 
-            if (clearData) ClearBrowsingData();
-            WebView?.Dispose();
+                if (clearData) ClearBrowsingData();
+                if (disposeWebView) WebView?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler(nameof(Close), ex);
+            }
         }
 
         public void Dispose()
         {
+            EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Disposing browser {Id}. ClearBrowsingDataOnExit={ClearBrowsingDataOnExit}.");
             Close(ClearBrowsingDataOnExit);
+        }
+
+        public void RecreateWebView(Uri initialAddress, bool isolateInstances)
+        {
+            EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Recreating WebView for browser {Id}. isolateInstances={isolateInstances}, address={initialAddress}.");
+            var userDataFolder = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "SmartClient.WebContentData");
+
+            WebView = new WebView2
+            {
+                CreationProperties = new CoreWebView2CreationProperties
+                {
+                    UserDataFolder = userDataFolder,
+                    ProfileName = isolateInstances ? Id.ToString() : string.Empty,
+                },
+                Source = initialAddress,
+            };
+            IsInitialized = false;
+            Initialize();
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

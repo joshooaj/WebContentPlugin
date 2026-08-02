@@ -3,6 +3,7 @@ using Microsoft.Web.WebView2.Wpf;
 using System;
 using System.Windows;
 using System.Windows.Input;
+using VideoOS.Platform;
 
 namespace WebContent.Client
 {
@@ -34,18 +35,33 @@ namespace WebContent.Client
         public void Init()
         {
             _instance = _viewModel.Browser;
-            _instance.WebView.ContentLoading += _browser_ContentLoading;
-            _instance.WebView.Loaded += _browser_Loaded;
-            _instance.WebView.NavigationStarting += WebView_NavigationStarting;
-            _instance.WebView.NavigationCompleted += WebView_NavigationCompleted;
+            EnvironmentManager.Instance.Log(false, nameof(BrowserCommand), $"Initializing command {_action} for browser {_instance.Id}.");
+            try
+            {
+                _instance.WebView.ContentLoading += _browser_ContentLoading;
+                _instance.WebView.Loaded += _browser_Loaded;
+                _instance.WebView.NavigationStarting += WebView_NavigationStarting;
+                _instance.WebView.NavigationCompleted += WebView_NavigationCompleted;
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler($"{nameof(BrowserCommand)}.Init({_action})", ex);
+            }
         }
 
         public void Dispose()
         {
-            _instance.WebView.ContentLoading -= _browser_ContentLoading;
-            _instance.WebView.Loaded -= _browser_Loaded;
-            _instance.WebView.NavigationStarting -= WebView_NavigationStarting;
-            _instance.WebView.NavigationCompleted -= WebView_NavigationCompleted;
+            try
+            {
+                _instance.WebView.ContentLoading -= _browser_ContentLoading;
+                _instance.WebView.Loaded -= _browser_Loaded;
+                _instance.WebView.NavigationStarting -= WebView_NavigationStarting;
+                _instance.WebView.NavigationCompleted -= WebView_NavigationCompleted;
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler($"{nameof(BrowserCommand)}.Dispose({_action})", ex);
+            }
         }
 
         private void WebView_NavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -93,31 +109,39 @@ namespace WebContent.Client
 
         public void Execute(object parameter)
         {
-            switch (_action)
+            try
             {
-                case BrowserAction.NavigateBack:
-                    _instance?.WebView.GoBack();
-                    break;
-                case BrowserAction.NavigateForward:
-                    _instance?.WebView.GoForward();
-                    break;
-                case BrowserAction.NavigateHome:
-                    if (parameter is string address && _instance != null)
-                    {
-                        _instance.Address = address;
-                    }
-                    break;
-                case BrowserAction.NavigateTo:
-                    // NOOP
-                    break;
-                case BrowserAction.Refresh:
-                    _instance?.WebView.Reload();
-                    break;
-                case BrowserAction.Print:
-                    _instance?.WebView.CoreWebView2.ShowPrintUI();
-                    break;
-                default:
-                    break;
+                EnvironmentManager.Instance.Log(false, nameof(BrowserCommand), $"Executing command {_action}. Parameter: {parameter?.GetType().Name ?? "null"}.");
+                switch (_action)
+                {
+                    case BrowserAction.NavigateBack:
+                        _instance?.WebView.GoBack();
+                        break;
+                    case BrowserAction.NavigateForward:
+                        _instance?.WebView.GoForward();
+                        break;
+                    case BrowserAction.NavigateHome:
+                        if (parameter is string address && _instance != null)
+                        {
+                            _instance.Address = address;
+                        }
+                        break;
+                    case BrowserAction.NavigateTo:
+                        break;
+                    case BrowserAction.Refresh:
+                        _instance?.WebView.Reload();
+                        break;
+                    case BrowserAction.Print:
+                        _instance?.WebView.CoreWebView2?.ShowPrintUI();
+                        break;
+                    default:
+                        EnvironmentManager.Instance.Log(true, nameof(BrowserCommand), $"Unsupported BrowserAction: {_action}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler($"{nameof(BrowserCommand)}.Execute({_action})", ex);
             }
         }
     }

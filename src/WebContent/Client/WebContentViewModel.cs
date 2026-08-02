@@ -96,6 +96,17 @@ namespace WebContent.Client
         
         private object _workspaceStateChangedReceiver;
 
+        private bool _isWorkspaceFloating;
+        public bool IsWorkspaceFloating
+        {
+            get => _isWorkspaceFloating;
+            set
+            {
+                _isWorkspaceFloating = value;
+                OnPropertyChanged();
+            }
+        }
+
         public BrowserInstance Browser
         {
             get => BrowserManager.GetBrowser(Id, new Uri(Home), ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
@@ -196,16 +207,20 @@ namespace WebContent.Client
 
         public void Init()
         {
+            var browserReferenceAdded = false;
             try
             {
                 if (IsInitialized) return;
 
+                BrowserManager.AddReference(Id);
+                browserReferenceAdded = true;
+
+                EnsureCommandsInitialized();
                 ApplyWorkspaceState(ClientControl.Instance.WorkSpaceState);
                 _viewItemManager.PropertyChangedEvent += ViewItemManager_PropertyChangedEvent;
                 _viewItemManager.ClearBrowsingDataRequest += ClearBrowsingDataRequestHandler;
                 _workspaceStateChangedReceiver = EnvironmentManager.Instance.RegisterReceiver(WorkspaceStateChangeHandler, new MessageIdFilter(MessageId.SmartClient.WorkSpaceStateChangedIndication));
 
-                var homeAddress = _viewItemManager.Settings.RememberLastAddress && !string.IsNullOrWhiteSpace(_viewItemManager.Settings.LastAddress) ? _viewItemManager.Settings.LastAddress : Home;
                 Browser.AllowDevTools = ViewItemManager.Settings.EnableDevTools;
                 Browser.AllowAudioNotifications = ViewItemManager.Settings.AllowAudioNotifications;
                 Browser.IsMuted = ViewItemManager.Settings.MuteAudio;
@@ -223,6 +238,11 @@ namespace WebContent.Client
                         Browser.Initialize();
                     }
 
+                    if (ClientControl.Instance.WorkSpaceState == WorkSpaceState.Normal)
+                    {
+                        RestoreAddressIfNeeded();
+                    }
+
                     if (_viewItemManager.Settings.ClearBrowsingDataOnExit)
                     {
                         WebContentViewItemPlugin.BrowsersToDispose.AddOrUpdate(Browser.Id, Browser, (id, instance) => instance);
@@ -234,7 +254,6 @@ namespace WebContent.Client
                     _reloadCommand.Init();
                     _printCommand.Init();
                     _homeCommand.Init();
-                    Application.Current?.Dispatcher.InvokeAsync(async () => await Browser.WebView.EnsureCoreWebView2Async()).Wait();
                     
                     // Can't set this here because the damn corewebview2 isn't available yet
                     // Browser.WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
@@ -248,6 +267,11 @@ namespace WebContent.Client
             }
             catch (Exception ex)
             {
+                if (browserReferenceAdded)
+                {
+                    BrowserManager.ReleaseReference(Id);
+                }
+
                 var location = nameof(WebContentViewModel) + ".Init()";
                 EnvironmentManager.Instance.Log(true, location, $"{ex.Message}\r\n{ex.StackTrace}");
                 EnvironmentManager.Instance.ExceptionHandler(location, ex);
@@ -268,14 +292,15 @@ namespace WebContent.Client
 
         private object WorkspaceStateChangeHandler(Message message, FQID destination, FQID sender)
         {
-            if (message.Data is WorkSpaceState state) {
+            if (message.Data is WorkSpaceState state)
+            {
+                ApplyWorkspaceState(state);
                 if (state == WorkSpaceState.Normal)
                 {
-                    // Transitioned from setup to Normal - navigate to home address
-                    Browser.Address = Home;
+                    IsWorkspaceFloating = false;
+                    RestoreAddressIfNeeded();
                 }
-                ApplyWorkspaceState(state);
-            };
+            }
             return null;
         }
 
@@ -287,18 +312,30 @@ namespace WebContent.Client
         {
             try
             {
-                EnvironmentManager.Instance.UnRegisterReceiver(_workspaceStateChangedReceiver);
-                _viewItemManager.PropertyChangedEvent -= ViewItemManager_PropertyChangedEvent;
-                _backCommand.Dispose();
-                _forwardCommand.Dispose();
-                _reloadCommand.Dispose();
-                _printCommand.Dispose();
-                _homeCommand.Dispose();
-
-                if (!_viewItemManager?.Settings.AllowBackgroundBrowser ?? false)
+                if (_workspaceStateChangedReceiver != null)
                 {
-                    BrowserManager.DestroyBrowser(Browser);
+                    EnvironmentManager.Instance.UnRegisterReceiver(_workspaceStateChangedReceiver);
+                    _workspaceStateChangedReceiver = null;
                 }
+
+                _viewItemManager.PropertyChangedEvent -= ViewItemManager_PropertyChangedEvent;
+                _viewItemManager.ClearBrowsingDataRequest -= ClearBrowsingDataRequestHandler;
+                Browser.PropertyChanged -= Browser_PropertyChanged;
+
+                _backCommand?.Dispose();
+                _forwardCommand?.Dispose();
+                _reloadCommand?.Dispose();
+                _printCommand?.Dispose();
+                _homeCommand?.Dispose();
+
+                var remainingReferences = BrowserManager.ReleaseReference(Id);
+                if (remainingReferences == 0)
+                {
+                    var allowBackground = _viewItemManager?.Settings.AllowBackgroundBrowser ?? false;
+                    Browser.Close(clearData: false, disposeWebView: !allowBackground);
+                }
+
+                IsInitialized = false;
             }
             catch (Exception ex)
             {
@@ -317,6 +354,67 @@ namespace WebContent.Client
         #endregion
 
         #region Private methods
+
+        private void EnsureCommandsInitialized()
+        {
+            _ = BackCommand;
+            _ = ForwardCommand;
+            _ = ReloadCommand;
+            _ = PrintCommand;
+            _ = HomeCommand;
+        }
+
+        private void RestoreAddressIfNeeded()
+        {
+            var restoreAddress = GetRestoreAddress();
+            if (string.IsNullOrWhiteSpace(restoreAddress))
+            {
+                restoreAddress = Strings.HomeAddress;
+            }
+
+            var currentAddress = Browser.Address;
+
+            if (string.IsNullOrWhiteSpace(currentAddress) || IsSameAddress(currentAddress, Home))
+            {
+                Browser.Address = restoreAddress;
+            }
+        }
+
+        private string GetRestoreAddress()
+        {
+            if (_viewItemManager?.Settings.RememberLastAddress == true && !string.IsNullOrWhiteSpace(_viewItemManager.Settings.LastAddress))
+            {
+                return _viewItemManager.Settings.LastAddress;
+            }
+
+            return Home;
+        }
+
+        private static bool IsSameAddress(string first, string second)
+        {
+            return string.Equals(NormalizeAddress(first), NormalizeAddress(second), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeAddress(string address)
+        {
+            if (string.IsNullOrWhiteSpace(address))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = address.Trim();
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absoluteUri))
+            {
+                return absoluteUri.AbsoluteUri.TrimEnd('/');
+            }
+
+            if (Uri.TryCreate($"https://{trimmed}", UriKind.Absolute, out var normalizedUri))
+            {
+                return normalizedUri.AbsoluteUri.TrimEnd('/');
+            }
+
+            return trimmed.TrimEnd('/');
+        }
 
         private void ApplyWorkspaceState(WorkSpaceState state)
         {

@@ -25,7 +25,7 @@ namespace WebContent
 
         public override string Name => Resources.PluginName;
 
-        public override Image Icon => Resources.CompanyLogo;
+        public override Image Icon => ResourceLoader.CompanyLogo;
 
         public override string Manufacturer => Resources.PluginCompany;
 
@@ -46,6 +46,64 @@ namespace WebContent
         public override AdminPlacementHint AdminPlacementHint => AdminPlacementHint.Default;
 
         public override List<ViewItemPlugin> ViewItemPlugins { get; } = new List<ViewItemPlugin>();
+
+        private List<WorkSpacePlugin> _workSpacePlugins;
+        public override List<WorkSpacePlugin> WorkSpacePlugins
+        {
+            get
+            {
+                if (_workSpacePlugins != null) return _workSpacePlugins;
+
+                _workSpacePlugins = new List<WorkSpacePlugin>();
+                try
+                {
+                    var workspaces = WorkspaceItemManager.GetWorkspaces();
+                    foreach (var workspace in workspaces)
+                    {
+                        var properties = BuildWorkspaceProperties(workspace);
+                        _workSpacePlugins.Add(new WebContentWorkSpacePlugin(
+                            workspace.FQID.ObjectId,
+                            workspace.Name,
+                            properties));
+                    }
+                }
+                catch
+                {
+                    // Configuration may not be ready yet; return empty list
+                }
+                return _workSpacePlugins;
+            }
+        }
+
+        private static Dictionary<string, string> BuildWorkspaceProperties(Item workspace)
+        {
+            var properties = new Dictionary<string, string>
+            {
+                { "WorkspaceId", workspace.FQID.ObjectId.ToString() },
+                { "WorkspaceName", workspace.Name }
+            };
+
+            CopyProperty(workspace, properties, "Address", "HomeAddress");
+            CopyProperty(workspace, properties, "HideToolbar");
+            CopyProperty(workspace, properties, "HideAddress");
+            CopyProperty(workspace, properties, "ZoomLevel");
+            CopyProperty(workspace, properties, "RememberLastAddress");
+            CopyProperty(workspace, properties, "ClearBrowsingDataOnExit");
+            CopyProperty(workspace, properties, "AllowBackgroundBrowser");
+            CopyProperty(workspace, properties, "AllowAudioNotifications");
+            CopyProperty(workspace, properties, "MuteAudio");
+            CopyProperty(workspace, properties, "IsolateBrowserInstances");
+            CopyProperty(workspace, properties, "EnableDevTools");
+
+            return properties;
+        }
+
+        private static void CopyProperty(Item workspace, Dictionary<string, string> properties, string sourceKey, string targetKey = null)
+        {
+            targetKey = targetKey ?? sourceKey;
+            if (workspace.Properties.ContainsKey(sourceKey))
+                properties[targetKey] = workspace.Properties[sourceKey];
+        }
 
         public override Collection<LicenseInformation> PluginLicenseRequest => SiteLicenseHandler.GetLicenseRequest();
 
@@ -83,7 +141,7 @@ namespace WebContent
                     securityActions,
                     null,
                     null,
-                    AdminPlacementHint.Root);
+                    PlacementHint.Root);
                 itemNode.SortKey = 500;
                 _itemNodes = new List<ItemNode> { itemNode };
                 return _itemNodes;
@@ -113,6 +171,7 @@ namespace WebContent
         public override async void Close()
         {
             ViewItemPlugins.Clear();
+            _workSpacePlugins?.Clear();
             foreach (var task in Tasks)
             {
                 try

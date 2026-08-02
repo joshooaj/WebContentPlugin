@@ -1,19 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
-using VideoOS.Platform;
 using WebContent.Admin;
 
 namespace WebContent.Client
 {
     public class WebContentSettings : INotifyPropertyChanged
     {
-        public string WorkspaceLabel => Strings.WorkspaceLabel;
         public string HomeLabel => $"{Strings.HomeLabel}:";
         public string RememberLastAddressLabel => Strings.RememberLastAddressLabel;
         public string HideToolbarLabel => Strings.HideToolbarLabel;
@@ -36,65 +30,6 @@ namespace WebContent.Client
         public string AllowAudioNotificationsToolTip => Strings.AllowAudioNotificationsToolTip;
         public string MuteAudioLabel => Strings.MuteAudioLabel;
         public string MuteAudioToolTip => Strings.MuteAudioToolTip;
-
-        public List<WorkspaceOption> WorkspaceOptions
-        {
-            get
-            {
-                var options = new List<WorkspaceOption>
-                {
-                    new WorkspaceOption { Id = Guid.Empty, Name = "(None - use custom address)" }
-                };
-                var workspaces = WorkspaceItemManager.GetWorkspaces();
-                foreach (var ws in workspaces)
-                {
-                    options.Add(new WorkspaceOption { Id = ws.FQID.ObjectId, Name = ws.Name });
-                }
-                return options;
-            }
-        }
-
-        public bool HasWorkspaces => WorkspaceOptions.Count > 1;
-
-        public Guid SelectedWorkspaceId
-        {
-            get => Guid.TryParse(_viewItemManager?.GetProperty(nameof(SelectedWorkspaceId)) ?? string.Empty, out var id) ? id : Guid.Empty;
-            set
-            {
-                if (SelectedWorkspaceId == value) return;
-                _viewItemManager?.SetProperty(nameof(SelectedWorkspaceId), value.ToString());
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(SelectedWorkspaceIndex));
-                if (value != Guid.Empty)
-                {
-                    var workspace = WorkspaceItemManager.GetWorkspace(value);
-                    if (workspace?.Properties != null && workspace.Properties.ContainsKey("Address"))
-                    {
-                        HomeAddress = workspace.Properties["Address"];
-                    }
-                }
-            }
-        }
-
-        public int SelectedWorkspaceIndex
-        {
-            get
-            {
-                var id = SelectedWorkspaceId;
-                for (int i = 0; i < WorkspaceOptions.Count; i++)
-                {
-                    if (WorkspaceOptions[i].Id == id) return i;
-                }
-                return 0;
-            }
-            set
-            {
-                if (value >= 0 && value < WorkspaceOptions.Count)
-                {
-                    SelectedWorkspaceId = WorkspaceOptions[value].Id;
-                }
-            }
-        }
 
         public bool IsHideAddressEnabled => !HideToolbar;
         public string HomeAddress
@@ -262,23 +197,5 @@ namespace WebContent.Client
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
-
-        //protected bool SetProperty<T>(ref T field, T newValue, [CallerMemberName] string propertyName = null)
-        //{
-        //    if (!Equals(field, newValue))
-        //    {
-        //        field = newValue;
-        //        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        //        return true;
-        //    }
-
-        //    return false;
-        //}
-    }
-
-    public class WorkspaceOption
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; }
     }
 }

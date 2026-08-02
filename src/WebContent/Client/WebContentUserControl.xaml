@@ -12,6 +12,9 @@
     <UserControl.DataContext>
         <local:WebContentViewModel />
     </UserControl.DataContext>
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </UserControl.Resources>
     <DockPanel Name="BrowserControl">
         <DockPanel Name="Toolbar" DockPanel.Dock="Top" LastChildFill="True" Visibility="{Binding ToolbarVisibility, Mode=OneWay}" PreviewMouseDown="WebContentUserControl_PreviewMouseDown" Background="Transparent">
             <Button Command="{Binding BackCommand}" Margin="2">
@@ -32,6 +35,17 @@
             <Label Content="{Binding TrialText}" Visibility="{Binding TrialVisibility, Mode=OneWay}" FontWeight="Medium" />
             <TextBox Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" FontWeight="Medium" Margin="2" Padding="5 0 0 0" IsEnabled="{Binding IsAddressEnabled}" />
         </DockPanel>
-        <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown" />
+        <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown">
+            <TextBlock Name="FloatingPlaceholder" Visibility="{Binding IsWorkspaceFloating, Converter={StaticResource BooleanToVisibilityConverter}}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       TextAlignment="Center" Foreground="LightGray" FontSize="14">
+                <TextBlock.Text>
+                    <MultiBinding StringFormat="{}{0}&#10;&#10;{1}">
+                        <Binding Source="This workspace is currently displayed in a floating window."/>
+                        <Binding Source="Close the floating window to return the browser here."/>
+                    </MultiBinding>
+                </TextBlock.Text>
+            </TextBlock>
+        </DockPanel>
     </DockPanel>
 </client:ViewItemWpfUserControl>

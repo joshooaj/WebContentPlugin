@@ -165,24 +165,32 @@ namespace WebContent.Admin
 
         internal static void Close()
         {
+            Logger.Log("Closing license handler.");
             EnvironmentManager.Instance.UnRegisterReceiver(_licenseReceiver);
         }
 
         private static object NewLicense(Message message, FQID destination, FQID sender)
         {
             var response = EnvironmentManager.Instance.LicenseManager.GetLicense(new Guid(Resources.PluginId), Resources.PluginLicenseType);
-            if (response == null) return null;
+            if (response == null)
+            {
+                Logger.Log("NewLicense callback received but response is null.");
+                return null;
+            }
 
+            Logger.Log($"NewLicense callback received. License type: {response.LicenseType}, expires: {response.Expire}");
             response.Counter = response.Counter > 1 ? 1 : response.Counter;
             _activatedLicense = response.Clone();
             _myLicense = response.Clone();
             EnvironmentManager.Instance.LicenseManager.ReservedLicenseManager.SaveLicenseInformation(_myLicense);
+            OnLicenseActivated();
             return null;
         }
 
         internal static Collection<LicenseInformation> GetLicenseRequest()
         {
             if (!_initialized) Init();
+            Logger.Log("Generating license request.");
             _myLicense.Counter = 1;
             return new Collection<LicenseInformation> { _myLicense };
         }
