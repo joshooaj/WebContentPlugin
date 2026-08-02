@@ -92,6 +92,8 @@ namespace WebContent
                 {
                     new SecurityAction("GENERIC_READ", "View Web Content Workspace"),
                     new SecurityAction("GENERIC_WRITE", "Manage Web Content Workspace"),
+                    new SecurityAction("VIEW", "View Web Content Workspace"),
+                    new SecurityAction("MANAGE", "Manage Web Content Workspace")
                 };
                 var itemNode = new ItemNode(
                     WorkspaceKind,
@@ -323,6 +325,32 @@ namespace WebContent
             };
 
             var sourceProperties = workspace.Properties;
+
+            var workspaceConfig = WorkspaceConfiguration.FromProperties(sourceProperties);
+            if (workspaceConfig != null)
+            {
+                var settings = workspaceConfig.GetFirstWebContentSettings();
+                if (settings != null)
+                {
+                    properties[nameof(WebContentSettings.InstanceId)] = workspace.FQID.ObjectId.ToString();
+                    properties[nameof(WebContentSettings.HomeAddress)] = WebContentConfiguration.NormalizeHomeAddress(settings.HomeAddress);
+                    properties[nameof(WebContentSettings.HideToolbar)] = WebContentConfiguration.FormatBoolean(settings.HideToolbar);
+
+                    var effectiveHideAddress = settings.HideToolbar ? false : settings.HideAddress;
+                    properties[nameof(WebContentSettings.HideAddress)] = WebContentConfiguration.FormatBoolean(effectiveHideAddress);
+                    properties[nameof(WebContentSettings.ZoomLevel)] = WebContentConfiguration.FormatZoomLevel(settings.ZoomLevel);
+                    properties[nameof(WebContentSettings.RememberLastAddress)] = WebContentConfiguration.FormatBoolean(settings.RememberLastAddress);
+                    properties[nameof(WebContentSettings.ClearBrowsingDataOnExit)] = WebContentConfiguration.FormatBoolean(settings.ClearBrowsingDataOnExit);
+                    properties[nameof(WebContentSettings.AllowBackgroundBrowser)] = WebContentConfiguration.FormatBoolean(settings.AllowBackgroundBrowser);
+                    properties[nameof(WebContentSettings.AllowAudioNotifications)] = WebContentConfiguration.FormatBoolean(settings.AllowAudioNotifications);
+                    properties[nameof(WebContentSettings.MuteAudio)] = WebContentConfiguration.FormatBoolean(settings.MuteAudio);
+                    properties[nameof(WebContentSettings.IsolateBrowserInstances)] = WebContentConfiguration.FormatBoolean(settings.IsolateBrowserInstances);
+                    properties[nameof(WebContentSettings.EnableDevTools)] = WebContentConfiguration.FormatBoolean(settings.EnableDevTools);
+
+                    return properties;
+                }
+            }
+
             var homeAddress = WebContentConfiguration.NormalizeHomeAddress(
                 WebContentConfiguration.GetString(sourceProperties, Strings.HomeAddress, "HomeAddress", "Address"));
 

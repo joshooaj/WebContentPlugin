@@ -118,6 +118,28 @@ namespace WebContent.Admin
 
             _userControl.WorkspaceName = item.Name;
 
+            var workspaceConfig = WorkspaceConfiguration.FromProperties(properties);
+            if (workspaceConfig != null)
+            {
+                var settings = workspaceConfig.GetFirstWebContentSettings();
+                if (settings != null)
+                {
+                    _userControl.HomeAddress = WebContentConfiguration.NormalizeHomeAddress(settings.HomeAddress);
+                    _userControl.RememberLastAddress = settings.RememberLastAddress;
+                    _userControl.HideToolbar = settings.HideToolbar;
+                    _userControl.HideAddress = settings.HideToolbar ? false : settings.HideAddress;
+                    _userControl.ZoomLevel = WebContentConfiguration.ClampZoomLevel(settings.ZoomLevel);
+                    _userControl.ClearBrowsingDataOnExit = settings.ClearBrowsingDataOnExit;
+                    _userControl.AllowBackgroundBrowser = settings.AllowBackgroundBrowser;
+                    _userControl.AllowAudioNotifications = settings.AllowAudioNotifications;
+                    _userControl.MuteAudio = settings.MuteAudio;
+                    _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
+                    _userControl.EnableDevTools = settings.EnableDevTools;
+                    _userControl.FillContent();
+                    return;
+                }
+            }
+
             _userControl.HomeAddress = WebContentConfiguration.NormalizeHomeAddress(
                 WebContentConfiguration.GetString(properties, Strings.HomeAddress, "Address", "HomeAddress"));
             _userControl.RememberLastAddress = WebContentConfiguration.GetBoolean(properties, false, "RememberLastAddress");
@@ -169,7 +191,25 @@ namespace WebContent.Admin
             SetOrRemoveProperty(CurrentItem, "MuteAudio", WebContentConfiguration.FormatBoolean(_userControl?.MuteAudio ?? false));
             SetOrRemoveProperty(CurrentItem, "IsolateBrowserInstances", WebContentConfiguration.FormatBoolean(_userControl?.IsolateBrowserInstances ?? false));
             SetOrRemoveProperty(CurrentItem, "EnableDevTools", WebContentConfiguration.FormatBoolean(_userControl?.EnableDevTools ?? false));
-            
+
+            var config = WorkspaceConfiguration.CreateDefault(homeAddress);
+            if (config.Items != null && config.Items.Count > 0)
+            {
+                var settings = config.Items[0].Settings;
+                settings.HideToolbar = hideToolbar;
+                settings.HideAddress = hideAddress;
+                settings.ZoomLevel = _userControl?.ZoomLevel ?? WebContentConfiguration.DefaultZoomLevel;
+                settings.RememberLastAddress = _userControl?.RememberLastAddress ?? false;
+                settings.ClearBrowsingDataOnExit = _userControl?.ClearBrowsingDataOnExit ?? false;
+                settings.AllowBackgroundBrowser = _userControl?.AllowBackgroundBrowser ?? true;
+                settings.AllowAudioNotifications = _userControl?.AllowAudioNotifications ?? true;
+                settings.MuteAudio = _userControl?.MuteAudio ?? false;
+                settings.IsolateBrowserInstances = _userControl?.IsolateBrowserInstances ?? false;
+                settings.EnableDevTools = _userControl?.EnableDevTools ?? false;
+            }
+
+            SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, config.Serialize());
+
             Configuration.Instance.SaveItemConfiguration(WebContentPluginDefinition.PluginId, CurrentItem);
             RefreshTreeView();
             return true;
@@ -197,6 +237,8 @@ namespace WebContent.Admin
             };
 
             CurrentItem = new Item(fqid, "Enter a name");
+            var defaultConfig = WorkspaceConfiguration.CreateDefault(string.Empty);
+            SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, defaultConfig.Serialize());
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Creating new workspace item. FQID: {fqid}.");
             Configuration.Instance.SaveItemConfiguration(WebContentPluginDefinition.PluginId, CurrentItem);
             RefreshTreeView();

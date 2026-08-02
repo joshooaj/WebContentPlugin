@@ -51,6 +51,8 @@
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Net.Http" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.ServiceModel.Web" />
     <Reference Include="System.Xml" />
     <Reference Include="WindowsBase" />
   </ItemGroup>
@@ -92,6 +94,7 @@
     <Compile Include="Admin\WebContentLicenseManager.cs" />
     <Compile Include="Client\WebContentExportManager.cs" />
     <Compile Include="WebContentConfiguration.cs" />
+    <Compile Include="WorkspaceConfiguration.cs" />
     <Compile Include="WebContentPluginDefinition.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ResourceLoader.cs" />
