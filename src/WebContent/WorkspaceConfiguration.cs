@@ -114,6 +114,16 @@ namespace WebContent
 
             return null;
         }
+
+        /// <summary>
+        /// Resolves the raw property dictionary to the first WebContent item's settings, or null
+        /// when the workspace carries no usable JSON blob.
+        /// </summary>
+        internal static WorkspaceItemSettings GetFirstWebContentSettings(IDictionary<string, string> properties)
+        {
+            var config = FromProperties(properties);
+            return config != null ? config.GetFirstWebContentSettings() : null;
+        }
     }
 
     [DataContract]

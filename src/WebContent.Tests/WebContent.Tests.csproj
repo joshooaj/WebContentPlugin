@@ -20,5 +20,9 @@
     <Compile Include="..\WebContent\Client\BrowserProfileKey.cs" Link="BrowserProfileKey.cs" />
     <Compile Include="..\WebContent\Client\BrowserRegistry.cs" Link="BrowserRegistry.cs" />
     <Compile Include="..\WebContent\Client\CallbackOwnership.cs" Link="CallbackOwnership.cs" />
+    <Compile Include="..\WebContent\Client\WorkspaceDefinition.cs" Link="WorkspaceDefinition.cs" />
+    <Compile Include="..\WebContent\Client\WorkspaceProperties.cs" Link="WorkspaceProperties.cs" />
+    <Compile Include="..\WebContent\WebContentConfiguration.cs" Link="WebContentConfiguration.cs" />
+    <Compile Include="..\WebContent\WorkspaceConfiguration.cs" Link="WorkspaceConfiguration.cs" />
   </ItemGroup>
 </Project>

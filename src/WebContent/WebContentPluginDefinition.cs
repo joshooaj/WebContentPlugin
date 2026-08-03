@@ -26,6 +26,7 @@ namespace WebContent
         private readonly object _workspaceSync = new object();
         private readonly List<object> _workspaceMessageRegistrations = new List<object>();
         private readonly List<WorkSpacePlugin> _workSpacePlugins = new List<WorkSpacePlugin>();
+        private readonly WorkspacePluginFactory _workspacePluginFactory = new WorkspacePluginFactory();
 
         private DateTime _nextWorkspaceRetryUtc = DateTime.MinValue;
         private DateTime _lastWorkspaceFailureLogUtc = DateTime.MinValue;
@@ -257,26 +258,23 @@ namespace WebContent
                     return;
                 }
 
-                if (workspaces.Count == 0 && !_workspaceLoadSucceeded && _emptyWorkspaceLoadCount < 3)
+                _workSpacePlugins.Clear();
+                var plugin = _workspacePluginFactory.CreateFirstProvisionableWorkSpacePlugin(workspaces);
+                if (plugin != null)
+                {
+                    _workSpacePlugins.Add(plugin);
+                }
+
+                if (_workSpacePlugins.Count == 0 && _emptyWorkspaceLoadCount < 3)
                 {
                     _emptyWorkspaceLoadCount++;
                     _nextWorkspaceRetryUtc = now.Add(TimeSpan.FromSeconds(15));
                     if (_emptyWorkspaceLoadCount == 1)
                     {
-                        EnvironmentManager.Instance.Log(false, nameof(WebContentPluginDefinition), "Workspace configuration returned zero entries during startup; scheduling retry.");
+                        EnvironmentManager.Instance.Log(false, nameof(WebContentPluginDefinition), "Workspace configuration returned no provisionable entries during startup; scheduling retry.");
                     }
 
                     return;
-                }
-
-                _workSpacePlugins.Clear();
-                foreach (var workspace in workspaces)
-                {
-                    var properties = BuildWorkspaceProperties(workspace);
-                    _workSpacePlugins.Add(new WebContentWorkSpacePlugin(
-                        workspace.FQID.ObjectId,
-                        workspace.Name,
-                        properties));
                 }
 
                 if (_workspaceLoadFailureCount > 0)
@@ -312,76 +310,6 @@ namespace WebContent
         {
             var cappedFailures = Math.Min(Math.Max(failureCount, 1), 6);
             return TimeSpan.FromSeconds(Math.Pow(2, cappedFailures));
-        }
-
-        private static Dictionary<string, string> BuildWorkspaceProperties(Item workspace)
-        {
-            var properties = new Dictionary<string, string>
-            {
-                { "WorkspaceId", workspace.FQID.ObjectId.ToString() },
-                { "WorkspaceName", workspace.Name }
-            };
-
-            var sourceProperties = workspace.Properties;
-
-            var workspaceConfig = WorkspaceConfiguration.FromProperties(sourceProperties);
-            if (workspaceConfig != null)
-            {
-                var settings = workspaceConfig.GetFirstWebContentSettings();
-                if (settings != null)
-                {
-                    properties[nameof(WebContentSettings.InstanceId)] = workspace.FQID.ObjectId.ToString();
-                    properties[nameof(WebContentSettings.HomeAddress)] = WebContentConfiguration.NormalizeHomeAddress(settings.HomeAddress);
-                    properties[nameof(WebContentSettings.HideToolbar)] = WebContentConfiguration.FormatBoolean(settings.HideToolbar);
-
-                    var effectiveHideAddress = settings.HideToolbar ? false : settings.HideAddress;
-                    properties[nameof(WebContentSettings.HideAddress)] = WebContentConfiguration.FormatBoolean(effectiveHideAddress);
-                    properties[nameof(WebContentSettings.ZoomLevel)] = WebContentConfiguration.FormatZoomLevel(settings.ZoomLevel);
-                    properties[nameof(WebContentSettings.RememberLastAddress)] = WebContentConfiguration.FormatBoolean(settings.RememberLastAddress);
-                    properties[nameof(WebContentSettings.ClearBrowsingDataOnExit)] = WebContentConfiguration.FormatBoolean(settings.ClearBrowsingDataOnExit);
-                    properties[nameof(WebContentSettings.AllowBackgroundBrowser)] = WebContentConfiguration.FormatBoolean(settings.AllowBackgroundBrowser);
-                    properties[nameof(WebContentSettings.AllowAudioNotifications)] = WebContentConfiguration.FormatBoolean(settings.AllowAudioNotifications);
-                    properties[nameof(WebContentSettings.MuteAudio)] = WebContentConfiguration.FormatBoolean(settings.MuteAudio);
-                    properties[nameof(WebContentSettings.IsolateBrowserInstances)] = WebContentConfiguration.FormatBoolean(settings.IsolateBrowserInstances);
-                    properties[nameof(WebContentSettings.EnableDevTools)] = WebContentConfiguration.FormatBoolean(settings.EnableDevTools);
-
-                    return properties;
-                }
-            }
-
-            var homeAddress = WebContentConfiguration.NormalizeHomeAddress(
-                WebContentConfiguration.GetString(sourceProperties, Strings.HomeAddress, "HomeAddress", "Address"));
-
-            properties[nameof(WebContentSettings.InstanceId)] = WebContentConfiguration.GetGuid(sourceProperties, workspace.FQID.ObjectId, nameof(WebContentSettings.InstanceId)).ToString();
-            properties[nameof(WebContentSettings.HomeAddress)] = homeAddress;
-            properties[nameof(WebContentSettings.HideToolbar)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.HideToolbar)));
-
-            var hideAddress = WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.HideAddress));
-            if (WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.HideToolbar)))
-            {
-                hideAddress = false;
-            }
-
-            properties[nameof(WebContentSettings.HideAddress)] = WebContentConfiguration.FormatBoolean(hideAddress);
-            properties[nameof(WebContentSettings.ZoomLevel)] = WebContentConfiguration.FormatZoomLevel(
-                WebContentConfiguration.GetZoomLevel(sourceProperties, WebContentConfiguration.DefaultZoomLevel, nameof(WebContentSettings.ZoomLevel)));
-            properties[nameof(WebContentSettings.RememberLastAddress)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.RememberLastAddress)));
-            properties[nameof(WebContentSettings.ClearBrowsingDataOnExit)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.ClearBrowsingDataOnExit)));
-            properties[nameof(WebContentSettings.AllowBackgroundBrowser)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, true, nameof(WebContentSettings.AllowBackgroundBrowser)));
-            properties[nameof(WebContentSettings.AllowAudioNotifications)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, true, nameof(WebContentSettings.AllowAudioNotifications)));
-            properties[nameof(WebContentSettings.MuteAudio)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.MuteAudio)));
-            properties[nameof(WebContentSettings.IsolateBrowserInstances)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.IsolateBrowserInstances)));
-            properties[nameof(WebContentSettings.EnableDevTools)] = WebContentConfiguration.FormatBoolean(
-                WebContentConfiguration.GetBoolean(sourceProperties, false, nameof(WebContentSettings.EnableDevTools)));
-
-            return properties;
         }
     }
 }
