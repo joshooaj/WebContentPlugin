@@ -56,7 +56,7 @@ namespace WebContent
             }
         }
 
-        public override AdminPlacementHint AdminPlacementHint => AdminPlacementHint.Default;
+        public override AdminPlacementHint AdminPlacementHint => AdminPlacementHint.Root;
 
         public override List<ViewItemPlugin> ViewItemPlugins { get; } = new List<ViewItemPlugin>();
 
@@ -105,7 +105,7 @@ namespace WebContent
                     securityActions,
                     null,
                     null,
-                    PlacementHint.Root);
+                    PlacementHint.Default);
                 itemNode.SortKey = 500;
                 _itemNodes = new List<ItemNode> { itemNode };
                 return _itemNodes;
