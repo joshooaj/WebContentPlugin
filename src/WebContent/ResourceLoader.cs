@@ -69,7 +69,11 @@ namespace WebContent
                 var encoder = new PngBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(source));
                 encoder.Save(stream);
-                return new Bitmap(stream);
+                stream.Position = 0;
+                using (var temp = new Bitmap(stream))
+                {
+                    return new Bitmap(temp);
+                }
             }
         }
     }
