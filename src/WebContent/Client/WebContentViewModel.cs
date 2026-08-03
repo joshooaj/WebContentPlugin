@@ -332,7 +332,8 @@ namespace WebContent.Client
                 if (remainingReferences == 0)
                 {
                     var allowBackground = _viewItemManager?.Settings.AllowBackgroundBrowser ?? false;
-                    Browser.Close(clearData: false, disposeWebView: !allowBackground);
+                    var clearOnExit = _viewItemManager?.Settings.ClearBrowsingDataOnExit ?? false;
+                    Browser.Close(clearData: clearOnExit && !allowBackground, disposeWebView: !allowBackground);
                     if (!allowBackground)
                     {
                         // WebView was disposed; stop tracking the shell so the
