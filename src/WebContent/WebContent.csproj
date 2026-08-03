@@ -76,6 +76,8 @@
     <Compile Include="Client\BrowserCommand.cs" />
     <Compile Include="Client\BrowserInstance.cs" />
     <Compile Include="Client\BrowserManager.cs" />
+    <Compile Include="Client\BrowserProfileKey.cs" />
+    <Compile Include="Client\BrowserProfileIdentity.cs" />
     <Compile Include="Client\WebContentViewModel.cs" />
     <Compile Include="Strings.Designer.cs">
       <AutoGen>True</AutoGen>

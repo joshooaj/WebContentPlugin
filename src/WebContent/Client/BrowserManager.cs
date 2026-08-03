@@ -1,7 +1,6 @@
 ﻿using Microsoft.Web.WebView2.Wpf;
 using System;
 using System.Collections.Concurrent;
-using System.IO;
 using VideoOS.Platform;
 
 namespace WebContent.Client
@@ -10,16 +9,6 @@ namespace WebContent.Client
     {
         private static readonly ConcurrentDictionary<Guid, BrowserInstance> _browsers = new ConcurrentDictionary<Guid, BrowserInstance>();
         private static readonly ConcurrentDictionary<Guid, int> _browserReferenceCounts = new ConcurrentDictionary<Guid, int>();
-        private static string _userDataFolder;
-
-        static BrowserManager()
-        {
-            _userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SmartClient.WebContentData");
-            if (!Directory.Exists(_userDataFolder))
-            {
-                Directory.CreateDirectory(_userDataFolder);
-            }
-        }
 
         public static BrowserInstance GetBrowser(Guid id)
         {
@@ -36,7 +25,7 @@ namespace WebContent.Client
                 {
                     CreationProperties = new CoreWebView2CreationProperties
                     {
-                        UserDataFolder = _userDataFolder,
+                        UserDataFolder = BrowserProfileIdentity.GetUserDataFolder(),
                         ProfileName = isIsolated ? id.ToString() : string.Empty,
                     },
                     Source = initialAddress,

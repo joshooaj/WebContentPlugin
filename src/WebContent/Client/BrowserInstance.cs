@@ -338,9 +338,7 @@ namespace WebContent.Client
             EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Recreating WebView for browser {Id}. isolateInstances={isolateInstances}, address={initialAddress}.");
             Close(clearData: false, disposeWebView: true);
 
-            var userDataFolder = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "SmartClient.WebContentData");
+            var userDataFolder = BrowserProfileIdentity.GetUserDataFolder();
 
             WebView = new WebView2
             {

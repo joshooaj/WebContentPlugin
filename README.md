@@ -23,6 +23,30 @@ need it for.
 - **Easily mute unexpected audio** from a browser in a previous view that is no longer displayed. If a background browser
     should start playing sound, you'll see a notification with the name of the web page and a button to mute that browser instance.
 
+## Browser data per XProtect user
+
+The Web Content plugin stores its WebView2 browser profile in
+`%APPDATA%\SmartClient.WebContentData`, **keyed to the XProtect login identity** you used to sign
+into Smart Client, not merely to the Windows account. Different XProtect users therefore start with
+**separate, fresh** browser profiles — they do not inherit each other's browsing history, cookies or
+saved credentials on the same machine.
+
+**Important — the Windows account is the security boundary.** WebView2/Chromium encrypts protected
+browsing data (cookies and saved passwords) with Windows DPAPI, which is tied to the Windows logon.
+Two different XProtect accounts on the *same* Windows account are separated but not
+*cryptographically* isolated from each other. To keep two XProtect identities fully private, log
+each into Smart Client under a **distinct Windows account**.
+
+### Deliberately sharing a browser profile
+
+If multiple operators intentionally need to share a single WebContent profile (for example a shared
+control-room operator), they must log into Smart Client as the **same XProtect login identity** on
+the **same Windows machine account**. Using different XProtect identities will give each a separate
+profile even on a shared Windows account.
+
+See `docs/adr/0001-browser-profile-per-xprotect-user.md` for the full decision and the security
+analysis.
+
 ## Getting started
 
 ### Install the plugin
