@@ -87,8 +87,8 @@ namespace WebContent
                 if (_itemNodes != null) return _itemNodes;
                 var securityActions = new List<SecurityAction>
                 {
-                    new SecurityAction("GENERIC_READ", "View Web Content Workspace"),
-                    new SecurityAction("GENERIC_WRITE", "Manage Web Content Workspace")
+                    new SecurityAction(WorkspacePermission.View, "View Web Content Workspace"),
+                    new SecurityAction(WorkspacePermission.Manage, "Manage Web Content Workspace")
                 };
                 var itemNode = new ItemNode(
                     WorkspaceKind,
@@ -252,11 +252,7 @@ namespace WebContent
                 }
 
                 _workSpacePlugins.Clear();
-                var plugin = _workspacePluginFactory.CreateFirstProvisionableWorkSpacePlugin(workspaces);
-                if (plugin != null)
-                {
-                    _workSpacePlugins.Add(plugin);
-                }
+                _workSpacePlugins.AddRange(_workspacePluginFactory.CreateWorkSpacePlugins(workspaces));
 
                 if (_workSpacePlugins.Count == 0 && _emptyWorkspaceLoadCount < 3)
                 {
@@ -264,7 +260,7 @@ namespace WebContent
                     _nextWorkspaceRetryUtc = now.Add(TimeSpan.FromSeconds(15));
                     if (_emptyWorkspaceLoadCount == 1)
                     {
-                        EnvironmentManager.Instance.Log(false, nameof(WebContentPluginDefinition), "Workspace configuration returned no provisionable entries during startup; scheduling retry.");
+                        EnvironmentManager.Instance.Log(false, nameof(WebContentPluginDefinition), "No workspace tabs were provisioned during startup (none defined, none viewable, or permission lookup unavailable); scheduling retry.");
                     }
 
                     return;

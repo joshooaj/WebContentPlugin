@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace WebContent.Client
 {
@@ -51,24 +52,29 @@ namespace WebContent.Client
         }
 
         /// <summary>
-        /// Returns the first provisionable definition in server order, or null when none qualify.
+        /// Returns the definitions the current user may view, in admin order. A definition must be
+        /// provisionable (see <see cref="IsProvisionable"/>) and its id must be present in
+        /// <paramref name="permittedIds"/>; everything else is silently skipped (ticket #8).
         /// </summary>
-        public static WorkspaceDefinition SelectFirstProvisionable(IReadOnlyList<WorkspaceDefinition> definitions)
+        public static List<WorkspaceDefinition> SelectVisible(
+            IReadOnlyList<WorkspaceDefinition> definitions,
+            IReadOnlyCollection<Guid> permittedIds)
         {
-            if (definitions == null)
+            var result = new List<WorkspaceDefinition>();
+            if (definitions == null || permittedIds == null)
             {
-                return null;
+                return result;
             }
 
             foreach (var definition in definitions)
             {
-                if (definition != null && definition.IsProvisionable)
+                if (definition != null && definition.IsProvisionable && permittedIds.Contains(definition.Id))
                 {
-                    return definition;
+                    result.Add(definition);
                 }
             }
 
-            return null;
+            return result;
         }
     }
 }
