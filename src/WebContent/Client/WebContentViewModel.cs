@@ -94,6 +94,8 @@ namespace WebContent.Client
         
         private object _workspaceStateChangedReceiver;
 
+        private bool _isClosed;
+
         private bool _isWorkspaceFloating;
         public bool IsWorkspaceFloating
         {
@@ -105,12 +107,21 @@ namespace WebContent.Client
             }
         }
 
+        private BrowserInstance _browser;
         public BrowserInstance Browser
         {
-            get => BrowserManager.GetBrowser(
-                Id,
-                WebContentConfiguration.CreateNavigationUri(Home, Strings.HomeAddress),
-                ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
+            get
+            {
+                if (_browser == null)
+                {
+                    _browser = BrowserManager.GetBrowser(
+                        Id,
+                        WebContentConfiguration.CreateNavigationUri(Home, Strings.HomeAddress),
+                        ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
+                }
+
+                return _browser;
+            }
         } 
 
         private BrowserCommand _backCommand;
@@ -311,6 +322,7 @@ namespace WebContent.Client
         {
             try
             {
+                _isClosed = true;
                 if (_workspaceStateChangedReceiver != null)
                 {
                     EnvironmentManager.Instance.UnRegisterReceiver(_workspaceStateChangedReceiver);
@@ -331,16 +343,25 @@ namespace WebContent.Client
                 var remainingReferences = BrowserManager.ReleaseReference(Id);
                 if (remainingReferences == 0)
                 {
-                    var allowBackground = _viewItemManager?.Settings.AllowBackgroundBrowser ?? false;
-                    var clearOnExit = _viewItemManager?.Settings.ClearBrowsingDataOnExit ?? false;
-                    Browser.Close(clearData: clearOnExit && !allowBackground, disposeWebView: !allowBackground);
-                    if (!allowBackground)
+                    if (BrowserManager.IsTracked(Id))
                     {
-                        // WebView was disposed; stop tracking the shell so the
-                        // shared registry does not grow across long sessions.
-                        BrowserManager.RemoveBrowserTracking(Id);
-                        WebContentViewItemPlugin.BrowsersToDispose.TryRemove(Id, out _);
+                        var allowBackground = _viewItemManager?.Settings.AllowBackgroundBrowser ?? false;
+                        var clearOnExit = _viewItemManager?.Settings.ClearBrowsingDataOnExit ?? false;
+                        if (!allowBackground)
+                        {
+                            Browser.Close(clearData: clearOnExit, disposeWebView: true);
+                            BrowserManager.RemoveBrowserTracking(Id);
+                            WebContentViewItemPlugin.BrowsersToDispose.TryRemove(Id, out _);
+                        }
+                        else
+                        {
+                            Browser.Close(clearData: false, disposeWebView: false);
+                        }
                     }
+                    // else: the browser was already reclaimed (e.g. the owning view item
+                    // was removed while this control held the last reference). Nothing
+                    // left to close or untrack.
+                    _browser = null;
                 }
 
                 IsInitialized = false;
@@ -478,6 +499,11 @@ namespace WebContent.Client
         {
             ExecuteOnUiThread(() =>
             {
+                if (_isClosed)
+                {
+                    return;
+                }
+
                 UpdateTrialState();
                 ApplyWorkspaceState(ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal);
             });

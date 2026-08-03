@@ -38,8 +38,13 @@ namespace WebContent.Client
         public override void Close()
         {
             EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemPlugin), $"Closing plugin. {BrowsersToDispose.Count} browser(s) pending disposal.");
-            foreach (var browser in BrowsersToDispose.Values)
+            foreach (var entry in BrowsersToDispose)
             {
+                if (!BrowsersToDispose.TryRemove(entry.Key, out var browser))
+                {
+                    continue;
+                }
+
                 try
                 {
                     EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemPlugin), $"Clearing browsing data for browser {browser.Id} on plugin close.");

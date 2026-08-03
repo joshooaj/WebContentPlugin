@@ -24,8 +24,16 @@ namespace WebContent.Client
         public override void Close()
         {
             EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Closing ViewItemManager for plugin {Resources.PluginName}.");
+            var instanceId = Settings.InstanceId;
             Settings.PropertyChanged -= WebContentViewItemManager_PropertyChangedEvent;
             Settings.Dispose();
+
+            // The view item position is gone permanently, so its browser can never be
+            // re-attached. Reclaim it so the shared registry does not grow across a long
+            // session of repeated view add/remove cycles.
+            BrowserManager.ReclaimBrowser(instanceId);
+            WebContentViewItemPlugin.BrowsersToDispose.TryRemove(instanceId, out _);
+
             base.Close();
         }
 

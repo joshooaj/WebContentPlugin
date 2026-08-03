@@ -1,14 +1,12 @@
 ﻿using Microsoft.Web.WebView2.Wpf;
 using System;
-using System.Collections.Concurrent;
 using VideoOS.Platform;
 
 namespace WebContent.Client
 {
     public static class BrowserManager
     {
-        private static readonly ConcurrentDictionary<Guid, BrowserInstance> _browsers = new ConcurrentDictionary<Guid, BrowserInstance>();
-        private static readonly ConcurrentDictionary<Guid, int> _browserReferenceCounts = new ConcurrentDictionary<Guid, int>();
+        private static readonly BrowserRegistry<BrowserInstance> _registry = new BrowserRegistry<BrowserInstance>();
 
         public static BrowserInstance GetBrowser(Guid id)
         {
@@ -19,27 +17,7 @@ namespace WebContent.Client
         {
             try
             {
-                if (_browsers.TryGetValue(id, out BrowserInstance b)) return b;
-
-                var instance = new WebView2
-                {
-                    CreationProperties = new CoreWebView2CreationProperties
-                    {
-                        UserDataFolder = BrowserProfileIdentity.GetUserDataFolder(),
-                        ProfileName = isIsolated ? id.ToString() : string.Empty,
-                    },
-                    Source = initialAddress,
-                };
-
-                if (_browsers.TryAdd(id, new BrowserInstance(instance, id)))
-                {
-                    return _browsers[id];
-                }
-                else
-                {
-                    EnvironmentManager.Instance.Log(true, nameof(GetBrowser), $"Failed to add new {nameof(BrowserInstance)} for view item with id {id}.");
-                    instance.Dispose();
-                }
+                return _registry.GetOrCreate(id, guid => CreateBrowser(guid, initialAddress, isIsolated));
             }
             catch (Exception ex)
             {
@@ -48,58 +26,68 @@ namespace WebContent.Client
             return null;
         }
 
+        private static BrowserInstance CreateBrowser(Guid id, Uri initialAddress, bool isIsolated)
+        {
+            var instance = new WebView2
+            {
+                CreationProperties = new CoreWebView2CreationProperties
+                {
+                    UserDataFolder = BrowserProfileIdentity.GetUserDataFolder(),
+                    ProfileName = isIsolated ? id.ToString() : string.Empty,
+                },
+                Source = initialAddress,
+            };
+
+            return new BrowserInstance(instance, id);
+        }
+
+        /// <summary>
+        /// Returns the tracked browser for <paramref name="id"/> without creating a new
+        /// one. Used by re-attach paths that must not resurrect a reclaimed browser.
+        /// </summary>
+        public static bool TryGetBrowser(Guid id, out BrowserInstance browser)
+        {
+            return _registry.TryGet(id, out browser);
+        }
+
+        public static bool IsTracked(Guid id)
+        {
+            return _registry.IsTracked(id);
+        }
+
         public static int AddReference(Guid id)
         {
-            return _browserReferenceCounts.AddOrUpdate(id, 1, (key, count) => count + 1);
+            return _registry.AddReference(id);
         }
 
         public static int ReleaseReference(Guid id)
         {
-            while (true)
-            {
-                if (!_browserReferenceCounts.TryGetValue(id, out var count))
-                {
-                    return 0;
-                }
-
-                if (count <= 1)
-                {
-                    if (_browserReferenceCounts.TryRemove(id, out _))
-                    {
-                        return 0;
-                    }
-
-                    continue;
-                }
-
-                if (_browserReferenceCounts.TryUpdate(id, count - 1, count))
-                {
-                    return count - 1;
-                }
-            }
+            return _registry.ReleaseReference(id, browser => browser?.Dispose());
         }
 
         public static int GetReferenceCount(Guid id)
         {
-            return _browserReferenceCounts.TryGetValue(id, out var count) ? count : 0;
+            return _registry.GetReferenceCount(id);
         }
 
-        public static void DestroyBrowser(BrowserInstance browser)
+        /// <summary>
+        /// Permanently removes a browser from the shared registry, disposing it. If the
+        /// browser is still referenced, removal is deferred until the last reference is
+        /// released. Used when the owning view item is removed so that the registry does
+        /// not grow across a long session.
+        /// </summary>
+        public static void ReclaimBrowser(Guid id)
         {
-            RemoveBrowserTracking(browser.Id);
-            browser.Dispose();
+            _registry.Reclaim(id, browser => browser?.Dispose());
         }
 
         /// <summary>
         /// Removes the tracking entry for a browser without disposing it. Callers are
         /// expected to have already disposed their own WebView via <see cref="BrowserInstance.Close"/>.
-        /// This keeps <see cref="_browsers"/> from growing unboundedly across many
-        /// view navigation and closure cycles in a long-lived session.
         /// </summary>
         public static void RemoveBrowserTracking(Guid id)
         {
-            _browsers.TryRemove(id, out _);
-            _browserReferenceCounts.TryRemove(id, out _);
+            _registry.RemoveTracking(id);
         }
     }
 }

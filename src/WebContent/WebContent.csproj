@@ -78,6 +78,8 @@
     <Compile Include="Client\BrowserManager.cs" />
     <Compile Include="Client\BrowserProfileKey.cs" />
     <Compile Include="Client\BrowserProfileIdentity.cs" />
+    <Compile Include="Client\BrowserRegistry.cs" />
+    <Compile Include="Client\CallbackOwnership.cs" />
     <Compile Include="Client\WebContentViewModel.cs" />
     <Compile Include="Strings.Designer.cs">
       <AutoGen>True</AutoGen>
