@@ -18,5 +18,7 @@
 
   <ItemGroup>
     <Compile Include="..\WebContent\Client\BrowserProfileKey.cs" Link="BrowserProfileKey.cs" />
+    <Compile Include="..\WebContent\Client\BrowserRegistry.cs" Link="BrowserRegistry.cs" />
+    <Compile Include="..\WebContent\Client\CallbackOwnership.cs" Link="CallbackOwnership.cs" />
   </ItemGroup>
 </Project>

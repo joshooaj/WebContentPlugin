@@ -6,6 +6,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Microsoft.Web.WebView2.Wpf;
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.Messaging;
@@ -37,7 +38,7 @@ namespace WebContent.Client
                     Source = _viewModel
                 };
                 _viewModel.Browser.WebView.SetBinding(VisibilityProperty, binding);
-                AddWebViewToPanel();
+                AddWebViewToPanel(_viewModel.Browser.WebView);
             }
         }
         public WebContentUserControl(WebContentViewItemManager viewItemManager)
@@ -92,7 +93,7 @@ namespace WebContent.Client
 
                 if (!Panel.Children.Contains(browser.WebView) || needsRecreation)
                 {
-                    AddWebViewToPanel();
+                    AddWebViewToPanel(browser.WebView);
                 }
                 EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"View item {_viewModel.Id} initialized successfully.");
             }
@@ -102,9 +103,8 @@ namespace WebContent.Client
             }
         }
 
-        private void AddWebViewToPanel()
+        private void AddWebViewToPanel(WebView2 webView)
         {
-            var webView = _viewModel.Browser.WebView;
             if (webView == null)
             {
                 return;
@@ -332,8 +332,9 @@ namespace WebContent.Client
                 return;
             }
 
-            var browser = _viewModel.Browser;
-            if (browser?.WebView == null)
+            // Resolve the tracked browser only. This re-attach path must not resurrect a
+            // browser that was reclaimed after the owning view item was removed.
+            if (!BrowserManager.TryGetBrowser(_viewModel.Id, out var browser) || browser?.WebView == null)
             {
                 return;
             }
@@ -343,7 +344,7 @@ namespace WebContent.Client
                 return;
             }
 
-            AddWebViewToPanel();
+            AddWebViewToPanel(browser.WebView);
         }
     }
 }

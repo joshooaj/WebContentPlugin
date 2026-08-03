@@ -158,6 +158,11 @@ namespace WebContent.Client
 
         private void WebView_CoreWebView2InitializationCompleted(object sender, Microsoft.Web.WebView2.Core.CoreWebView2InitializationCompletedEventArgs e)
         {
+            if (!IsInitialized)
+            {
+                return;
+            }
+
             var webView = WebView;
             if (webView == null)
             {
@@ -181,28 +186,51 @@ namespace WebContent.Client
             webView.CoreWebView2.IsMuted = _isMuted;
         }
 
+        private readonly CallbackOwnership _callbackOwnership = new CallbackOwnership();
         private CancellationTokenSource _cancellationTokenSource;
+
         private void WebView_IsDocumentPlayingAudioChanged(object sender, object e)
         {
             if (!AllowAudioNotifications) return;
             if (WebView?.CoreWebView2 == null) return;
+            if (!IsInitialized) return;
             if (WebView.IsVisible) return;
 
             if (!IsMuted && WebView.CoreWebView2.IsDocumentPlayingAudio)
             {
-                _cancellationTokenSource?.Cancel();
-                _cancellationTokenSource?.Dispose();
+                CancelPendingAudioRemoval();
                 SendAudioPlayingMessage();
             }
             else
             {
-                _cancellationTokenSource = new CancellationTokenSource();
-                Task.Delay(TimeSpan.FromSeconds(10), _cancellationTokenSource.Token).ContinueWith(task =>
-                {
-                    if (task.IsCanceled) return;
-                    RemoveAudioPlayingMessage();
-                });
+                ScheduleAudioRemoval();
             }
+        }
+
+        private void CancelPendingAudioRemoval()
+        {
+            _cancellationTokenSource?.Cancel();
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
+        }
+
+        private void ScheduleAudioRemoval()
+        {
+            // Capture ownership so a removal scheduled before the browser is closed is
+            // ignored after the browser's lifecycle has ended (ticket #15).
+            var ownershipToken = _callbackOwnership.Capture();
+            _cancellationTokenSource?.Cancel();
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = _cancellationTokenSource.Token;
+
+            Task.Delay(TimeSpan.FromSeconds(10), cancellationToken).ContinueWith(task =>
+            {
+                if (task.IsCanceled) return;
+                if (!_callbackOwnership.IsCurrent(ownershipToken)) return;
+                if (WebView == null || !IsInitialized) return;
+                RemoveAudioPlayingMessage();
+            });
         }
 
         private void SendAudioPlayingMessage()
@@ -281,9 +309,8 @@ namespace WebContent.Client
             {
                 try
                 {
-                    _cancellationTokenSource?.Cancel();
-                    _cancellationTokenSource?.Dispose();
-                    _cancellationTokenSource = null;
+                    _callbackOwnership.End();
+                    CancelPendingAudioRemoval();
 
                     if (_audioNotificationClickReceiver != null)
                     {
