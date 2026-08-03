@@ -96,7 +96,12 @@ namespace WebContent
 
         internal static string NormalizeHomeAddress(string address)
         {
-            return NormalizeAddressOrDefault(address, Strings.HomeAddress);
+            return NormalizeHomeAddress(address, Strings.HomeAddress);
+        }
+
+        internal static string NormalizeHomeAddress(string address, string fallbackAddress)
+        {
+            return NormalizeAddressOrDefault(address, fallbackAddress);
         }
 
         internal static string NormalizeOptionalAddress(string address)
