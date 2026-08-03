@@ -198,7 +198,7 @@ namespace WebContent.Admin
                 var settings = config.Items[0].Settings;
                 settings.HideToolbar = hideToolbar;
                 settings.HideAddress = hideAddress;
-                settings.ZoomLevel = _userControl?.ZoomLevel ?? WebContentConfiguration.DefaultZoomLevel;
+                settings.ZoomLevel = WebContentConfiguration.ClampZoomLevel(_userControl?.ZoomLevel ?? WebContentConfiguration.DefaultZoomLevel);
                 settings.RememberLastAddress = _userControl?.RememberLastAddress ?? false;
                 settings.ClearBrowsingDataOnExit = _userControl?.ClearBrowsingDataOnExit ?? false;
                 settings.AllowBackgroundBrowser = _userControl?.AllowBackgroundBrowser ?? true;
