@@ -7,13 +7,13 @@
              xmlns:local="clr-namespace:WebContent.Client"
              mc:Ignorable="d" 
              d:DesignHeight="450" d:DesignWidth="800">
-    <UserControl.DataContext>
-        <local:WebContentSettings />
-    </UserControl.DataContext>
-    <Grid>
-        <StackPanel>
-            <TextBlock Margin="5" FontWeight="Bold" Text="{Binding HomeLabel, Mode=OneTime}"/>
-            <TextBox Margin="5" Text="{Binding HomeAddress, Mode=TwoWay}"/>
+     <UserControl.DataContext>
+         <local:WebContentSettings />
+     </UserControl.DataContext>
+     <Grid>
+         <StackPanel>
+             <TextBlock Margin="5" FontWeight="Bold" Text="{Binding HomeLabel, Mode=OneTime}"/>
+             <TextBox Margin="5" Text="{Binding HomeAddress, Mode=TwoWay}"/>
 
             <CheckBox Margin="5" IsChecked="{Binding RememberLastAddress, Mode=TwoWay}"
                       Content="{Binding RememberLastAddressLabel, Mode=OneTime}" FontWeight="Bold"

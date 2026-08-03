@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using VideoOS.Platform;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.UI.Controls;
 
@@ -23,7 +24,7 @@ namespace WebContent.Client
             {
                 if (_iconSource == null)
                 {
-                    _iconSource = new VideoOSIconBitmapSource { BitmapSource = Resources.WebContentIcon.ToBitmapSource() };
+                    _iconSource = new VideoOSIconBitmapSource { BitmapSource = ResourceLoader.WebContentIconSource };
                 }
                 return _iconSource;
             }
@@ -31,19 +32,29 @@ namespace WebContent.Client
 
         public override void Init()
         {
-            // setup
+            EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemPlugin), $"Initializing plugin {Name} (Id: {Id}).");
         }
 
         public override void Close()
         {
+            EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemPlugin), $"Closing plugin. {BrowsersToDispose.Count} browser(s) pending disposal.");
             foreach (var browser in BrowsersToDispose.Values)
             {
-                browser.ClearBrowsingData();
+                try
+                {
+                    EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemPlugin), $"Clearing browsing data for browser {browser.Id} on plugin close.");
+                    browser.ClearBrowsingData();
+                }
+                catch (Exception ex)
+                {
+                    EnvironmentManager.Instance.ExceptionHandler($"{nameof(WebContentViewItemPlugin)}.Close", ex);
+                }
             }
         }
 
         public override ViewItemManager GenerateViewItemManager()
         {
+            EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemPlugin), "Generating ViewItemManager.");
             return new WebContentViewItemManager();
         }
     }

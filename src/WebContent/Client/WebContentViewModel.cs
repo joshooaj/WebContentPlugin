@@ -1,12 +1,12 @@
 ﻿using Microsoft.Web.WebView2.Wpf;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using VideoOS.Platform;
 using VideoOS.Platform.Messaging;
+using WebContent;
 using WebContent.Admin;
 
 namespace WebContent.Client
@@ -14,8 +14,6 @@ namespace WebContent.Client
 
     public class WebContentViewModel : INotifyPropertyChanged, IDisposable
     {
-        private readonly static Dictionary<Guid, WebView2> Browsers = new Dictionary<Guid, WebView2>();
-        
         public event PropertyChangedEventHandler PropertyChanged;
 
         #region Properties
@@ -96,9 +94,23 @@ namespace WebContent.Client
         
         private object _workspaceStateChangedReceiver;
 
+        private bool _isWorkspaceFloating;
+        public bool IsWorkspaceFloating
+        {
+            get => _isWorkspaceFloating;
+            set
+            {
+                _isWorkspaceFloating = value;
+                OnPropertyChanged();
+            }
+        }
+
         public BrowserInstance Browser
         {
-            get => BrowserManager.GetBrowser(Id, new Uri(Home), ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
+            get => BrowserManager.GetBrowser(
+                Id,
+                WebContentConfiguration.CreateNavigationUri(Home, Strings.HomeAddress),
+                ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
         } 
 
         private BrowserCommand _backCommand;
@@ -196,31 +208,37 @@ namespace WebContent.Client
 
         public void Init()
         {
+            var browserReferenceAdded = false;
             try
             {
                 if (IsInitialized) return;
 
+                BrowserManager.AddReference(Id);
+                browserReferenceAdded = true;
+
+                EnsureCommandsInitialized();
                 ApplyWorkspaceState(ClientControl.Instance.WorkSpaceState);
                 _viewItemManager.PropertyChangedEvent += ViewItemManager_PropertyChangedEvent;
                 _viewItemManager.ClearBrowsingDataRequest += ClearBrowsingDataRequestHandler;
                 _workspaceStateChangedReceiver = EnvironmentManager.Instance.RegisterReceiver(WorkspaceStateChangeHandler, new MessageIdFilter(MessageId.SmartClient.WorkSpaceStateChangedIndication));
+                SiteLicenseHandler.LicenseActivated += SiteLicenseHandler_LicenseActivated;
 
-                var homeAddress = _viewItemManager.Settings.RememberLastAddress && !string.IsNullOrWhiteSpace(_viewItemManager.Settings.LastAddress) ? _viewItemManager.Settings.LastAddress : Home;
                 Browser.AllowDevTools = ViewItemManager.Settings.EnableDevTools;
                 Browser.AllowAudioNotifications = ViewItemManager.Settings.AllowAudioNotifications;
                 Browser.IsMuted = ViewItemManager.Settings.MuteAudio;
                 Browser.PropertyChanged += Browser_PropertyChanged;
                 try
                 {
-                    TrialText = $"Trial expires on {SiteLicenseHandler.Expires.ToLocalTime().Date:d}";
-                    if (SiteLicenseHandler.IsExpired)
-                    {
-                        TrialText = TrialText.Replace("expires", "expired");
-                    }
+                    UpdateTrialState();
 
                     if (!Browser.IsInitialized)
                     {
                         Browser.Initialize();
+                    }
+
+                    if (ClientControl.Instance.WorkSpaceState == WorkSpaceState.Normal)
+                    {
+                        RestoreAddressIfNeeded();
                     }
 
                     if (_viewItemManager.Settings.ClearBrowsingDataOnExit)
@@ -234,7 +252,6 @@ namespace WebContent.Client
                     _reloadCommand.Init();
                     _printCommand.Init();
                     _homeCommand.Init();
-                    Application.Current?.Dispatcher.InvokeAsync(async () => await Browser.WebView.EnsureCoreWebView2Async()).Wait();
                     
                     // Can't set this here because the damn corewebview2 isn't available yet
                     // Browser.WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
@@ -248,6 +265,12 @@ namespace WebContent.Client
             }
             catch (Exception ex)
             {
+                SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
+                if (browserReferenceAdded)
+                {
+                    BrowserManager.ReleaseReference(Id);
+                }
+
                 var location = nameof(WebContentViewModel) + ".Init()";
                 EnvironmentManager.Instance.Log(true, location, $"{ex.Message}\r\n{ex.StackTrace}");
                 EnvironmentManager.Instance.ExceptionHandler(location, ex);
@@ -268,14 +291,15 @@ namespace WebContent.Client
 
         private object WorkspaceStateChangeHandler(Message message, FQID destination, FQID sender)
         {
-            if (message.Data is WorkSpaceState state) {
+            if (message.Data is WorkSpaceState state)
+            {
+                ApplyWorkspaceState(state);
                 if (state == WorkSpaceState.Normal)
                 {
-                    // Transitioned from setup to Normal - navigate to home address
-                    Browser.Address = Home;
+                    IsWorkspaceFloating = false;
+                    RestoreAddressIfNeeded();
                 }
-                ApplyWorkspaceState(state);
-            };
+            }
             return null;
         }
 
@@ -287,18 +311,39 @@ namespace WebContent.Client
         {
             try
             {
-                EnvironmentManager.Instance.UnRegisterReceiver(_workspaceStateChangedReceiver);
-                _viewItemManager.PropertyChangedEvent -= ViewItemManager_PropertyChangedEvent;
-                _backCommand.Dispose();
-                _forwardCommand.Dispose();
-                _reloadCommand.Dispose();
-                _printCommand.Dispose();
-                _homeCommand.Dispose();
-
-                if (!_viewItemManager?.Settings.AllowBackgroundBrowser ?? false)
+                if (_workspaceStateChangedReceiver != null)
                 {
-                    BrowserManager.DestroyBrowser(Browser);
+                    EnvironmentManager.Instance.UnRegisterReceiver(_workspaceStateChangedReceiver);
+                    _workspaceStateChangedReceiver = null;
                 }
+
+                _viewItemManager.PropertyChangedEvent -= ViewItemManager_PropertyChangedEvent;
+                _viewItemManager.ClearBrowsingDataRequest -= ClearBrowsingDataRequestHandler;
+                SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
+                Browser.PropertyChanged -= Browser_PropertyChanged;
+
+                _backCommand?.Dispose();
+                _forwardCommand?.Dispose();
+                _reloadCommand?.Dispose();
+                _printCommand?.Dispose();
+                _homeCommand?.Dispose();
+
+                var remainingReferences = BrowserManager.ReleaseReference(Id);
+                if (remainingReferences == 0)
+                {
+                    var allowBackground = _viewItemManager?.Settings.AllowBackgroundBrowser ?? false;
+                    var clearOnExit = _viewItemManager?.Settings.ClearBrowsingDataOnExit ?? false;
+                    Browser.Close(clearData: clearOnExit && !allowBackground, disposeWebView: !allowBackground);
+                    if (!allowBackground)
+                    {
+                        // WebView was disposed; stop tracking the shell so the
+                        // shared registry does not grow across long sessions.
+                        BrowserManager.RemoveBrowserTracking(Id);
+                        WebContentViewItemPlugin.BrowsersToDispose.TryRemove(Id, out _);
+                    }
+                }
+
+                IsInitialized = false;
             }
             catch (Exception ex)
             {
@@ -318,6 +363,67 @@ namespace WebContent.Client
 
         #region Private methods
 
+        private void EnsureCommandsInitialized()
+        {
+            _ = BackCommand;
+            _ = ForwardCommand;
+            _ = ReloadCommand;
+            _ = PrintCommand;
+            _ = HomeCommand;
+        }
+
+        private void RestoreAddressIfNeeded()
+        {
+            var restoreAddress = GetRestoreAddress();
+            if (string.IsNullOrWhiteSpace(restoreAddress))
+            {
+                restoreAddress = Strings.HomeAddress;
+            }
+
+            var currentAddress = Browser.Address;
+
+            if (string.IsNullOrWhiteSpace(currentAddress) || IsSameAddress(currentAddress, Home))
+            {
+                Browser.Address = restoreAddress;
+            }
+        }
+
+        private string GetRestoreAddress()
+        {
+            if (_viewItemManager?.Settings.RememberLastAddress == true && !string.IsNullOrWhiteSpace(_viewItemManager.Settings.LastAddress))
+            {
+                return _viewItemManager.Settings.LastAddress;
+            }
+
+            return Home;
+        }
+
+        private static bool IsSameAddress(string first, string second)
+        {
+            return string.Equals(NormalizeAddress(first), NormalizeAddress(second), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeAddress(string address)
+        {
+            if (string.IsNullOrWhiteSpace(address))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = address.Trim();
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absoluteUri))
+            {
+                return absoluteUri.AbsoluteUri.TrimEnd('/');
+            }
+
+            if (Uri.TryCreate($"https://{trimmed}", UriKind.Absolute, out var normalizedUri))
+            {
+                return normalizedUri.AbsoluteUri.TrimEnd('/');
+            }
+
+            return trimmed.TrimEnd('/');
+        }
+
         private void ApplyWorkspaceState(WorkSpaceState state)
         {
             OnPropertyChanged(nameof(IsAddressEnabled));
@@ -326,22 +432,55 @@ namespace WebContent.Client
                 case WorkSpaceState.Normal:
                     ToolbarVisibility = _viewItemManager.Settings.HideToolbar ? Visibility.Collapsed : Visibility.Visible;
                     BrowserVisibility = Visibility.Visible;
-                    _backCommand.Enabled = true;
-                    _forwardCommand.Enabled = true;
-                    _homeCommand.Enabled = true;
-                    _printCommand.Enabled = true;
-                    _reloadCommand.Enabled = true;
+                    if (_backCommand != null) _backCommand.Enabled = true;
+                    if (_forwardCommand != null) _forwardCommand.Enabled = true;
+                    if (_homeCommand != null) _homeCommand.Enabled = true;
+                    if (_printCommand != null) _printCommand.Enabled = true;
+                    if (_reloadCommand != null) _reloadCommand.Enabled = true;
                     break;
                 case WorkSpaceState.Setup:
                     ToolbarVisibility = Visibility.Visible;
                     BrowserVisibility = Visibility.Hidden;
-                    _backCommand.Enabled = false;
-                    _forwardCommand.Enabled = false;
-                    _homeCommand.Enabled = false;
-                    _printCommand.Enabled = false;
-                    _reloadCommand.Enabled = false;
+                    if (_backCommand != null) _backCommand.Enabled = false;
+                    if (_forwardCommand != null) _forwardCommand.Enabled = false;
+                    if (_homeCommand != null) _homeCommand.Enabled = false;
+                    if (_printCommand != null) _printCommand.Enabled = false;
+                    if (_reloadCommand != null) _reloadCommand.Enabled = false;
                     break;
             }
+        }
+
+        private void UpdateTrialState()
+        {
+            var trialText = $"Trial expires on {SiteLicenseHandler.Expires.ToLocalTime().Date:d}";
+            if (SiteLicenseHandler.IsExpired)
+            {
+                trialText = trialText.Replace("expires", "expired");
+            }
+
+            TrialText = trialText;
+            OnPropertyChanged(nameof(TrialVisibility));
+        }
+
+        private void ExecuteOnUiThread(Action action)
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            dispatcher.BeginInvoke(action);
+        }
+
+        private void SiteLicenseHandler_LicenseActivated(object sender, EventArgs e)
+        {
+            ExecuteOnUiThread(() =>
+            {
+                UpdateTrialState();
+                ApplyWorkspaceState(ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal);
+            });
         }
 
         private void ReloadProperties()
@@ -354,7 +493,7 @@ namespace WebContent.Client
             Browser.AllowAudioNotifications = ViewItemManager.Settings.AllowAudioNotifications;
             Browser.IsMuted = ViewItemManager.Settings.MuteAudio;
 
-            if (Browser.WebView.CoreWebView2 != null)
+            if (Browser.WebView?.CoreWebView2 != null)
             {
                 Browser.WebView.CoreWebView2.Settings.AreDevToolsEnabled = ViewItemManager.Settings.EnableDevTools;
             }

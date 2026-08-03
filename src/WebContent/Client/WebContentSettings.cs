@@ -1,16 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
+using WebContent;
 using WebContent.Admin;
 
 namespace WebContent.Client
 {
-    public class WebContentSettings : INotifyPropertyChanged
+    public class WebContentSettings : INotifyPropertyChanged, IDisposable
     {
         public string HomeLabel => $"{Strings.HomeLabel}:";
         public string RememberLastAddressLabel => Strings.RememberLastAddressLabel;
@@ -36,144 +33,160 @@ namespace WebContent.Client
         public string MuteAudioToolTip => Strings.MuteAudioToolTip;
 
         public bool IsHideAddressEnabled => !HideToolbar;
+
         public string HomeAddress
         {
-            get => _viewItemManager?.GetProperty(nameof(HomeAddress)) ?? Strings.HomeAddress;
+            get => WebContentConfiguration.NormalizeHomeAddress(
+                WebContentConfiguration.GetString(GetProperty, Strings.HomeAddress, nameof(HomeAddress), "Address"));
             set
             {
-                if (HomeAddress == value) return;
-                _viewItemManager?.SetProperty(nameof(HomeAddress), value);
+                var normalizedAddress = WebContentConfiguration.NormalizeHomeAddress(value);
+                if (string.Equals(HomeAddress, normalizedAddress, StringComparison.OrdinalIgnoreCase)) return;
+                SetProperty(nameof(HomeAddress), normalizedAddress);
+                SetProperty("Address", normalizedAddress);
                 OnPropertyChanged();
             }
         }
 
         public bool RememberLastAddress
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(RememberLastAddress)) ?? false.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(RememberLastAddress));
             set
             {
                 if (RememberLastAddress == value) return;
-                _viewItemManager?.SetProperty(nameof(RememberLastAddress), value.ToString());
+                SetProperty(nameof(RememberLastAddress), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
             }
         }
 
         public bool HideToolbar
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(HideToolbar)) ?? false.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(HideToolbar));
             set
             {
                 if (HideToolbar == value) return;
-                _viewItemManager?.SetProperty(nameof(HideToolbar), value.ToString());
+                SetProperty(nameof(HideToolbar), WebContentConfiguration.FormatBoolean(value));
+                if (value && HideAddress)
+                {
+                    SetProperty(nameof(HideAddress), WebContentConfiguration.FormatBoolean(false));
+                    OnPropertyChanged(nameof(HideAddress));
+                }
+
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(IsHideAddressEnabled));
             }
         }
 
         public bool HideAddress
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(HideAddress)) ?? false.ToString());
+            get => !HideToolbar && WebContentConfiguration.GetBoolean(GetProperty, false, nameof(HideAddress));
             set
             {
-                if (HideAddress == value) return;
-                _viewItemManager?.SetProperty(nameof(HideAddress), value.ToString());
+                var normalizedValue = HideToolbar ? false : value;
+                if (HideAddress == normalizedValue) return;
+                SetProperty(nameof(HideAddress), WebContentConfiguration.FormatBoolean(normalizedValue));
                 OnPropertyChanged();
             }
         }
 
         public double ZoomLevel
         {
-            get => double.Parse(_viewItemManager?.GetProperty(nameof(ZoomLevel)) ?? "100");
+            get => WebContentConfiguration.GetZoomLevel(GetProperty, WebContentConfiguration.DefaultZoomLevel, nameof(ZoomLevel));
             set
             {
-                if (ZoomLevel == value) return;
-                _viewItemManager?.SetProperty(nameof(ZoomLevel), value.ToString());
+                var normalizedValue = WebContentConfiguration.ClampZoomLevel(value);
+                if (Math.Abs(ZoomLevel - normalizedValue) < double.Epsilon) return;
+                SetProperty(nameof(ZoomLevel), WebContentConfiguration.FormatZoomLevel(normalizedValue));
                 OnPropertyChanged();
             }
         }
 
         public string LastAddress
         {
-            get => _viewItemManager?.GetProperty(nameof(LastAddress));
+            get => WebContentConfiguration.NormalizeOptionalAddress(
+                WebContentConfiguration.GetString(GetProperty, string.Empty, nameof(LastAddress)));
             set
             {
-                if (LastAddress == value) return;
-                _viewItemManager?.SetProperty(nameof(LastAddress), value);
+                var normalizedAddress = WebContentConfiguration.NormalizeOptionalAddress(value);
+                if (string.Equals(LastAddress, normalizedAddress, StringComparison.OrdinalIgnoreCase)) return;
+                SetProperty(nameof(LastAddress), normalizedAddress);
                 OnPropertyChanged();
             }
         }
 
         public bool ClearBrowsingDataOnExit
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(ClearBrowsingDataOnExit)) ?? false.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(ClearBrowsingDataOnExit));
             set
             {
                 if (ClearBrowsingDataOnExit == value) return;
-                _viewItemManager?.SetProperty(nameof(ClearBrowsingDataOnExit), value.ToString());
+                SetProperty(nameof(ClearBrowsingDataOnExit), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
             }
         }
 
         public bool AllowBackgroundBrowser
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(AllowBackgroundBrowser)) ?? true.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, true, nameof(AllowBackgroundBrowser));
             set
             {
                 if (AllowBackgroundBrowser == value) return;
-                _viewItemManager?.SetProperty(nameof(AllowBackgroundBrowser), value.ToString());
+                SetProperty(nameof(AllowBackgroundBrowser), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
             }
         }
 
         public bool AllowAudioNotifications
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(AllowAudioNotifications)) ?? true.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, true, nameof(AllowAudioNotifications));
             set
             {
                 if (AllowAudioNotifications == value) return;
-                _viewItemManager?.SetProperty(nameof(AllowAudioNotifications), value.ToString());
+                SetProperty(nameof(AllowAudioNotifications), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
             }
         }
 
         public bool MuteAudio
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(MuteAudio)) ?? false.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(MuteAudio));
             set
             {
                 if (MuteAudio == value) return;
-                _viewItemManager?.SetProperty(nameof(MuteAudio), value.ToString());
+                SetProperty(nameof(MuteAudio), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
             }
         }
 
         public bool IsolateBrowserInstances
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(IsolateBrowserInstances)) ?? false.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(IsolateBrowserInstances));
             set
             {
                 if (IsolateBrowserInstances == value) return;
-                _viewItemManager?.SetProperty(nameof(IsolateBrowserInstances), value.ToString());
+                SetProperty(nameof(IsolateBrowserInstances), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
             }
         }
 
         public bool EnableDevTools
         {
-            get => bool.Parse(_viewItemManager?.GetProperty(nameof(EnableDevTools)) ?? false.ToString());
+            get => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(EnableDevTools));
             set
             {
                 if (EnableDevTools == value) return;
-                _viewItemManager?.SetProperty(nameof(EnableDevTools), value.ToString());
+                SetProperty(nameof(EnableDevTools), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
             }
         }
 
-        public Guid InstanceId {
-            get => Guid.TryParse(_viewItemManager?.GetProperty(nameof(InstanceId)) ?? string.Empty, out var id) ? id : Guid.Empty;
+        public Guid InstanceId
+        {
+            get => WebContentConfiguration.GetGuid(GetProperty, Guid.Empty, nameof(InstanceId));
             set
             {
                 if (InstanceId == value) return;
-                _viewItemManager?.SetProperty(nameof(InstanceId), value.ToString());
+                SetProperty(nameof(InstanceId), value.ToString());
                 OnPropertyChanged();
             }
         }
@@ -184,6 +197,7 @@ namespace WebContent.Client
         }
 
         private WebContentViewItemManager _viewItemManager;
+        private bool _disposed;
 
         public WebContentSettings()
         {
@@ -193,6 +207,7 @@ namespace WebContent.Client
         public WebContentSettings(WebContentViewItemManager viewItemManager)
         {
             _viewItemManager = viewItemManager;
+            SiteLicenseHandler.LicenseActivated += SiteLicenseHandler_LicenseActivated;
             if (InstanceId == Guid.Empty) InstanceId = Guid.NewGuid();
         }
 
@@ -202,16 +217,30 @@ namespace WebContent.Client
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
 
-        //protected bool SetProperty<T>(ref T field, T newValue, [CallerMemberName] string propertyName = null)
-        //{
-        //    if (!Equals(field, newValue))
-        //    {
-        //        field = newValue;
-        //        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        //        return true;
-        //    }
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
 
-        //    return false;
-        //}
+            SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
+            _disposed = true;
+        }
+
+        private string GetProperty(string key)
+        {
+            return _viewItemManager?.GetProperty(key);
+        }
+
+        private void SetProperty(string key, string value)
+        {
+            _viewItemManager?.SetProperty(key, value);
+        }
+
+        private void SiteLicenseHandler_LicenseActivated(object sender, EventArgs e)
+        {
+            OnPropertyChanged(nameof(IsLicenseActivated));
+        }
     }
 }

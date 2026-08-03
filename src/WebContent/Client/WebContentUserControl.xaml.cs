@@ -1,10 +1,15 @@
-﻿using System.ComponentModel;
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.Messaging;
+using WebContent;
 
 namespace WebContent.Client
 {
@@ -13,8 +18,13 @@ namespace WebContent.Client
     /// </summary>
     public partial class WebContentUserControl : ViewItemWpfUserControl
     {
-        private WebContentViewModel _viewModel;
+        private static readonly object ActiveControlsSync = new object();
+        private static readonly Dictionary<Guid, List<WeakReference<WebContentUserControl>>> ActiveControlsByBrowserId = new Dictionary<Guid, List<WeakReference<WebContentUserControl>>>();
 
+        private WebContentViewModel _viewModel;
+        private bool _isClosed;
+        public override bool ShowToolbar => false;
+        public override bool Selectable => false;
         public WebContentUserControl()
         {
             InitializeComponent();
@@ -27,7 +37,7 @@ namespace WebContent.Client
                     Source = _viewModel
                 };
                 _viewModel.Browser.WebView.SetBinding(VisibilityProperty, binding);
-                Panel.Children.Add(_viewModel.Browser.WebView);                
+                AddWebViewToPanel();
             }
         }
         public WebContentUserControl(WebContentViewItemManager viewItemManager)
@@ -41,26 +51,112 @@ namespace WebContent.Client
 
         public override void Init()
         {
-            _viewModel.Init();
-            if (Panel.Children.Count == 0)
+            EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Initializing view item {_viewModel.Id}.");
+            try
             {
+                _isClosed = false;
+                var browser = _viewModel.Browser;
+                if (browser == null)
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Failed to resolve browser for view item {_viewModel.Id}.");
+                    return;
+                }
+
+                var needsRecreation = browser.NeedsRecreation;
+                if (needsRecreation)
+                {
+                    var address = _viewModel.ViewItemManager.Settings.RememberLastAddress && !string.IsNullOrWhiteSpace(_viewModel.ViewItemManager.Settings.LastAddress)
+                        ? _viewModel.ViewItemManager.Settings.LastAddress
+                        : _viewModel.Home;
+
+                    EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Browser needs recreation for {_viewModel.Id}. Address: {address}");
+                    browser.RecreateWebView(
+                        WebContentConfiguration.CreateNavigationUri(address, _viewModel.Home),
+                        _viewModel.ViewItemManager.Settings.IsolateBrowserInstances);
+                }
+
+                _viewModel.Init();
+                RegisterActiveControl(browser.Id);
+
+                if (browser.WebView == null)
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Browser {_viewModel.Id} does not have an available WebView after initialization.");
+                    return;
+                }
+                
                 var binding = new Binding("BrowserVisibility")
                 {
                     Source = _viewModel
                 };
-                _viewModel.Browser.WebView.SetBinding(VisibilityProperty, binding);
-                Panel.Children.Add(_viewModel.Browser.WebView);
+                browser.WebView.SetBinding(VisibilityProperty, binding);
+
+                if (!Panel.Children.Contains(browser.WebView) || needsRecreation)
+                {
+                    AddWebViewToPanel();
+                }
+                EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"View item {_viewModel.Id} initialized successfully.");
             }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler(nameof(Init), ex);
+            }
+        }
+
+        private void AddWebViewToPanel()
+        {
+            var webView = _viewModel.Browser.WebView;
+            if (webView == null)
+            {
+                return;
+            }
+
+            EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Adding WebView to panel for browser {_viewModel.Browser.Id}.");
+            var parent = System.Windows.Media.VisualTreeHelper.GetParent(webView);
+            if (parent != null)
+            {
+                if (parent is System.Windows.Controls.Panel parentPanel)
+                {
+                    parentPanel.Children.Remove(webView);
+                }
+                else if (parent is System.Windows.Controls.ContentControl contentControl)
+                {
+                    contentControl.Content = null;
+                }
+            }
+            Panel.Children.Add(webView);
         }
 
         public override void Close()
         {
-            if (_viewModel.ViewItemManager?.Settings.RememberLastAddress ?? false)
+            EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Closing view item {_viewModel?.Id}.");
+            try
             {
-                _viewModel.ViewItemManager.Settings.LastAddress = _viewModel.Address;
+                _isClosed = true;
+                var browser = _viewModel?.Browser;
+                var browserId = browser?.Id ?? Guid.Empty;
+                var allowBackground = _viewModel?.ViewItemManager?.Settings.AllowBackgroundBrowser ?? false;
+                var webView = browser?.WebView;
+                var shouldReattach = allowBackground && webView != null;
+                var isWebViewOwnedByThisControl = webView != null && ReferenceEquals(VisualTreeHelper.GetParent(webView), Panel);
+
+                if (_viewModel.ViewItemManager?.Settings.RememberLastAddress ?? false)
+                {
+                    _viewModel.ViewItemManager.Settings.LastAddress = _viewModel.Address;
+                }
+
+                UnregisterActiveControl(browserId);
+                _viewModel.Dispose();
+                Panel.Children.Clear();
+
+                if (shouldReattach && isWebViewOwnedByThisControl)
+                {
+                    ReattachBrowserToActiveControl(browserId);
+                }
             }
-            _viewModel.Dispose();
-            Panel.Children.Clear();
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler(nameof(Close), ex);
+            }
         }
 
         private void WebContentUserControl_PreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -129,6 +225,125 @@ namespace WebContent.Client
             {
                 FireDoubleClickEvent();
             }
+        }
+
+        private void RegisterActiveControl(Guid browserId)
+        {
+            if (browserId == Guid.Empty)
+            {
+                return;
+            }
+
+            lock (ActiveControlsSync)
+            {
+                if (!ActiveControlsByBrowserId.TryGetValue(browserId, out var controls))
+                {
+                    controls = new List<WeakReference<WebContentUserControl>>();
+                    ActiveControlsByBrowserId[browserId] = controls;
+                }
+
+                CleanupActiveControls(controls, null);
+                controls.Add(new WeakReference<WebContentUserControl>(this));
+            }
+        }
+
+        private void UnregisterActiveControl(Guid browserId)
+        {
+            if (browserId == Guid.Empty)
+            {
+                return;
+            }
+
+            lock (ActiveControlsSync)
+            {
+                if (!ActiveControlsByBrowserId.TryGetValue(browserId, out var controls))
+                {
+                    return;
+                }
+
+                CleanupActiveControls(controls, this);
+
+                if (controls.Count == 0)
+                {
+                    ActiveControlsByBrowserId.Remove(browserId);
+                }
+            }
+        }
+
+        private void ReattachBrowserToActiveControl(Guid browserId)
+        {
+            var targetControl = GetReattachTarget(browserId);
+            if (targetControl == null)
+            {
+                return;
+            }
+
+            targetControl.Dispatcher.BeginInvoke(new Action(targetControl.AddWebViewToPanelIfNeeded), DispatcherPriority.Background);
+        }
+
+        private static void CleanupActiveControls(List<WeakReference<WebContentUserControl>> controls, WebContentUserControl controlToRemove)
+        {
+            for (var i = controls.Count - 1; i >= 0; i--)
+            {
+                if (!controls[i].TryGetTarget(out var control) || control == null || control._isClosed || ReferenceEquals(control, controlToRemove))
+                {
+                    controls.RemoveAt(i);
+                }
+            }
+        }
+
+        private WebContentUserControl GetReattachTarget(Guid browserId)
+        {
+            if (browserId == Guid.Empty)
+            {
+                return null;
+            }
+
+            lock (ActiveControlsSync)
+            {
+                if (!ActiveControlsByBrowserId.TryGetValue(browserId, out var controls))
+                {
+                    return null;
+                }
+
+                CleanupActiveControls(controls, this);
+
+                for (var i = controls.Count - 1; i >= 0; i--)
+                {
+                    if (controls[i].TryGetTarget(out var control) && control != null && !control._isClosed)
+                    {
+                        return control;
+                    }
+                }
+
+                if (controls.Count == 0)
+                {
+                    ActiveControlsByBrowserId.Remove(browserId);
+                }
+
+                return null;
+            }
+        }
+
+        private void AddWebViewToPanelIfNeeded()
+        {
+            if (_isClosed || _viewModel == null)
+            {
+                return;
+            }
+
+            var browser = _viewModel.Browser;
+            if (browser?.WebView == null)
+            {
+                return;
+            }
+
+            if (Panel.Children.Contains(browser.WebView))
+            {
+                return;
+            }
+
+            AddWebViewToPanel();
         }
     }
 }
