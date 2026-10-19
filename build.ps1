@@ -12,7 +12,7 @@ $null = New-Item $PSScriptRoot\output, .cache\ -ItemType Directory -Force
 Get-ChildItem $PSScriptRoot\output | Remove-Item -Recurse -Force
 
 # Download WebView2 runtime
-$webview2Url = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/c638b5d5-4b2f-4845-baab-c9f4fd6c58ab/MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+$webview2Url = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/35871e19-d11b-432d-9d1e-7be0ff286540/MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
 $webviewDestination = [io.path]::Combine($PSScriptRoot, '.cache', 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe')
 if (!(Test-Path $webviewDestination -PathType Leaf)) {
     $ProgressPreference = 'SilentlyContinue'
