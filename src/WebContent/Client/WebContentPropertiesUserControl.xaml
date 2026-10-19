@@ -64,7 +64,6 @@
                     IsSnapToTickEnabled="True"/>
             </DockPanel>
             <Button Margin="5" Content="{Binding ClearBrowsingDataNowLabel}" Click="ClearBrowsingDataButton_Click"/>
-            <Button Margin="5" Content="{Binding PurchaseLicenseLabel}" Click="PurchaseLicense_Click" Visibility="{Binding IsLicenseActivated }"/>
         </StackPanel>
     </Grid>
 </client:PropertiesWpfUserControl>

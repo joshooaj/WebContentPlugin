@@ -1,5 +1,4 @@
 ﻿using System.ComponentModel;
-using System.Diagnostics;
 using VideoOS.Platform.Client;
 
 namespace WebContent.Client
@@ -26,11 +25,6 @@ namespace WebContent.Client
         private void ClearBrowsingDataButton_Click(object sender, System.Windows.RoutedEventArgs e)
         {
             _viewItemManager.ClearBrowsingData();
-        }
-
-        private void PurchaseLicense_Click(object sender, System.Windows.RoutedEventArgs e)
-        {
-            Process.Start(Strings.PurchaseLicenseUrl);
         }
     }
 }

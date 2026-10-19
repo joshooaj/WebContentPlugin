@@ -24,7 +24,6 @@ namespace WebContent.Admin
         {
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), "Initializing WorkspaceItemManager.");
             EnvironmentManager.Instance.EnableConfigurationChangedService = true;
-            SiteLicenseHandler.Init();
         }
 
         public override void Close()
@@ -35,8 +34,6 @@ namespace WebContent.Admin
                 EnvironmentManager.Instance.UnRegisterReceiver(_messageRegistrationObject);
                 _messageRegistrationObject = null;
             }
-
-            SiteLicenseHandler.Close();
         }
 
         private void RefreshTreeView()

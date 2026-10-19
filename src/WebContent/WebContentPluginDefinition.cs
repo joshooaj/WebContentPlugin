@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Threading;
@@ -8,7 +7,6 @@ using System.Threading.Tasks;
 using VideoOS.Platform;
 using VideoOS.Platform.Admin;
 using VideoOS.Platform.Client;
-using VideoOS.Platform.License;
 using VideoOS.Platform.Messaging;
 using WebContent.Admin;
 using WebContent.Client;
@@ -70,8 +68,6 @@ namespace WebContent
             }
         }
 
-        public override Collection<LicenseInformation> PluginLicenseRequest => SiteLicenseHandler.GetLicenseRequest();
-
         public override bool IncludeInExport => true;
 
         public List<ItemNode> RootItemChildNodes { get; private set; } = new List<ItemNode>();
@@ -115,8 +111,6 @@ namespace WebContent
 
         public override void Init()
         {
-            SiteLicenseHandler.Init();
-
             switch (EnvironmentManager.Instance.EnvironmentType)
             {
                 case EnvironmentType.Administration:
@@ -137,7 +131,6 @@ namespace WebContent
 
         public override async void Close()
         {
-            SiteLicenseHandler.Close();
             StopWorkspaceRetryTimer();
             UnregisterWorkspaceRecoveryReceivers();
 

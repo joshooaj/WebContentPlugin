@@ -63,7 +63,6 @@
     <Compile Include="Admin\RootNodeUserControl.Designer.cs">
       <DependentUpon>RootNodeUserControl.cs</DependentUpon>
     </Compile>
-    <Compile Include="Admin\SiteLicenseHandler.cs" />
     <Compile Include="Admin\WorkspaceItemManager.cs" />
     <Compile Include="Admin\WorkspaceUserControl.cs">
       <SubType>UserControl</SubType>
@@ -95,7 +94,6 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <Compile Include="Admin\WebContentLicenseManager.cs" />
     <Compile Include="Client\WebContentExportManager.cs" />
     <Compile Include="WebContentConfiguration.cs" />
     <Compile Include="WorkspaceConfiguration.cs" />

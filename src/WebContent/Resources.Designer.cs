@@ -108,15 +108,6 @@ namespace WebContent {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to MIPSDK-SiteLicense.
-        /// </summary>
-        internal static string PluginLicenseType {
-            get {
-                return ResourceManager.GetString("PluginLicenseType", resourceCulture);
-            }
-        }
-        
-        /// <summary>
         ///   Looks up a localized string similar to Web Content.
         /// </summary>
         internal static string PluginName {
