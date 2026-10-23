@@ -45,6 +45,9 @@ namespace WebContent.Client
             // Publish the admin-defined properties for the session so the provisioned view item
             // can seed its own persisted property store (see WorkspaceInstanceProperties).
             WorkspaceInstanceProperties.Register(_instanceId, _workspaceProperties);
+            WorkspaceInstanceProperties.Register(_workspaceId, _workspaceProperties);
+            _workspaceProperties.TryGetValue(nameof(WebContentSettings.HomeAddress), out var configuredHome);
+            EnvironmentManager.Instance.Log(false, nameof(WebContentWorkSpacePlugin), $"WebContent workspace '{_workspaceName}' published definition (InstanceId={_instanceId}, HomeAddress={configuredHome ?? "(none)"}).");
 
             try
             {
@@ -115,11 +118,35 @@ namespace WebContent.Client
         {
             if (IsWebContentViewItemCurrent())
             {
+                RegisterViewItemFqid();
                 return;
             }
 
             RemoveWebContentViewItem();
             PopulateViewItem();
+            RegisterViewItemFqid();
+        }
+
+        /// <summary>
+        /// Maps the view item's layout FQID to the definition so the ViewItemManager can resolve
+        /// its workspace identity before its own property store holds any identity (a brand-new
+        /// view item mints a random InstanceId when seeded properties are not loaded yet).
+        /// </summary>
+        private void RegisterViewItemFqid()
+        {
+            try
+            {
+                var viewItem = ViewAndLayoutItem.GetViewItem(0);
+                var fqid = viewItem?.FQID;
+                if (fqid != null && fqid.ObjectId != Guid.Empty)
+                {
+                    WorkspaceInstanceProperties.Register(fqid.ObjectId, _workspaceProperties);
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Failed to register FQID mapping for workspace {_workspaceName} ({_workspaceId}): {ex.Message}");
+            }
         }
 
         private bool IsWebContentViewItemCurrent()

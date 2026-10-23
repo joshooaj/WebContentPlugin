@@ -22,18 +22,26 @@ namespace WebContent.Client
             SeedWorkspaceProperties();
         }
 
+        public override void PropertiesLoaded()
+        {
+            base.PropertiesLoaded();
+            SeedWorkspaceProperties();
+        }
+
         /// <summary>
         /// Workspace-provisioned view items cannot receive admin settings through the
         /// InsertViewItemPlugin property dictionary (GetProperty does not read it), so the
-        /// workspace plugin publishes the definition to the session registry and the view item
-        /// seeds its own persisted property store from it. Standalone (manually placed) view
-        /// items have no registry entry and keep their own configuration.
+        /// workspace plugin publishes the definition to the session registry keyed by the view
+        /// item's layout FQID and instance ids, and the view item seeds its own persisted
+        /// property store from it. Standalone (manually placed) view items have no registry
+        /// entry and keep their own configuration. The seeding runs from PropertiesLoaded (the
+        /// current platform hook) and Init (legacy hook) and is idempotent.
         /// </summary>
         private void SeedWorkspaceProperties()
         {
             try
             {
-                if (!WorkspaceInstanceProperties.TryGet(Settings.InstanceId, out var definition))
+                if (!TryResolveWorkspaceDefinition(out var definition, out var matchedKey))
                 {
                     return;
                 }
@@ -41,6 +49,7 @@ namespace WebContent.Client
                 var seed = WorkspaceInstanceProperties.ComputeSeed(GetProperty, definition);
                 if (seed.Count == 0)
                 {
+                    EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"WebContent workspace seed: view item {matchedKey} already current (HomeAddress={TryHome(definition)}).");
                     return;
                 }
 
@@ -50,12 +59,40 @@ namespace WebContent.Client
                 }
 
                 SaveProperties();
-                EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Seeded {seed.Count} workspace-defined property value(s) for view item {Settings.InstanceId}.");
+                EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"WebContent workspace seed: applied {seed.Count} value(s) via key {matchedKey} (HomeAddress={TryHome(definition)}).");
             }
             catch (Exception ex)
             {
                 EnvironmentManager.Instance.ExceptionHandler($"{nameof(WebContentViewItemManager)}.SeedWorkspaceProperties", ex);
             }
+        }
+
+        private bool TryResolveWorkspaceDefinition(out System.Collections.Generic.IReadOnlyDictionary<string, string> definition, out string matchedKey)
+        {
+            definition = null;
+            matchedKey = null;
+
+            var fqidId = FQID?.ObjectId ?? Guid.Empty;
+            if (fqidId != Guid.Empty && WorkspaceInstanceProperties.TryGet(fqidId, out definition))
+            {
+                matchedKey = $"FQID {fqidId}";
+                return true;
+            }
+
+            var instanceId = Settings.InstanceId;
+            if (instanceId != Guid.Empty && WorkspaceInstanceProperties.TryGet(instanceId, out definition))
+            {
+                matchedKey = $"InstanceId {instanceId}";
+                return true;
+            }
+
+            EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"WebContent workspace seed: no registry entry for FQID {fqidId} / InstanceId {instanceId}; treating the view item as standalone.");
+            return false;
+        }
+
+        private static string TryHome(System.Collections.Generic.IReadOnlyDictionary<string, string> definition)
+        {
+            return definition != null && definition.TryGetValue(nameof(WebContentSettings.HomeAddress), out var home) ? home : "(none)";
         }
 
         public override void Close()
