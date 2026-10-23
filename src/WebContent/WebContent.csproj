@@ -107,6 +107,8 @@
     <Compile Include="Client\WebContentViewItemPlugin.cs" />
     <Compile Include="Client\WebContentWorkSpacePlugin.cs" />
     <Compile Include="Client\WorkspaceDefinition.cs" />
+    <Compile Include="Client\WorkspaceDefinitionFingerprint.cs" />
+    <Compile Include="Client\WorkspaceViewItemSync.cs" />
     <Compile Include="Client\WorkspacePermission.cs" />
     <Compile Include="Client\WorkspacePermissionEvaluator.cs" />
     <Compile Include="Client\WorkspacePluginFactory.cs" />

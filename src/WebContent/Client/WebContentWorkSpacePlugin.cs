@@ -107,23 +107,65 @@ namespace WebContent.Client
 
         private void EnsureViewItemPresent()
         {
-            if (IsWebContentViewItemPresent())
+            if (IsWebContentViewItemCurrent())
             {
                 return;
             }
 
+            RemoveWebContentViewItem();
             PopulateViewItem();
         }
 
-        private bool IsWebContentViewItemPresent()
+        private bool IsWebContentViewItemCurrent()
         {
             try
             {
-                return ViewAndLayoutItem.ViewItemId(0) == WebContentViewItemPluginId;
+                if (ViewAndLayoutItem.ViewItemId(0) != WebContentViewItemPluginId)
+                {
+                    return false;
+                }
+
+                // Properties without a fingerprint (e.g. hand-built test doubles) keep the old
+                // presence-only behavior so re-provisioning never churns on missing metadata.
+                if (!_workspaceProperties.TryGetValue(WorkspaceViewItemSync.FingerprintKey, out var fingerprint) ||
+                    string.IsNullOrEmpty(fingerprint))
+                {
+                    return true;
+                }
+
+                var existing = ViewAndLayoutItem.GetViewItem(0);
+                if (WorkspaceViewItemSync.IsCurrent(existing?.Properties, _workspaceId, fingerprint))
+                {
+                    return true;
+                }
+
+                EnvironmentManager.Instance.Log(false, nameof(WebContentWorkSpacePlugin), $"Persisted view item for workspace {_workspaceName} ({_workspaceId}) is stale or foreign; re-provisioning it from the current definition.");
+                return false;
             }
             catch
             {
                 return false;
+            }
+        }
+
+        private void RemoveWebContentViewItem()
+        {
+            try
+            {
+                if (ViewAndLayoutItem.ViewItemId(0) != WebContentViewItemPluginId)
+                {
+                    return;
+                }
+
+                var existing = ViewAndLayoutItem.GetViewItem(0);
+                if (existing != null)
+                {
+                    ViewAndLayoutItem.RemoveChild(existing);
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Failed to remove stale view item from workspace {_workspaceName} ({_workspaceId}): {ex.Message}");
             }
         }
 

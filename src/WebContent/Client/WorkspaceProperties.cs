@@ -20,8 +20,9 @@ namespace WebContent.Client
         {
             var properties = new Dictionary<string, string>
             {
-                { "WorkspaceId", workspaceId.ToString() },
-                { "WorkspaceName", workspaceName }
+                { WorkspaceViewItemSync.WorkspaceIdKey, workspaceId.ToString() },
+                { "WorkspaceName", workspaceName },
+                { WorkspaceViewItemSync.FingerprintKey, WorkspaceDefinitionFingerprint.Compute(workspaceName, sourceProperties) }
             };
 
             var settings = WorkspaceConfiguration.GetFirstWebContentSettings(sourceProperties);
