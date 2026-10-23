@@ -120,12 +120,17 @@ namespace WebContent.Client
         public override PropertiesWpfUserControl GeneratePropertiesWpfUserControl()
         {
             EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), "Generating properties UserControl.");
+            SeedWorkspaceProperties();
             return new WebContentPropertiesUserControl(this);
         }
 
         public override ViewItemWpfUserControl GenerateViewItemWpfUserControl()
         {
             EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), "Generating view item UserControl.");
+            // Smart Client 2025 R3 never calls the obsolete Init() and only calls
+            // PropertiesLoaded() for layout-deserialized items, but it always calls this
+            // method before the view reads any settings. Seeding is idempotent.
+            SeedWorkspaceProperties();
             return new WebContentUserControl(this);
         }
 
