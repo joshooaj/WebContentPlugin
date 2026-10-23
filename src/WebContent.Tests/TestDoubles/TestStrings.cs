@@ -9,6 +9,6 @@ namespace WebContent
     /// </summary>
     internal static class Strings
     {
-        public const string HomeAddress = "https://www.cascadia.tech/";
+        public const string HomeAddress = "https://github.com/joshooaj/WebContentPlugin";
     }
 }

@@ -1,9 +1,7 @@
 ﻿using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Windows;
 using WebContent;
-using WebContent.Admin;
 
 namespace WebContent.Client
 {
@@ -15,7 +13,6 @@ namespace WebContent.Client
         public string HideAddressLabel => Strings.HideAddressLabel;
         public string ZoomLevelLabel => $"{Strings.ZoomLevelLabel}:";
         public string ClearBrowsingDataOnExitLabel => Strings.ClearBrowsingDataOnExitLabel;
-        public string PurchaseLicenseLabel => Strings.PurchaseLicenseLabel;
         public string EnableDevToolsLabel => Strings.EnableDevToolsLabel;
         public string EnableDevToolsToolTip => Strings.EnableDevToolsToolTip;
         public string ClearBrowsingDataNowLabel => Strings.ClearBrowsingDataNowLabel;
@@ -191,11 +188,6 @@ namespace WebContent.Client
             }
         }
 
-        public Visibility IsLicenseActivated
-        {
-            get => SiteLicenseHandler.IsActivated ? Visibility.Collapsed : Visibility.Visible;
-        }
-
         private WebContentViewItemManager _viewItemManager;
         private bool _disposed;
 
@@ -207,7 +199,6 @@ namespace WebContent.Client
         public WebContentSettings(WebContentViewItemManager viewItemManager)
         {
             _viewItemManager = viewItemManager;
-            SiteLicenseHandler.LicenseActivated += SiteLicenseHandler_LicenseActivated;
             if (InstanceId == Guid.Empty) InstanceId = Guid.NewGuid();
         }
 
@@ -224,7 +215,6 @@ namespace WebContent.Client
                 return;
             }
 
-            SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
             _disposed = true;
         }
 
@@ -236,11 +226,6 @@ namespace WebContent.Client
         private void SetProperty(string key, string value)
         {
             _viewItemManager?.SetProperty(key, value);
-        }
-
-        private void SiteLicenseHandler_LicenseActivated(object sender, EventArgs e)
-        {
-            OnPropertyChanged(nameof(IsLicenseActivated));
         }
     }
 }

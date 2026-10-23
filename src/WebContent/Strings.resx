@@ -157,7 +157,7 @@
     <value>The toolbar is always visible in setup mode. Enable this to hide the toolbar when not in setup mode. Note that with the toolbar hidden, you will not have access to the address bar, or navigation buttons, and you cannot double-click anywhere to maximize the browser view item.</value>
   </data>
   <data name="HomeAddress" xml:space="preserve">
-    <value>https://www.cascadia.tech/</value>
+    <value>https://github.com/joshooaj/WebContentPlugin</value>
   </data>
   <data name="HomeLabel" xml:space="preserve">
     <value>Home</value>
@@ -173,12 +173,6 @@
   </data>
   <data name="MuteAudioToolTip" xml:space="preserve">
     <value>Mute all audio for this browser instance.</value>
-  </data>
-  <data name="PurchaseLicenseLabel" xml:space="preserve">
-    <value>Purchase a license</value>
-  </data>
-  <data name="PurchaseLicenseUrl" xml:space="preserve">
-    <value>https://tinyurl.com/cbtxvv76</value>
   </data>
   <data name="RememberLastAddressLabel" xml:space="preserve">
     <value>Remember last address</value>

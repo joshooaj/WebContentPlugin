@@ -178,7 +178,7 @@ namespace WebContent {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to https://www.cascadia.tech/.
+        ///   Looks up a localized string similar to https://github.com/joshooaj/WebContentPlugin.
         /// </summary>
         internal static string HomeAddress {
             get {
@@ -228,24 +228,6 @@ namespace WebContent {
         internal static string MuteAudioToolTip {
             get {
                 return ResourceManager.GetString("MuteAudioToolTip", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to Purchase a license.
-        /// </summary>
-        internal static string PurchaseLicenseLabel {
-            get {
-                return ResourceManager.GetString("PurchaseLicenseLabel", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to https://tinyurl.com/cbtxvv76.
-        /// </summary>
-        internal static string PurchaseLicenseUrl {
-            get {
-                return ResourceManager.GetString("PurchaseLicenseUrl", resourceCulture);
             }
         }
         

@@ -7,7 +7,6 @@ using System.Windows.Input;
 using VideoOS.Platform;
 using VideoOS.Platform.Messaging;
 using WebContent;
-using WebContent.Admin;
 
 namespace WebContent.Client
 {
@@ -39,7 +38,7 @@ namespace WebContent.Client
             set
             {
                 if (value == _toolbarVisibility) return;
-                _toolbarVisibility = SiteLicenseHandler.IsExpired ? Visibility.Visible : value;
+                _toolbarVisibility = value;
                 OnPropertyChanged();
             }
         }
@@ -51,50 +50,17 @@ namespace WebContent.Client
             set
             {
                 if (_browserVisibility == value) return;
-                if (SiteLicenseHandler.IsExpired)
-                {
-                    _browserVisibility = Visibility.Collapsed;
-                }
-                else
-                {
-                    _browserVisibility = value;
-                }
-                _browserVisibility = SiteLicenseHandler.IsExpired ? Visibility.Collapsed : value;
+                _browserVisibility = value;
                 OnPropertyChanged();
             }
         }
 
         public Visibility AddressVisibility => (_viewItemManager?.Settings.HideAddress ?? false) ? Visibility.Collapsed : Visibility.Visible;
 
-        private Visibility _trialVisibility = Visibility.Collapsed;
-        public Visibility TrialVisibility
-        {
-            get => _trialVisibility = SiteLicenseHandler.IsActivated ? Visibility.Collapsed : Visibility.Visible;
-            set
-            {
-                _trialVisibility = value;
-                OnPropertyChanged(nameof(TrialVisibility));
-            }
-        }
-
-        private string _trialText = $"Trial expires in 30 days";
-
-        public string TrialText
-        {
-            get => _trialText;
-            set
-            {
-                _trialText = value;
-                OnPropertyChanged(nameof(TrialText));
-            }
-        }
-
         public Guid Id => _viewItemManager?.Settings.InstanceId ?? Guid.NewGuid();
 
         
         private object _workspaceStateChangedReceiver;
-
-        private bool _isClosed;
 
         private bool _isWorkspaceFloating;
         public bool IsWorkspaceFloating
@@ -232,7 +198,6 @@ namespace WebContent.Client
                 _viewItemManager.PropertyChangedEvent += ViewItemManager_PropertyChangedEvent;
                 _viewItemManager.ClearBrowsingDataRequest += ClearBrowsingDataRequestHandler;
                 _workspaceStateChangedReceiver = EnvironmentManager.Instance.RegisterReceiver(WorkspaceStateChangeHandler, new MessageIdFilter(MessageId.SmartClient.WorkSpaceStateChangedIndication));
-                SiteLicenseHandler.LicenseActivated += SiteLicenseHandler_LicenseActivated;
 
                 Browser.AllowDevTools = ViewItemManager.Settings.EnableDevTools;
                 Browser.AllowAudioNotifications = ViewItemManager.Settings.AllowAudioNotifications;
@@ -240,8 +205,6 @@ namespace WebContent.Client
                 Browser.PropertyChanged += Browser_PropertyChanged;
                 try
                 {
-                    UpdateTrialState();
-
                     if (!Browser.IsInitialized)
                     {
                         Browser.Initialize();
@@ -276,7 +239,6 @@ namespace WebContent.Client
             }
             catch (Exception ex)
             {
-                SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
                 if (browserReferenceAdded)
                 {
                     BrowserManager.ReleaseReference(Id);
@@ -322,7 +284,6 @@ namespace WebContent.Client
         {
             try
             {
-                _isClosed = true;
                 if (_workspaceStateChangedReceiver != null)
                 {
                     EnvironmentManager.Instance.UnRegisterReceiver(_workspaceStateChangedReceiver);
@@ -331,7 +292,6 @@ namespace WebContent.Client
 
                 _viewItemManager.PropertyChangedEvent -= ViewItemManager_PropertyChangedEvent;
                 _viewItemManager.ClearBrowsingDataRequest -= ClearBrowsingDataRequestHandler;
-                SiteLicenseHandler.LicenseActivated -= SiteLicenseHandler_LicenseActivated;
                 Browser.PropertyChanged -= Browser_PropertyChanged;
 
                 _backCommand?.Dispose();
@@ -469,44 +429,6 @@ namespace WebContent.Client
                     if (_reloadCommand != null) _reloadCommand.Enabled = false;
                     break;
             }
-        }
-
-        private void UpdateTrialState()
-        {
-            var trialText = $"Trial expires on {SiteLicenseHandler.Expires.ToLocalTime().Date:d}";
-            if (SiteLicenseHandler.IsExpired)
-            {
-                trialText = trialText.Replace("expires", "expired");
-            }
-
-            TrialText = trialText;
-            OnPropertyChanged(nameof(TrialVisibility));
-        }
-
-        private void ExecuteOnUiThread(Action action)
-        {
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher == null || dispatcher.CheckAccess())
-            {
-                action();
-                return;
-            }
-
-            dispatcher.BeginInvoke(action);
-        }
-
-        private void SiteLicenseHandler_LicenseActivated(object sender, EventArgs e)
-        {
-            ExecuteOnUiThread(() =>
-            {
-                if (_isClosed)
-                {
-                    return;
-                }
-
-                UpdateTrialState();
-                ApplyWorkspaceState(ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal);
-            });
         }
 
         private void ReloadProperties()

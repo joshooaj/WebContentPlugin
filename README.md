@@ -83,19 +83,11 @@ WebView2 Runtime if necessary, and place the plugin files in `C:\Program Files\V
 
 ![Screenshot of web content view item properties](./docs/assets/images/properties.png)
 
-## Licensing
+## License
 
-No license is required when used with XProtect Essential+, or when connected to any XProtect VMS using a test license.
-
-Under all other circumstances, a 30-day evaluation license will automatically be applied and a site license can be purchased from the [Cascadia Technology Store](https://www.cascadia.tech/). Make sure to provide your XProtect VMS (or OEM) Software License Code when placing the order.
-
-### License activation
-
-Once you have purchased a license from the [Cascadia Technology Store](https://www.cascadia.tech/), I must manually add a site license for the plugin to your software license code. You will receive a confirmation email when this has been completed.
-
-To apply the license to your VMS, perform a normal online (or offline) license activation using Management Client on a system where the plugin is installed.
-
-**Important:** The Web Content Plugin must be installed on the same system where Management Client is used to perform the activation, otherwise the Management Client won't include a license request from the plugin during the activation process.
+The Web Content Plugin is free to use with all features. No license,
+activation, or time limit is required. It is distributed under the
+[MIT License](./LICENSE).
 
 ## Software Build of Materials
 

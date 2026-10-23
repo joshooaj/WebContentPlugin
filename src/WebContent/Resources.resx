@@ -126,9 +126,6 @@
   <data name="PluginId" xml:space="preserve">
     <value>4faaaf8f-9286-453f-8599-2555e17e535d</value>
   </data>
-  <data name="PluginLicenseType" xml:space="preserve">
-    <value>MIPSDK-SiteLicense</value>
-  </data>
   <data name="PluginName" xml:space="preserve">
     <value>Web Content</value>
   </data>
