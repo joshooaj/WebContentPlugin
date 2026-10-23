@@ -19,6 +19,43 @@ namespace WebContent.Client
         {
             EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Initializing ViewItemManager for plugin {Resources.PluginName}.");
             base.Init();
+            SeedWorkspaceProperties();
+        }
+
+        /// <summary>
+        /// Workspace-provisioned view items cannot receive admin settings through the
+        /// InsertViewItemPlugin property dictionary (GetProperty does not read it), so the
+        /// workspace plugin publishes the definition to the session registry and the view item
+        /// seeds its own persisted property store from it. Standalone (manually placed) view
+        /// items have no registry entry and keep their own configuration.
+        /// </summary>
+        private void SeedWorkspaceProperties()
+        {
+            try
+            {
+                if (!WorkspaceInstanceProperties.TryGet(Settings.InstanceId, out var definition))
+                {
+                    return;
+                }
+
+                var seed = WorkspaceInstanceProperties.ComputeSeed(GetProperty, definition);
+                if (seed.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var entry in seed)
+                {
+                    SetProperty(entry.Key, entry.Value);
+                }
+
+                SaveProperties();
+                EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Seeded {seed.Count} workspace-defined property value(s) for view item {Settings.InstanceId}.");
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler($"{nameof(WebContentViewItemManager)}.SeedWorkspaceProperties", ex);
+            }
         }
 
         public override void Close()

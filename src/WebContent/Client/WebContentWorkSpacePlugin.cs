@@ -17,6 +17,7 @@ namespace WebContent.Client
         private readonly string _workspaceName;
         private readonly Dictionary<string, string> _workspaceProperties;
         private readonly List<object> _messageRegistrations = new List<object>();
+        private readonly Guid _instanceId;
         private bool _isCurrentWorkspace;
 
         public WebContentWorkSpacePlugin(Guid workspaceId, string workspaceName, Dictionary<string, string> properties)
@@ -26,9 +27,10 @@ namespace WebContent.Client
             _workspaceProperties = properties ?? new Dictionary<string, string>();
 
             if (!_workspaceProperties.TryGetValue(nameof(WebContentSettings.InstanceId), out var instanceId) ||
-                !Guid.TryParse(instanceId, out _))
+                !Guid.TryParse(instanceId, out _instanceId))
             {
-                _workspaceProperties[nameof(WebContentSettings.InstanceId)] = _workspaceId.ToString();
+                _instanceId = _workspaceId;
+                _workspaceProperties[nameof(WebContentSettings.InstanceId)] = _instanceId.ToString();
             }
         }
 
@@ -40,6 +42,10 @@ namespace WebContent.Client
 
         public override void Init()
         {
+            // Publish the admin-defined properties for the session so the provisioned view item
+            // can seed its own persisted property store (see WorkspaceInstanceProperties).
+            WorkspaceInstanceProperties.Register(_instanceId, _workspaceProperties);
+
             try
             {
                 LoadProperties(true);

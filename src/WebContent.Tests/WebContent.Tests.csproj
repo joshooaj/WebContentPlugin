@@ -22,6 +22,7 @@
     <Compile Include="..\WebContent\Client\CallbackOwnership.cs" Link="CallbackOwnership.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceDefinition.cs" Link="WorkspaceDefinition.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceDefinitionFingerprint.cs" Link="WorkspaceDefinitionFingerprint.cs" />
+    <Compile Include="..\WebContent\Client\WorkspaceInstanceProperties.cs" Link="WorkspaceInstanceProperties.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceProperties.cs" Link="WorkspaceProperties.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceViewItemSync.cs" Link="WorkspaceViewItemSync.cs" />
     <Compile Include="..\WebContent\WebContentConfiguration.cs" Link="WebContentConfiguration.cs" />
