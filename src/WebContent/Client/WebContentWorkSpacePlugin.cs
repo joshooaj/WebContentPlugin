@@ -18,13 +18,17 @@ namespace WebContent.Client
         private readonly Dictionary<string, string> _workspaceProperties;
         private readonly List<object> _messageRegistrations = new List<object>();
         private readonly Guid _instanceId;
+        private readonly WorkspaceConfigError _configError;
+        private readonly WorkSpaceNotification _configErrorNotification;
         private bool _isCurrentWorkspace;
 
-        public WebContentWorkSpacePlugin(Guid workspaceId, string workspaceName, Dictionary<string, string> properties)
+        internal WebContentWorkSpacePlugin(Guid workspaceId, string workspaceName, Dictionary<string, string> properties, WorkspaceConfigError configError = WorkspaceConfigError.None)
         {
             _workspaceId = workspaceId;
             _workspaceName = workspaceName;
             _workspaceProperties = properties ?? new Dictionary<string, string>();
+            _configError = configError;
+            _configErrorNotification = BuildConfigErrorNotification(configError, workspaceName);
 
             if (!_workspaceProperties.TryGetValue(nameof(WebContentSettings.InstanceId), out var instanceId) ||
                 !Guid.TryParse(instanceId, out _instanceId))
@@ -48,6 +52,12 @@ namespace WebContent.Client
             WorkspaceInstanceProperties.Register(_workspaceId, _workspaceProperties);
             _workspaceProperties.TryGetValue(nameof(WebContentSettings.HomeAddress), out var configuredHome);
             EnvironmentManager.Instance.Log(false, nameof(WebContentWorkSpacePlugin), $"WebContent workspace '{_workspaceName}' published definition (InstanceId={_instanceId}, HomeAddress={configuredHome ?? "(none)"}).");
+
+            if (_configError != WorkspaceConfigError.None)
+            {
+                Notification = _configErrorNotification;
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Configuration error for workspace '{_workspaceName}' ({_workspaceId}): {DescribeConfigError(_configError)} The tab stays visible with a WorkSpaceNotification (ticket #9).");
+            }
 
             try
             {
@@ -92,7 +102,7 @@ namespace WebContent.Client
             _isCurrentWorkspace = message.Data is Item item && item.FQID.ObjectId == _workspaceId;
             if (_isCurrentWorkspace)
             {
-                Notification = null;
+                Notification = _configErrorNotification;
                 EnsureViewItemPresent();
             }
 
@@ -211,6 +221,32 @@ namespace WebContent.Client
             catch (Exception ex)
             {
                 EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Failed to populate workspace {_workspaceName} ({_workspaceId}): {ex.Message}");
+            }
+        }
+
+        private static WorkSpaceNotification BuildConfigErrorNotification(WorkspaceConfigError configError, string workspaceName)
+        {
+            if (configError == WorkspaceConfigError.None)
+            {
+                return null;
+            }
+
+            return new WorkSpaceNotification(
+                WorkSpaceNotification.SEVERITY_MEDIUM,
+                1,
+                string.Format(Strings.WorkspaceConfigErrorNotification, workspaceName, DescribeConfigError(configError)));
+        }
+
+        private static string DescribeConfigError(WorkspaceConfigError configError)
+        {
+            switch (configError)
+            {
+                case WorkspaceConfigError.MalformedJson:
+                    return Strings.WorkspaceConfigErrorMalformedJson;
+                case WorkspaceConfigError.MissingBrowserConfig:
+                    return Strings.WorkspaceConfigErrorMissingBrowserConfig;
+                default:
+                    return string.Empty;
             }
         }
     }

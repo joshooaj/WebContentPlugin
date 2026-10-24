@@ -284,5 +284,32 @@ namespace WebContent {
                 return ResourceManager.GetString("ZoomLevelLabel", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Web Content workspace &quot;{0}&quot; has a configuration error: {1} Correct the workspace definition in the Management Client..
+        /// </summary>
+        internal static string WorkspaceConfigErrorNotification {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorNotification", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to the saved workspace configuration is corrupt and could not be parsed..
+        /// </summary>
+        internal static string WorkspaceConfigErrorMalformedJson {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorMalformedJson", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to no browser page with a home address is configured for this workspace..
+        /// </summary>
+        internal static string WorkspaceConfigErrorMissingBrowserConfig {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorMissingBrowserConfig", resourceCulture);
+            }
+        }
     }
 }

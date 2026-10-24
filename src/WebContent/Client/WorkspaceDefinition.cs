@@ -52,9 +52,29 @@ namespace WebContent.Client
         }
 
         /// <summary>
+        /// A workspace is shown as a tab when it has a display name, even if its configuration is
+        /// broken (ticket #9): the tab then carries a WorkSpaceNotification describing the
+        /// configuration error instead of silently disappearing.
+        /// </summary>
+        public bool IsDisplayable
+        {
+            get { return !string.IsNullOrWhiteSpace(Name); }
+        }
+
+        /// <summary>
+        /// Why this definition has no usable browser configuration, or <see cref="WorkspaceConfigError.None"/>
+        /// when it is healthy (ticket #9).
+        /// </summary>
+        public WorkspaceConfigError ConfigurationError
+        {
+            get { return WorkspaceConfiguration.DetectError(SourceProperties); }
+        }
+
+        /// <summary>
         /// Returns the definitions the current user may view, in admin order. A definition must be
-        /// provisionable (see <see cref="IsProvisionable"/>) and its id must be present in
-        /// <paramref name="permittedIds"/>; everything else is silently skipped (ticket #8).
+        /// displayable (see <see cref="IsDisplayable"/>) and its id must be present in
+        /// <paramref name="permittedIds"/>; since ticket #9 a broken configuration does not hide
+        /// the tab, it only classifies the defect via <see cref="ConfigurationError"/>.
         /// </summary>
         public static List<WorkspaceDefinition> SelectVisible(
             IReadOnlyList<WorkspaceDefinition> definitions,
@@ -68,7 +88,7 @@ namespace WebContent.Client
 
             foreach (var definition in definitions)
             {
-                if (definition != null && definition.IsProvisionable && permittedIds.Contains(definition.Id))
+                if (definition != null && definition.IsDisplayable && permittedIds.Contains(definition.Id))
                 {
                     result.Add(definition);
                 }

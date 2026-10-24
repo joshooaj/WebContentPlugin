@@ -266,6 +266,8 @@ namespace WebContent.Client
                 {
                     _viewItemManager.Settings.LastAddress = Address;
                 }
+
+                _viewItemManager.Settings.RecordSessionAddress(Address);
             }
         }
 
@@ -378,12 +380,8 @@ namespace WebContent.Client
 
         private string GetRestoreAddress()
         {
-            if (_viewItemManager?.Settings.RememberLastAddress == true && !string.IsNullOrWhiteSpace(_viewItemManager.Settings.LastAddress))
-            {
-                return _viewItemManager.Settings.LastAddress;
-            }
-
-            return Home;
+            var settings = _viewItemManager?.Settings;
+            return settings != null ? settings.ResolveRestoreAddress() : Home;
         }
 
         private static bool IsSameAddress(string first, string second)

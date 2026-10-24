@@ -8,10 +8,13 @@ namespace WebContent.Tests
 {
     /// <summary>
     /// Tests for the pure workspace model and the multi-workspace selection used by
-    /// <see cref="WorkspacePluginFactory"/> (ticket #8). A definition is provisionable only
+    /// <see cref="WorkspacePluginFactory"/> (tickets #8 and #9). A definition is provisionable
     /// when it has a display name and a configured home address (JSON blob first, then the
     /// legacy HomeAddress/Address properties). <see cref="WorkspaceDefinition.SelectVisible"/>
-    /// returns the provisionable definitions the current user may VIEW, in admin order.
+    /// returns the named definitions the current user may VIEW, in admin order; since ticket #9
+    /// a named workspace with a broken or missing config stays visible so its tab can carry a
+    /// WorkSpaceNotification instead of silently disappearing, and
+    /// <see cref="WorkspaceDefinition.ConfigurationError"/> names the defect.
     /// </summary>
     public class WorkspaceDefinitionTests
     {
@@ -36,6 +39,22 @@ namespace WebContent.Tests
             if (!string.IsNullOrEmpty(legacyHomeAddress))
             {
                 properties["HomeAddress"] = legacyHomeAddress;
+            }
+
+            return new WorkspaceDefinition(Guid.NewGuid(), name, properties);
+        }
+
+        private static WorkspaceDefinition CreateWithRawConfig(string name, string rawConfigJson, string legacyAddress = null)
+        {
+            var properties = new Dictionary<string, string>();
+            if (rawConfigJson != null)
+            {
+                properties[WorkspaceConfiguration.WorkspaceConfigKey] = rawConfigJson;
+            }
+
+            if (!string.IsNullOrEmpty(legacyAddress))
+            {
+                properties["Address"] = legacyAddress;
             }
 
             return new WorkspaceDefinition(Guid.NewGuid(), name, properties);
@@ -150,7 +169,7 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void SelectVisible_Skips_Non_Provisionable_Even_When_Permitted()
+        public void SelectVisible_Includes_Config_Broken_But_Permitted_Workspace()
         {
             var noAddress = Create("NoAddress");
             var ok = Create("Ok", legacyAddress: "ok.local");
@@ -158,6 +177,20 @@ namespace WebContent.Tests
             var visible = WorkspaceDefinition.SelectVisible(
                 new[] { noAddress, ok },
                 new[] { noAddress.Id, ok.Id });
+
+            Assert.Equal(new[] { noAddress, ok }, visible);
+            Assert.Equal(WorkspaceConfigError.MissingBrowserConfig, noAddress.ConfigurationError);
+        }
+
+        [Fact]
+        public void SelectVisible_Still_Skips_Unnamed_Workspaces_Even_When_Permitted()
+        {
+            var nameless = Create(null, legacyAddress: "hidden.local");
+            var ok = Create("Ok", legacyAddress: "ok.local");
+
+            var visible = WorkspaceDefinition.SelectVisible(
+                new[] { nameless, ok },
+                new[] { nameless.Id, ok.Id });
 
             Assert.Single(visible);
             Assert.Same(ok, visible[0]);
@@ -208,6 +241,72 @@ namespace WebContent.Tests
 
             Assert.Single(visible);
             Assert.Same(valid, visible[0]);
+        }
+
+        [Fact]
+        public void ConfigurationError_None_For_Json_Blob_With_Home_Address()
+        {
+            var definition = Create("Ops", jsonHomeAddress: "example.com");
+
+            Assert.Equal(WorkspaceConfigError.None, definition.ConfigurationError);
+        }
+
+        [Fact]
+        public void ConfigurationError_None_For_Legacy_Only_Definition()
+        {
+            var definition = Create("Ops", legacyAddress: "intranet.local");
+
+            Assert.Equal(WorkspaceConfigError.None, definition.ConfigurationError);
+        }
+
+        [Fact]
+        public void ConfigurationError_MalformedJson_When_Blob_Fails_To_Parse()
+        {
+            var definition = CreateWithRawConfig("Ops", "{ this is not json");
+
+            Assert.Equal(WorkspaceConfigError.MalformedJson, definition.ConfigurationError);
+        }
+
+        [Fact]
+        public void ConfigurationError_MalformedJson_Even_When_Legacy_Properties_Would_Rescue_It()
+        {
+            var definition = CreateWithRawConfig("Ops", "{ corrupt", legacyAddress: "intranet.local");
+
+            Assert.Equal(WorkspaceConfigError.MalformedJson, definition.ConfigurationError);
+            Assert.Equal("intranet.local", definition.HomeAddress);
+        }
+
+        [Fact]
+        public void ConfigurationError_MissingBrowserConfig_When_Blob_Carries_No_Items()
+        {
+            var definition = CreateWithRawConfig("Ops", "[]");
+
+            Assert.Equal(WorkspaceConfigError.MissingBrowserConfig, definition.ConfigurationError);
+        }
+
+        [Fact]
+        public void ConfigurationError_MissingBrowserConfig_When_WebContent_Item_Has_No_Home_Address()
+        {
+            var definition = CreateWithRawConfig("Ops", "{\"version\":1,\"items\":[{\"type\":\"WebContent\",\"position\":0}]}");
+
+            Assert.Equal(WorkspaceConfigError.MissingBrowserConfig, definition.ConfigurationError);
+        }
+
+        [Fact]
+        public void ConfigurationError_MissingBrowserConfig_When_Nothing_Is_Configured()
+        {
+            var definition = Create("Ops");
+
+            Assert.Equal(WorkspaceConfigError.MissingBrowserConfig, definition.ConfigurationError);
+        }
+
+        [Fact]
+        public void ConfigurationError_MissingBrowserConfig_When_Only_Whitespace_Name_And_Legacy_Address()
+        {
+            var definition = Create("  ", legacyAddress: "intranet.local");
+
+            Assert.Equal(WorkspaceConfigError.None, definition.ConfigurationError);
+            Assert.False(definition.IsDisplayable);
         }
     }
 }

@@ -74,9 +74,8 @@ namespace WebContent.Client
                 var needsRecreation = browser.NeedsRecreation;
                 if (needsRecreation)
                 {
-                    var address = _viewModel.ViewItemManager.Settings.RememberLastAddress && !string.IsNullOrWhiteSpace(_viewModel.ViewItemManager.Settings.LastAddress)
-                        ? _viewModel.ViewItemManager.Settings.LastAddress
-                        : _viewModel.Home;
+                    var settings = _viewModel.ViewItemManager.Settings;
+                    var address = settings.ResolveRestoreAddress() ?? _viewModel.Home;
 
                     EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Browser needs recreation for {_viewModel.Id}. Address: {address}");
                     browser.RecreateWebView(
@@ -150,6 +149,11 @@ namespace WebContent.Client
                 if (_viewModel.ViewItemManager?.Settings.RememberLastAddress ?? false)
                 {
                     _viewModel.ViewItemManager.Settings.LastAddress = _viewModel.Address;
+                }
+
+                if (_viewModel.ViewItemManager != null)
+                {
+                    _viewModel.ViewItemManager.Settings.RecordSessionAddress(_viewModel.Address);
                 }
 
                 UnregisterActiveControl(browserId);

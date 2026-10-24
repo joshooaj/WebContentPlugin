@@ -48,7 +48,7 @@ namespace WebContent.Client
                     definition.SourceProperties,
                     Strings.HomeAddress);
 
-                plugins.Add(new WebContentWorkSpacePlugin(definition.Id, definition.Name, properties));
+                plugins.Add(new WebContentWorkSpacePlugin(definition.Id, definition.Name, properties, definition.ConfigurationError));
             }
 
             return plugins;

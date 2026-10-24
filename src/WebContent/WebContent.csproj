@@ -114,6 +114,7 @@
     <Compile Include="Client\WorkspacePermissionEvaluator.cs" />
     <Compile Include="Client\WorkspacePluginFactory.cs" />
     <Compile Include="Client\WorkspaceProperties.cs" />
+    <Compile Include="Client\WorkspaceSessionState.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="plugin.def">

@@ -6,6 +6,22 @@ using System.Runtime.Serialization.Json;
 
 namespace WebContent
 {
+    /// <summary>
+    /// Why an admin-defined workspace has no usable browser configuration (ticket #9). Surfaced
+    /// to the operator as a WorkSpaceNotification on the workspace tab instead of letting the
+    /// tab silently disappear.
+    /// </summary>
+    internal enum WorkspaceConfigError
+    {
+        None,
+
+        /// <summary>The WorkspaceConfig JSON blob exists but cannot be parsed (corrupt).</summary>
+        MalformedJson,
+
+        /// <summary>No browser view item with a home address could be resolved from the definition.</summary>
+        MissingBrowserConfig,
+    }
+
     [DataContract]
     internal class WorkspaceConfiguration
     {
@@ -123,6 +139,42 @@ namespace WebContent
         {
             var config = FromProperties(properties);
             return config != null ? config.GetFirstWebContentSettings() : null;
+        }
+
+        /// <summary>
+        /// Classifies why the raw workspace properties do not yield a usable browser home address
+        /// (ticket #9). When the JSON blob is present it is authoritative: a corrupt blob is
+        /// reported even if legacy properties could rescue rendering, and a blob without a
+        /// home-addressed WebContent item is a missing browser config. Only a definition without
+        /// any blob falls back to the legacy HomeAddress/Address properties.
+        /// </summary>
+        internal static WorkspaceConfigError DetectError(IDictionary<string, string> properties)
+        {
+            if (properties == null)
+            {
+                return WorkspaceConfigError.MissingBrowserConfig;
+            }
+
+            var json = WebContentConfiguration.GetString(properties, null, WorkspaceConfigKey);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                var config = Deserialize(json);
+                if (config == null)
+                {
+                    return WorkspaceConfigError.MalformedJson;
+                }
+
+                var settings = config.GetFirstWebContentSettings();
+                if (settings == null || string.IsNullOrWhiteSpace(settings.HomeAddress))
+                {
+                    return WorkspaceConfigError.MissingBrowserConfig;
+                }
+
+                return WorkspaceConfigError.None;
+            }
+
+            var legacyHome = WebContentConfiguration.GetString(properties, string.Empty, "HomeAddress", "Address");
+            return string.IsNullOrWhiteSpace(legacyHome) ? WorkspaceConfigError.MissingBrowserConfig : WorkspaceConfigError.None;
         }
     }
 
