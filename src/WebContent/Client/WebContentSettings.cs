@@ -239,16 +239,18 @@ namespace WebContent.Client
         /// <summary>
         /// Clears the cross-session LastAddress so an admin definition update restores the new
         /// home URL (ticket #9). Session state is cleared separately via WorkspaceSessionState.Reset.
+        /// Returns true when a value was actually cleared.
         /// </summary>
-        public void ResetPersistedLastAddress()
+        public bool ResetPersistedLastAddress()
         {
             if (string.IsNullOrEmpty(LastAddress))
             {
-                return;
+                return false;
             }
 
             SetProperty(nameof(LastAddress), string.Empty);
             OnPropertyChanged();
+            return true;
         }
 
         private WebContentViewItemManager _viewItemManager;

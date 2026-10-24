@@ -7,7 +7,9 @@ namespace WebContent.Client
     /// <summary>
     /// Plain-data description of an admin-defined workspace read from the server. Decoupled from
     /// VideoOS so the selection logic can be unit-tested. The source properties are the raw
-    /// property dictionary of the workspace <c>Item</c>.
+    /// property dictionary of the workspace <c>Item</c>. Since ticket #9 the tab visibility rule
+    /// is <see cref="IsDisplayable"/> (a name), and <see cref="ConfigurationError"/> classifies a
+    /// broken browser configuration instead of hiding the workspace.
     /// </summary>
     internal sealed class WorkspaceDefinition
     {
@@ -40,15 +42,6 @@ namespace WebContent.Client
 
                 return WebContentConfiguration.GetString(SourceProperties, string.Empty, "HomeAddress", "Address");
             }
-        }
-
-        /// <summary>
-        /// A workspace can become a Smart Client tab only when it has a display name and a
-        /// configured home address.
-        /// </summary>
-        public bool IsProvisionable
-        {
-            get { return !string.IsNullOrWhiteSpace(Name) && !string.IsNullOrWhiteSpace(HomeAddress); }
         }
 
         /// <summary>

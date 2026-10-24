@@ -108,16 +108,19 @@ namespace WebContent.Client
         /// </summary>
         private void ResetSavedNavigationState(System.Collections.Generic.IReadOnlyDictionary<string, string> definition, string matchedKey)
         {
-            WorkspaceSessionState.Reset(Settings.InstanceId);
+            var cleared = WorkspaceSessionState.Reset(Settings.InstanceId);
             if (definition.TryGetValue(nameof(WebContentSettings.InstanceId), out var rawInstanceId) &&
                 Guid.TryParse(rawInstanceId, out var definitionInstanceId) &&
                 definitionInstanceId != Settings.InstanceId)
             {
-                WorkspaceSessionState.Reset(definitionInstanceId);
+                cleared |= WorkspaceSessionState.Reset(definitionInstanceId);
             }
 
-            Settings.ResetPersistedLastAddress();
-            EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Workspace definition updated ({matchedKey}); saved navigation state reset so the browser starts at the new home address.");
+            cleared |= Settings.ResetPersistedLastAddress();
+            if (cleared)
+            {
+                EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Workspace definition updated ({matchedKey}); saved navigation state reset so the browser starts at the new home address.");
+            }
         }
 
         public override void Close()

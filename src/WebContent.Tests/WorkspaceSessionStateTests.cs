@@ -139,8 +139,8 @@ namespace WebContent.Tests
         [Theory]
         [InlineData("fp-v1", "fp-v2", true)]
         [InlineData("fp-v1", "fp-v1", false)]
-        [InlineData("", "fp-v2", false)]
-        [InlineData(null, "fp-v2", false)]
+        [InlineData("", "fp-v2", true)]
+        [InlineData(null, "fp-v2", true)]
         [InlineData("fp-v1", "", false)]
         [InlineData("fp-v1", null, false)]
         public void DefinitionUpdate_Is_Detected_From_Fingerprints(string previous, string updated, bool expected)

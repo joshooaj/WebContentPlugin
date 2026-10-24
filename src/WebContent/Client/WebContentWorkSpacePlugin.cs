@@ -118,6 +118,7 @@ namespace WebContent.Client
 
             if (message.Data is WorkSpaceState state && state == WorkSpaceState.Normal)
             {
+                Notification = _configErrorNotification;
                 EnsureViewItemPresent();
             }
 

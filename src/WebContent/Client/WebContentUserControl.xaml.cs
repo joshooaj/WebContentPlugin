@@ -74,8 +74,7 @@ namespace WebContent.Client
                 var needsRecreation = browser.NeedsRecreation;
                 if (needsRecreation)
                 {
-                    var settings = _viewModel.ViewItemManager.Settings;
-                    var address = settings.ResolveRestoreAddress() ?? _viewModel.Home;
+                    var address = _viewModel.ResolveRestoreAddress() ?? _viewModel.Home;
 
                     EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"Browser needs recreation for {_viewModel.Id}. Address: {address}");
                     browser.RecreateWebView(
@@ -151,9 +150,11 @@ namespace WebContent.Client
                     _viewModel.ViewItemManager.Settings.LastAddress = _viewModel.Address;
                 }
 
+                // Record the browser's real address only; the ViewModel.Address fallback
+                // (Strings.HomeAddress) must not poison the session store.
                 if (_viewModel.ViewItemManager != null)
                 {
-                    _viewModel.ViewItemManager.Settings.RecordSessionAddress(_viewModel.Address);
+                    _viewModel.ViewItemManager.Settings.RecordSessionAddress(browser?.Address);
                 }
 
                 UnregisterActiveControl(browserId);

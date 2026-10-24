@@ -8,13 +8,12 @@ namespace WebContent.Tests
 {
     /// <summary>
     /// Tests for the pure workspace model and the multi-workspace selection used by
-    /// <see cref="WorkspacePluginFactory"/> (tickets #8 and #9). A definition is provisionable
-    /// when it has a display name and a configured home address (JSON blob first, then the
-    /// legacy HomeAddress/Address properties). <see cref="WorkspaceDefinition.SelectVisible"/>
-    /// returns the named definitions the current user may VIEW, in admin order; since ticket #9
-    /// a named workspace with a broken or missing config stays visible so its tab can carry a
+    /// <see cref="WorkspacePluginFactory"/> (tickets #8 and #9). A workspace is displayed as a
+    /// tab when it has a name and the user may VIEW it, in admin order; since ticket #9 a named
+    /// workspace with a broken or missing config stays visible so its tab can carry a
     /// WorkSpaceNotification instead of silently disappearing, and
-    /// <see cref="WorkspaceDefinition.ConfigurationError"/> names the defect.
+    /// <see cref="WorkspaceDefinition.ConfigurationError"/> names the defect (JSON blob first,
+    /// then the legacy HomeAddress/Address properties).
     /// </summary>
     public class WorkspaceDefinitionTests
     {
@@ -101,43 +100,22 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void IsProvisionable_True_When_Name_And_Json_Address_Present()
+        public void IsDisplayable_True_When_Name_Present_Even_Without_Address()
         {
-            var definition = Create("Ops", jsonHomeAddress: "example.com");
-
-            Assert.True(definition.IsProvisionable);
+            Assert.True(Create("Ops", jsonHomeAddress: "example.com").IsDisplayable);
+            Assert.True(Create("Ops").IsDisplayable);
         }
 
         [Fact]
-        public void IsProvisionable_True_When_Name_And_Legacy_Address_Present()
+        public void IsDisplayable_False_When_Name_Missing()
         {
-            var definition = Create("Ops", legacyAddress: "intranet.local");
-
-            Assert.True(definition.IsProvisionable);
+            Assert.False(Create(null, legacyAddress: "intranet.local").IsDisplayable);
         }
 
         [Fact]
-        public void IsProvisionable_False_When_Name_Missing()
+        public void IsDisplayable_False_When_Only_Whitespace_Name()
         {
-            var definition = Create(null, legacyAddress: "intranet.local");
-
-            Assert.False(definition.IsProvisionable);
-        }
-
-        [Fact]
-        public void IsProvisionable_False_When_Address_Missing()
-        {
-            var definition = Create("Ops");
-
-            Assert.False(definition.IsProvisionable);
-        }
-
-        [Fact]
-        public void IsProvisionable_False_When_Only_Whitespace_Name()
-        {
-            var definition = Create("  ", legacyAddress: "intranet.local");
-
-            Assert.False(definition.IsProvisionable);
+            Assert.False(Create("  ", legacyAddress: "intranet.local").IsDisplayable);
         }
 
         [Fact]

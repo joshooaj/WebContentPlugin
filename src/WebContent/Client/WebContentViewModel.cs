@@ -364,7 +364,7 @@ namespace WebContent.Client
 
         private void RestoreAddressIfNeeded()
         {
-            var restoreAddress = GetRestoreAddress();
+            var restoreAddress = ResolveRestoreAddress();
             if (string.IsNullOrWhiteSpace(restoreAddress))
             {
                 restoreAddress = Strings.HomeAddress;
@@ -378,7 +378,11 @@ namespace WebContent.Client
             }
         }
 
-        private string GetRestoreAddress()
+        /// <summary>
+        /// Address a fresh or recreated browser for this view item should start at: this session's
+        /// recorded URL, else the persisted LastAddress (when RememberLastAddress is on), else home.
+        /// </summary>
+        internal string ResolveRestoreAddress()
         {
             var settings = _viewItemManager?.Settings;
             return settings != null ? settings.ResolveRestoreAddress() : Home;

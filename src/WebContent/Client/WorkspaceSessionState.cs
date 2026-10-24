@@ -53,12 +53,14 @@ namespace WebContent.Client
                 : null;
         }
 
-        public static void Reset(Guid instanceKey)
+        public static bool Reset(Guid instanceKey)
         {
-            if (instanceKey != Guid.Empty)
+            if (instanceKey == Guid.Empty)
             {
-                _byInstanceKey.TryRemove(instanceKey, out _);
+                return false;
             }
+
+            return _byInstanceKey.TryRemove(instanceKey, out _);
         }
 
         /// <summary>
@@ -81,14 +83,20 @@ namespace WebContent.Client
             return homeAddress;
         }
 
+        /// <summary>
+        /// A definition seed carrying a fingerprint invalidates saved navigation state unless the
+        /// persisted fingerprint already matches it. A blank persisted fingerprint (new view item
+        /// store, or one persisted by a pre-fingerprint version) also counts as stale so a first
+        /// admin edit cannot leave an old page restored.
+        /// </summary>
         public static bool ShouldResetOnDefinitionUpdate(string previousFingerprint, string updatedFingerprint)
         {
-            if (string.IsNullOrWhiteSpace(previousFingerprint) || string.IsNullOrWhiteSpace(updatedFingerprint))
+            if (string.IsNullOrWhiteSpace(updatedFingerprint))
             {
                 return false;
             }
 
-            return !string.Equals(previousFingerprint, updatedFingerprint, StringComparison.Ordinal);
+            return !string.Equals(previousFingerprint ?? string.Empty, updatedFingerprint, StringComparison.Ordinal);
         }
     }
 }
