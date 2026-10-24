@@ -200,6 +200,32 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void Build_Adds_Stable_Definition_Fingerprint()
+        {
+            var id = Guid.NewGuid();
+            var source = new Dictionary<string, string> { ["Address"] = "intranet.local" };
+
+            var first = WorkspaceProperties.Build(id, "Ops", source, FallbackHomeAddress);
+            var second = WorkspaceProperties.Build(id, "Ops", source, FallbackHomeAddress);
+
+            Assert.NotEmpty(first["DefinitionFingerprint"]);
+            Assert.Equal(first["DefinitionFingerprint"], second["DefinitionFingerprint"]);
+        }
+
+        [Fact]
+        public void Build_Changes_Fingerprint_When_Admin_Edits_Definition()
+        {
+            var id = Guid.NewGuid();
+
+            var before = WorkspaceProperties.Build(
+                id, "Ops", new Dictionary<string, string> { ["Address"] = "old.local" }, FallbackHomeAddress);
+            var after = WorkspaceProperties.Build(
+                id, "Ops", new Dictionary<string, string> { ["Address"] = "new.local" }, FallbackHomeAddress);
+
+            Assert.NotEqual(before["DefinitionFingerprint"], after["DefinitionFingerprint"]);
+        }
+
+        [Fact]
         public void Source_Properties_Are_Not_Mutated()
         {
             var id = Guid.NewGuid();

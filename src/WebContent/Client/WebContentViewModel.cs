@@ -57,7 +57,7 @@ namespace WebContent.Client
 
         public Visibility AddressVisibility => (_viewItemManager?.Settings.HideAddress ?? false) ? Visibility.Collapsed : Visibility.Visible;
 
-        public Guid Id => _viewItemManager?.Settings.InstanceId ?? Guid.NewGuid();
+        public Guid Id => _viewItemManager?.Settings.InstanceId ?? (_designerMode ? Guid.NewGuid() : Guid.Empty);
 
         
         private object _workspaceStateChangedReceiver;
@@ -73,12 +73,18 @@ namespace WebContent.Client
             }
         }
 
+        private bool _designerMode;
         private BrowserInstance _browser;
         public BrowserInstance Browser
         {
             get
             {
-                if (_browser == null)
+                // XAML bindings fire during InitializeComponent() before the ViewItemManager is
+                // attached. Resolving the browser then keyed it to a random id and navigated it
+                // to the fallback home address instead of the configured one, and the view never
+                // corrected itself because RestoreAddressIfNeeded only re-navigates when the
+                // current address equals home. Wait for the manager; the designer path is exempt.
+                if (_browser == null && (_viewItemManager != null || _designerMode))
                 {
                     _browser = BrowserManager.GetBrowser(
                         Id,
@@ -175,6 +181,7 @@ namespace WebContent.Client
             // Empty constructor for WPF designer support
             if (DesignerProperties.GetIsInDesignMode(new DependencyObject()))
             {
+                _designerMode = true;
                 _browserVisibility = Visibility.Visible;
                 //Browser = BrowserManager.GetBrowser(Guid.Empty, new Uri(Home), false);
                 Browser.Initialize();

@@ -7,10 +7,11 @@ using WebContent.Client;
 namespace WebContent.Tests
 {
     /// <summary>
-    /// Tests for the pure workspace model and the "first valid config" selection used by
-    /// <see cref="WorkspacePluginFactory"/> (ticket #7). A definition is provisionable only
+    /// Tests for the pure workspace model and the multi-workspace selection used by
+    /// <see cref="WorkspacePluginFactory"/> (ticket #8). A definition is provisionable only
     /// when it has a display name and a configured home address (JSON blob first, then the
-    /// legacy HomeAddress/Address properties).
+    /// legacy HomeAddress/Address properties). <see cref="WorkspaceDefinition.SelectVisible"/>
+    /// returns the provisionable definitions the current user may VIEW, in admin order.
     /// </summary>
     public class WorkspaceDefinitionTests
     {
@@ -121,53 +122,92 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void SelectFirstProvisionable_Returns_First_Qualifying_Definition()
+        public void SelectVisible_Returns_Provisionable_And_Permitted_In_Admin_Order()
         {
-            var skipped = Create("Skipped");
+            var first = Create("First", legacyAddress: "first.local");
+            var second = Create("Second", legacyAddress: "second.local");
+            var third = Create("Third", legacyAddress: "third.local");
+
+            var visible = WorkspaceDefinition.SelectVisible(
+                new[] { first, second, third },
+                new[] { first.Id, third.Id });
+
+            Assert.Equal(new[] { first, third }, visible);
+        }
+
+        [Fact]
+        public void SelectVisible_Skips_Workspaces_Without_View_Permission()
+        {
             var first = Create("First", legacyAddress: "first.local");
             var second = Create("Second", legacyAddress: "second.local");
 
-            var selected = WorkspaceDefinition.SelectFirstProvisionable(new[] { skipped, first, second });
+            var visible = WorkspaceDefinition.SelectVisible(
+                new[] { first, second },
+                new[] { first.Id });
 
-            Assert.Same(first, selected);
+            Assert.Single(visible);
+            Assert.Same(first, visible[0]);
         }
 
         [Fact]
-        public void SelectFirstProvisionable_Returns_Null_When_List_Empty()
+        public void SelectVisible_Skips_Non_Provisionable_Even_When_Permitted()
         {
-            var selected = WorkspaceDefinition.SelectFirstProvisionable(new WorkspaceDefinition[0]);
+            var noAddress = Create("NoAddress");
+            var ok = Create("Ok", legacyAddress: "ok.local");
 
-            Assert.Null(selected);
+            var visible = WorkspaceDefinition.SelectVisible(
+                new[] { noAddress, ok },
+                new[] { noAddress.Id, ok.Id });
+
+            Assert.Single(visible);
+            Assert.Same(ok, visible[0]);
         }
 
         [Fact]
-        public void SelectFirstProvisionable_Returns_Null_When_None_Qualify()
+        public void SelectVisible_Returns_Empty_When_No_Workspace_Is_Permitted()
         {
-            var selected = WorkspaceDefinition.SelectFirstProvisionable(new[]
-            {
-                Create("One"),
-                Create("Two")
-            });
+            var first = Create("First", legacyAddress: "first.local");
 
-            Assert.Null(selected);
+            var visible = WorkspaceDefinition.SelectVisible(new[] { first }, Array.Empty<Guid>());
+
+            Assert.Empty(visible);
         }
 
         [Fact]
-        public void SelectFirstProvisionable_Skips_Null_Entries()
+        public void SelectVisible_Returns_Empty_When_List_Empty()
+        {
+            var visible = WorkspaceDefinition.SelectVisible(new WorkspaceDefinition[0], new[] { Guid.NewGuid() });
+
+            Assert.Empty(visible);
+        }
+
+        [Fact]
+        public void SelectVisible_Handles_Null_List()
+        {
+            var visible = WorkspaceDefinition.SelectVisible(null, new[] { Guid.NewGuid() });
+
+            Assert.Empty(visible);
+        }
+
+        [Fact]
+        public void SelectVisible_Handles_Null_Permitted_Ids()
         {
             var valid = Create("Valid", legacyAddress: "valid.local");
 
-            var selected = WorkspaceDefinition.SelectFirstProvisionable(new WorkspaceDefinition[] { null, valid, null });
+            var visible = WorkspaceDefinition.SelectVisible(new[] { valid }, null);
 
-            Assert.Same(valid, selected);
+            Assert.Empty(visible);
         }
 
         [Fact]
-        public void SelectFirstProvisionable_Handles_Null_List()
+        public void SelectVisible_Skips_Null_Entries()
         {
-            var selected = WorkspaceDefinition.SelectFirstProvisionable(null);
+            var valid = Create("Valid", legacyAddress: "valid.local");
 
-            Assert.Null(selected);
+            var visible = WorkspaceDefinition.SelectVisible(new WorkspaceDefinition[] { null, valid }, new[] { valid.Id });
+
+            Assert.Single(visible);
+            Assert.Same(valid, visible[0]);
         }
     }
 }

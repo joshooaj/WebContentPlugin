@@ -6,24 +6,25 @@ using VideoOS.Platform.Client;
 namespace WebContent.Client
 {
     /// <summary>
-    /// Turns admin-defined workspace configurations read from the server into a Smart Client
-    /// workspace plugin. Ticket #7 provisions exactly one tab from the first provisionable
-    /// configuration; multi-workspace support is a follow-up. The pure selection and property
-    /// building live in <see cref="WorkspaceDefinition"/> and <see cref="WorkspaceProperties"/>
-    /// so they can be unit-tested without the VideoOS SDK.
+    /// Turns admin-defined workspace configurations read from the server into one Smart Client
+    /// workspace plugin per workspace (ticket #8). Workspaces the current user cannot VIEW are
+    /// silently skipped, and the remaining tabs are created in admin-defined server order. The
+    /// pure selection and property building live in <see cref="WorkspaceDefinition"/> and
+    /// <see cref="WorkspaceProperties"/> so they can be unit-tested without the VideoOS SDK.
     /// </summary>
     internal sealed class WorkspacePluginFactory
     {
+        private readonly WorkspacePermissionEvaluator _permissionEvaluator = new WorkspacePermissionEvaluator();
+
         /// <summary>
-        /// Returns the plugin for the first provisionable workspace in server order, or null when
-        /// the read succeeded but no workspace has both a display name and a configured home
-        /// address.
+        /// Returns one plugin per admin-defined workspace the current user may VIEW, in the admin-defined
+        /// order, or an empty list when the read succeeded but no workspace qualifies.
         /// </summary>
-        public WorkSpacePlugin CreateFirstProvisionableWorkSpacePlugin(IReadOnlyList<Item> workspaces)
+        public IReadOnlyList<WorkSpacePlugin> CreateWorkSpacePlugins(IReadOnlyList<Item> workspaces)
         {
             if (workspaces == null || workspaces.Count == 0)
             {
-                return null;
+                return Array.Empty<WorkSpacePlugin>();
             }
 
             var definitions = new List<WorkspaceDefinition>(workspaces.Count);
@@ -35,19 +36,22 @@ namespace WebContent.Client
                     workspace.Properties));
             }
 
-            var selected = WorkspaceDefinition.SelectFirstProvisionable(definitions);
-            if (selected == null)
+            var permittedIds = _permissionEvaluator.GetViewableWorkspaceIds(workspaces);
+            var visible = WorkspaceDefinition.SelectVisible(definitions, permittedIds);
+
+            var plugins = new List<WorkSpacePlugin>(visible.Count);
+            foreach (var definition in visible)
             {
-                return null;
+                var properties = WorkspaceProperties.Build(
+                    definition.Id,
+                    definition.Name,
+                    definition.SourceProperties,
+                    Strings.HomeAddress);
+
+                plugins.Add(new WebContentWorkSpacePlugin(definition.Id, definition.Name, properties));
             }
 
-            var properties = WorkspaceProperties.Build(
-                selected.Id,
-                selected.Name,
-                selected.SourceProperties,
-                Strings.HomeAddress);
-
-            return new WebContentWorkSpacePlugin(selected.Id, selected.Name, properties);
+            return plugins;
         }
     }
 }

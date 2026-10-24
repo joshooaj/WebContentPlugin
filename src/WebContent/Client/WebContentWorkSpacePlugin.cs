@@ -17,6 +17,7 @@ namespace WebContent.Client
         private readonly string _workspaceName;
         private readonly Dictionary<string, string> _workspaceProperties;
         private readonly List<object> _messageRegistrations = new List<object>();
+        private readonly Guid _instanceId;
         private bool _isCurrentWorkspace;
 
         public WebContentWorkSpacePlugin(Guid workspaceId, string workspaceName, Dictionary<string, string> properties)
@@ -26,9 +27,10 @@ namespace WebContent.Client
             _workspaceProperties = properties ?? new Dictionary<string, string>();
 
             if (!_workspaceProperties.TryGetValue(nameof(WebContentSettings.InstanceId), out var instanceId) ||
-                !Guid.TryParse(instanceId, out _))
+                !Guid.TryParse(instanceId, out _instanceId))
             {
-                _workspaceProperties[nameof(WebContentSettings.InstanceId)] = _workspaceId.ToString();
+                _instanceId = _workspaceId;
+                _workspaceProperties[nameof(WebContentSettings.InstanceId)] = _instanceId.ToString();
             }
         }
 
@@ -40,6 +42,13 @@ namespace WebContent.Client
 
         public override void Init()
         {
+            // Publish the admin-defined properties for the session so the provisioned view item
+            // can seed its own persisted property store (see WorkspaceInstanceProperties).
+            WorkspaceInstanceProperties.Register(_instanceId, _workspaceProperties);
+            WorkspaceInstanceProperties.Register(_workspaceId, _workspaceProperties);
+            _workspaceProperties.TryGetValue(nameof(WebContentSettings.HomeAddress), out var configuredHome);
+            EnvironmentManager.Instance.Log(false, nameof(WebContentWorkSpacePlugin), $"WebContent workspace '{_workspaceName}' published definition (InstanceId={_instanceId}, HomeAddress={configuredHome ?? "(none)"}).");
+
             try
             {
                 LoadProperties(true);
@@ -107,23 +116,89 @@ namespace WebContent.Client
 
         private void EnsureViewItemPresent()
         {
-            if (IsWebContentViewItemPresent())
+            if (IsWebContentViewItemCurrent())
             {
+                RegisterViewItemFqid();
                 return;
             }
 
+            RemoveWebContentViewItem();
             PopulateViewItem();
+            RegisterViewItemFqid();
         }
 
-        private bool IsWebContentViewItemPresent()
+        /// <summary>
+        /// Maps the view item's layout FQID to the definition so the ViewItemManager can resolve
+        /// its workspace identity before its own property store holds any identity (a brand-new
+        /// view item mints a random InstanceId when seeded properties are not loaded yet).
+        /// </summary>
+        private void RegisterViewItemFqid()
         {
             try
             {
-                return ViewAndLayoutItem.ViewItemId(0) == WebContentViewItemPluginId;
+                var viewItem = ViewAndLayoutItem.GetViewItem(0);
+                var fqid = viewItem?.FQID;
+                if (fqid != null && fqid.ObjectId != Guid.Empty)
+                {
+                    WorkspaceInstanceProperties.Register(fqid.ObjectId, _workspaceProperties);
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Failed to register FQID mapping for workspace {_workspaceName} ({_workspaceId}): {ex.Message}");
+            }
+        }
+
+        private bool IsWebContentViewItemCurrent()
+        {
+            try
+            {
+                if (ViewAndLayoutItem.ViewItemId(0) != WebContentViewItemPluginId)
+                {
+                    return false;
+                }
+
+                // Properties without a fingerprint (e.g. hand-built test doubles) keep the old
+                // presence-only behavior so re-provisioning never churns on missing metadata.
+                if (!_workspaceProperties.TryGetValue(WorkspaceViewItemSync.FingerprintKey, out var fingerprint) ||
+                    string.IsNullOrEmpty(fingerprint))
+                {
+                    return true;
+                }
+
+                var existing = ViewAndLayoutItem.GetViewItem(0);
+                if (WorkspaceViewItemSync.IsCurrent(existing?.Properties, _workspaceId, fingerprint))
+                {
+                    return true;
+                }
+
+                EnvironmentManager.Instance.Log(false, nameof(WebContentWorkSpacePlugin), $"Persisted view item for workspace {_workspaceName} ({_workspaceId}) is stale or foreign; re-provisioning it from the current definition.");
+                return false;
             }
             catch
             {
                 return false;
+            }
+        }
+
+        private void RemoveWebContentViewItem()
+        {
+            try
+            {
+                if (ViewAndLayoutItem.ViewItemId(0) != WebContentViewItemPluginId)
+                {
+                    return;
+                }
+
+                var existing = ViewAndLayoutItem.GetViewItem(0);
+                if (existing != null)
+                {
+                    ViewAndLayoutItem.RemoveChild(existing);
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Failed to remove stale view item from workspace {_workspaceName} ({_workspaceId}): {ex.Message}");
             }
         }
 
