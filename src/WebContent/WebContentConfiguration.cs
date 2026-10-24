@@ -111,13 +111,13 @@ namespace WebContent
                 return string.Empty;
             }
 
-            return TryCreateNavigationUri(address, out var uri) ? uri.ToString() : string.Empty;
+            return TryCreateNavigationUri(address, out var uri) ? uri.AbsoluteUri : string.Empty;
         }
 
         internal static string NormalizeAddressOrDefault(string address, string fallbackAddress)
         {
             var uri = CreateNavigationUri(address, fallbackAddress);
-            return uri.ToString();
+            return uri.AbsoluteUri;
         }
 
         internal static Uri CreateNavigationUri(string address, string fallbackAddress = null)
@@ -144,12 +144,96 @@ namespace WebContent
             }
 
             var trimmed = address.Trim();
-            if (Uri.TryCreate(trimmed, UriKind.Absolute, out uri))
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absolute))
+            {
+                if (IsHttpScheme(absolute) && absolute.Host.Length > 0)
+                {
+                    uri = absolute;
+                    return true;
+                }
+
+                if (!LooksLikeHostPort(trimmed))
+                {
+                    return false;
+                }
+            }
+
+            if (trimmed.IndexOf("://", StringComparison.Ordinal) > 0)
+            {
+                return false;
+            }
+
+            if (Uri.TryCreate($"https://{trimmed}", UriKind.Absolute, out uri) && uri.Host.Length > 0)
             {
                 return true;
             }
 
-            return Uri.TryCreate($"https://{trimmed}", UriKind.Absolute, out uri);
+            uri = null;
+            return false;
+        }
+
+        private static bool IsHttpScheme(Uri uri)
+        {
+            return string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // "server:8443" parses as an absolute URI whose scheme is "server:", so a bare host:port
+        // must be told apart from a real scheme ("mailto:a@b.com") by its numeric port.
+        private static bool LooksLikeHostPort(string address)
+        {
+            var colon = IndexOfUnbracketed(address, ':');
+            if (colon <= 0)
+            {
+                return false;
+            }
+
+            var portEnd = colon + 1;
+            while (portEnd < address.Length && char.IsDigit(address[portEnd]))
+            {
+                portEnd++;
+            }
+
+            if (portEnd == colon + 1 || portEnd - colon > 6)
+            {
+                return false;
+            }
+
+            if (portEnd < address.Length && address[portEnd] != '/' && address[portEnd] != '?' && address[portEnd] != '#')
+            {
+                return false;
+            }
+
+            return int.TryParse(address.Substring(colon + 1, portEnd - colon - 1), out var port) &&
+                   port >= 0 &&
+                   port <= 65535;
+        }
+
+        private static int IndexOfUnbracketed(string address, char target)
+        {
+            var inBrackets = false;
+            for (var i = 0; i < address.Length; i++)
+            {
+                var c = address[i];
+                if (c == '[')
+                {
+                    inBrackets = true;
+                }
+                else if (c == ']')
+                {
+                    inBrackets = false;
+                }
+                else if (c == target && !inBrackets)
+                {
+                    return i;
+                }
+                else if (!inBrackets && (c == '/' || c == '?' || c == '#'))
+                {
+                    return -1;
+                }
+            }
+
+            return -1;
         }
 
         internal static string FormatBoolean(bool value)

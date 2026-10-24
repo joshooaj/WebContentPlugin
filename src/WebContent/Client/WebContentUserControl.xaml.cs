@@ -21,6 +21,7 @@ namespace WebContent.Client
     {
         private static readonly object ActiveControlsSync = new object();
         private static readonly Dictionary<Guid, List<WeakReference<WebContentUserControl>>> ActiveControlsByBrowserId = new Dictionary<Guid, List<WeakReference<WebContentUserControl>>>();
+        private static readonly Brush InvalidAddressBrush = Brushes.OrangeRed;
 
         private WebContentViewModel _viewModel;
         private bool _isClosed;
@@ -29,6 +30,7 @@ namespace WebContent.Client
         public WebContentUserControl()
         {
             InitializeComponent();
+            addressBar.TextChanged += OnAddressBarTextChanged;
             _viewModel = DataContext as WebContentViewModel;
 
             if (DesignerProperties.GetIsInDesignMode(this))
@@ -45,9 +47,15 @@ namespace WebContent.Client
         {
             // FYI DataContext is null until InitializeComponent() is called
             InitializeComponent();
+            addressBar.TextChanged += OnAddressBarTextChanged;
             _viewModel = DataContext as WebContentViewModel;
             _viewModel.ViewItemManager = viewItemManager;
             //PreviewMouseDown += WebContentUserControl_PreviewMouseDown;
+        }
+
+        private void OnAddressBarTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            ClearAddressFeedback();
         }
 
         public override void Init()
@@ -209,9 +217,36 @@ namespace WebContent.Client
                 {
                     address += ".com";
                 }
-                _viewModel.Browser.Address = address;
+
+                if (WebContentConfiguration.TryCreateNavigationUri(address, out var uri))
+                {
+                    ClearAddressFeedback();
+                    _viewModel.Browser.Address = uri.AbsoluteUri;
+                }
+                else
+                {
+                    ShowInvalidAddressFeedback(address);
+                }
                 e.Handled = true;
             }
+        }
+
+        private void ShowInvalidAddressFeedback(string rawAddress)
+        {
+            EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Rejected invalid address input for view item {_viewModel?.Id}: '{rawAddress}'.");
+            addressBar.BorderBrush = InvalidAddressBrush;
+            addressBar.ToolTip = string.Format(Strings.InvalidAddressMessage, rawAddress);
+        }
+
+        private void ClearAddressFeedback()
+        {
+            if (!ReferenceEquals(addressBar.BorderBrush, InvalidAddressBrush))
+            {
+                return;
+            }
+
+            addressBar.ClearValue(BorderBrushProperty);
+            addressBar.ClearValue(ToolTipProperty);
         }
 
         private void ViewItemWpfUserControl_MouseDown(object sender, MouseButtonEventArgs e)

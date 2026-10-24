@@ -37,7 +37,20 @@ namespace WebContent.Client
                 WebContentConfiguration.GetString(GetProperty, Strings.HomeAddress, nameof(HomeAddress), "Address"));
             set
             {
-                var normalizedAddress = WebContentConfiguration.NormalizeHomeAddress(value);
+                string normalizedAddress;
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    normalizedAddress = WebContentConfiguration.NormalizeHomeAddress(value);
+                }
+                else if (WebContentConfiguration.TryCreateNavigationUri(value, out var uri))
+                {
+                    normalizedAddress = uri.AbsoluteUri;
+                }
+                else
+                {
+                    throw new ArgumentException(string.Format(Strings.InvalidAddressMessage, value), nameof(value));
+                }
+
                 if (string.Equals(HomeAddress, normalizedAddress, StringComparison.OrdinalIgnoreCase)) return;
                 SetProperty(nameof(HomeAddress), normalizedAddress);
                 SetProperty("Address", normalizedAddress);

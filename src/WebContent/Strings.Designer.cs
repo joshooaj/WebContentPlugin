@@ -196,6 +196,24 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to &quot;{0}&quot; is not a valid address. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL..
+        /// </summary>
+        internal static string InvalidAddressMessage {
+            get {
+                return ResourceManager.GetString("InvalidAddressMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Invalid address.
+        /// </summary>
+        internal static string InvalidAddressTitle {
+            get {
+                return ResourceManager.GetString("InvalidAddressTitle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Isolate this browser instance.
         /// </summary>
         internal static string IsolateBrowserInstancesLabel {
@@ -210,6 +228,15 @@ namespace WebContent {
         internal static string IsolateBrowserInstancesToolTip {
             get {
                 return ResourceManager.GetString("IsolateBrowserInstancesToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A home address is required. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL..
+        /// </summary>
+        internal static string MissingHomeAddressMessage {
+            get {
+                return ResourceManager.GetString("MissingHomeAddressMessage", resourceCulture);
             }
         }
         

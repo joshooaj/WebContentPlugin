@@ -398,18 +398,12 @@ namespace WebContent.Client
                 return string.Empty;
             }
 
-            var trimmed = address.Trim();
-            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absoluteUri))
+            if (WebContentConfiguration.TryCreateNavigationUri(address, out var uri))
             {
-                return absoluteUri.AbsoluteUri.TrimEnd('/');
+                return uri.AbsoluteUri.TrimEnd('/');
             }
 
-            if (Uri.TryCreate($"https://{trimmed}", UriKind.Absolute, out var normalizedUri))
-            {
-                return normalizedUri.AbsoluteUri.TrimEnd('/');
-            }
-
-            return trimmed.TrimEnd('/');
+            return address.Trim().TrimEnd('/');
         }
 
         private void ApplyWorkspaceState(WorkSpaceState state)

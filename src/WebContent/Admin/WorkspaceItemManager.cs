@@ -172,7 +172,22 @@ namespace WebContent.Admin
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Saving workspace configuration for item: {CurrentItem.Name} (FQID: {CurrentItem.FQID}).");
             CurrentItem.Name = _userControl?.WorkspaceName ?? CurrentItem.Name;
 
-            var homeAddress = WebContentConfiguration.NormalizeHomeAddress(_userControl?.HomeAddress);
+            var rawHomeAddress = _userControl?.HomeAddress;
+            if (string.IsNullOrWhiteSpace(rawHomeAddress))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): home address is empty.");
+                MessageBox.Show(Strings.MissingHomeAddressMessage, Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (!WebContentConfiguration.TryCreateNavigationUri(rawHomeAddress, out var homeAddressUri))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid home address '{rawHomeAddress}'.");
+                MessageBox.Show(string.Format(Strings.InvalidAddressMessage, rawHomeAddress), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            var homeAddress = homeAddressUri.AbsoluteUri;
             var hideToolbar = _userControl?.HideToolbar ?? false;
             var hideAddress = !hideToolbar && (_userControl?.HideAddress ?? false);
 
