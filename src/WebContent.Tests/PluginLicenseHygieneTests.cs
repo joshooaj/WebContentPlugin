@@ -8,9 +8,9 @@ namespace WebContent.Tests
 {
     /// <summary>
     /// Ticket #16 (guarding #13): the plugin deliberately does NOT participate in the MIP site
-    /// license scheme (removed in a2eb05b, MIT relicense). This source-hygiene scan pins that
-    /// decision: the deleted license classes must stay deleted and no plugin source may
-    /// reference the VideoOS license APIs again, so a merge or revert cannot silently
+    /// license scheme (removed in 02ff12c, MIT relicense via PR #23). This source-hygiene scan
+    /// pins that decision: the deleted license classes must stay deleted and no plugin source
+    /// may reference the VideoOS license APIs again, so a merge or revert cannot silently
     /// resurrect license gating in an MIT-licensed plugin.
     /// </summary>
     public class PluginLicenseHygieneTests
