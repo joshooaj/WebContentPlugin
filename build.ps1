@@ -30,6 +30,16 @@ Write-Host "Building CascadiaWebContentPlugin.$Version.msi"
 if (!$?) {
     throw "MSBuild exited with code $LASTEXITCODE"
 }
+
+$sbomPath = Join-Path $PSScriptRoot 'output\WebContent\_manifest\spdx_2.2\manifest.spdx.json'
+if (!(Test-Path $sbomPath -PathType Leaf)) {
+    throw "SBOM was not generated at $sbomPath. The PostBuildEvent sbom-tool step did not run or failed."
+}
+$detectedPackages = ((Get-Content $sbomPath -Raw | ConvertFrom-Json).packages | Where-Object { $_.name -ne 'CascadiaWebContentPlugin' })
+if (@($detectedPackages).Count -eq 0) {
+    throw "SBOM at $sbomPath lists no referenced packages; sbom-tool component detection is broken (check the -bc component path in the PostBuildEvent)."
+}
+Write-Host "SBOM OK: $($detectedPackages.Count) referenced packages detected." -ForegroundColor Green
 Write-Host "Build completed successfully." -ForegroundColor Green
 
 [pscustomobject]@{
