@@ -28,10 +28,10 @@ need it for.
 The Web Content plugin stores its WebView2 browser profile in
 `%APPDATA%\SmartClient.WebContentData`, **keyed to the XProtect login identity** you used to sign
 into Smart Client, not merely to the Windows account. Different XProtect users therefore start with
-**separate, fresh** browser profiles — they do not inherit each other's browsing history, cookies or
+**separate, fresh** browser profiles. They do not inherit each other's browsing history, cookies or
 saved credentials on the same machine.
 
-**Important — the Windows account is the security boundary.** WebView2/Chromium encrypts protected
+**Important: the Windows account is the security boundary.** WebView2/Chromium encrypts protected
 browsing data (cookies and saved passwords) with Windows DPAPI, which is tied to the Windows logon.
 Two different XProtect accounts on the *same* Windows account are separated but not
 *cryptographically* isolated from each other. To keep two XProtect identities fully private, log
@@ -51,10 +51,11 @@ analysis.
 
 ### Install the plugin
 
-Download and run the [CascadiaWebContentPlugin](https://download.cascadia.tech/software/CascadiaWebContentPlugin.msi) installer.
+Download the installer from the [latest release](https://github.com/joshooaj/WebContentPlugin/releases/latest). Run the
+file named `CascadiaWebContentPlugin.<version>.msi`.
 
-The installer is not currently signed and your browser will warn you about the file is potentially unsafe. You can
-validate the file hash against the [SHA256 hash](https://download.cascadia.tech/software/CascadiaWebContentPlugin.msi.sha256.txt).
+The installer is not currently signed, so your browser will warn you that the file is potentially unsafe. The release
+also carries a `CascadiaWebContentPlugin.<version>.msi.sha256.txt` file that you can use to validate the installer hash.
 
 Click **Keep**, and if your browser asks again, click **Keep anyway**. The installation experience will improve when I
 get a code signing certificate setup.
