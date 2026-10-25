@@ -1,0 +1,72 @@
+name: Release
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    name: Release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache WebView2
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .\.cache
+          key: ${{ runner.os }}-webview
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+
+      - name: Compute release version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw "Releases must be dispatched from main, but ran on $env:GITHUB_REF."
+          }
+          dotnet tool restore
+          $version = (dotnet nbgv get-version -v SimpleVersion).Trim()
+          if (-not $version) { throw 'nbgv returned no SimpleVersion.' }
+          $tag = "v$version"
+          if (git ls-remote --tags origin "refs/tags/$tag") { throw "Tag $tag already exists." }
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists." }
+          "version=$version" | Add-Content $env:GITHUB_OUTPUT
+          "tag=$tag" | Add-Content $env:GITHUB_OUTPUT
+
+      - name: Build
+        shell: powershell
+        run: .\build.ps1 -Version '${{ steps.version.outputs.version }}'
+
+      - name: Tag release commit
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          git tag $tag
+          git push origin "refs/tags/$tag"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          $installer = Get-ChildItem -Path .\output\Setup\en-US\*.msi | Select-Object -First 1
+          if (-not $installer) { throw 'No MSI found in output\Setup\en-US\.' }
+          (Get-FileHash $installer.FullName -Algorithm SHA256).Hash | Set-Content "$($installer.FullName).sha256.txt"
+          gh release create $tag $installer.FullName "$($installer.FullName).sha256.txt" --generate-notes --title $tag
