@@ -10,5 +10,7 @@ namespace WebContent
     internal static class Strings
     {
         public const string HomeAddress = "https://github.com/joshooaj/WebContentPlugin";
+
+        public const string InvalidAddressMessage = "\"{0}\" is not a valid address. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL.";
     }
 }
