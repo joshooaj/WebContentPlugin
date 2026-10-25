@@ -30,6 +30,10 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
+      - name: Restore .NET tools
+        shell: pwsh
+        run: dotnet tool restore
+
       - name: Compute release version
         id: version
         env:
@@ -39,12 +43,16 @@ jobs:
           if ($env:GITHUB_REF -ne 'refs/heads/main') {
             throw "Releases must be dispatched from main, but ran on $env:GITHUB_REF."
           }
-          dotnet tool restore
-          $version = (dotnet nbgv get-version -v SimpleVersion).Trim()
+          Write-Host "pwsh $($PSVersionTable.PSVersion), git $(git --version)"
+          dotnet nbgv get-version -f json > nbgv.json
+          if ($LASTEXITCODE -ne 0) { throw "nbgv get-version exited $LASTEXITCODE." }
+          $version = (Get-Content nbgv.json -Raw | ConvertFrom-Json).SimpleVersion
           if (-not $version) { throw 'nbgv returned no SimpleVersion.' }
           $tag = "v$version"
-          if (git ls-remote --tags origin "refs/tags/$tag") { throw "Tag $tag already exists." }
-          gh release view $tag *> $null
+          Write-Host "Computed $tag"
+          gh api "repos/{owner}/{repo}/git/ref/tags/$tag" --jq .ref *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Tag $tag already exists." }
+          gh release view $tag --json tagName *> $null
           if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists." }
           "version=$version" | Add-Content $env:GITHUB_OUTPUT
           "tag=$tag" | Add-Content $env:GITHUB_OUTPUT
