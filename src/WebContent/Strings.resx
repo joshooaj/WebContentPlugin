@@ -162,11 +162,20 @@
   <data name="HomeLabel" xml:space="preserve">
     <value>Home</value>
   </data>
+  <data name="InvalidAddressMessage" xml:space="preserve">
+    <value>"{0}" is not a valid address. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL.</value>
+  </data>
+  <data name="InvalidAddressTitle" xml:space="preserve">
+    <value>Invalid address</value>
+  </data>
   <data name="IsolateBrowserInstancesLabel" xml:space="preserve">
     <value>Isolate this browser instance</value>
   </data>
   <data name="IsolateBrowserInstancesToolTip" xml:space="preserve">
     <value>Use a unique browser profile to isolate this browser instance from any others.</value>
+  </data>
+  <data name="MissingHomeAddressMessage" xml:space="preserve">
+    <value>A home address is required. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL.</value>
   </data>
   <data name="MuteAudioLabel" xml:space="preserve">
     <value>Mute audio</value>
@@ -182,6 +191,18 @@
   </data>
   <data name="ZoomLevelLabel" xml:space="preserve">
     <value>Zoom level</value>
+  </data>
+  <data name="WorkspaceConfigErrorNotification" xml:space="preserve">
+    <value>Web Content workspace "{0}" has a configuration error: {1} Correct the workspace definition in the Management Client.</value>
+  </data>
+  <data name="WorkspaceConfigErrorMalformedJson" xml:space="preserve">
+    <value>the saved workspace configuration is corrupt and could not be parsed.</value>
+  </data>
+  <data name="WorkspaceConfigErrorAdminBanner" xml:space="preserve">
+    <value>Saved configuration is broken: {0} Press Save to rewrite a clean definition from the values shown.</value>
+  </data>
+  <data name="WorkspaceConfigErrorMissingBrowserConfig" xml:space="preserve">
+    <value>no browser page with a home address is configured for this workspace.</value>
   </data>
   <data name="WorkspaceLabel" xml:space="preserve">
     <value>Workspace</value>

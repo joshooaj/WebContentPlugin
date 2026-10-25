@@ -46,6 +46,12 @@ namespace WebContent.Client
                     return;
                 }
 
+                if (definition.TryGetValue(WorkspaceViewItemSync.FingerprintKey, out var updatedFingerprint) &&
+                    WorkspaceSessionState.ShouldResetOnDefinitionUpdate(GetProperty(WorkspaceViewItemSync.FingerprintKey), updatedFingerprint))
+                {
+                    ResetSavedNavigationState(definition, matchedKey);
+                }
+
                 var seed = WorkspaceInstanceProperties.ComputeSeed(GetProperty, definition);
                 if (seed.Count == 0)
                 {
@@ -93,6 +99,28 @@ namespace WebContent.Client
         private static string TryHome(System.Collections.Generic.IReadOnlyDictionary<string, string> definition)
         {
             return definition != null && definition.TryGetValue(nameof(WebContentSettings.HomeAddress), out var home) ? home : "(none)";
+        }
+
+        /// <summary>
+        /// Ticket #9: the admin edited the workspace definition (fingerprint changed), so saved
+        /// navigation state is dropped and the browser starts at the new home URL on next login.
+        /// Clears the session-scoped URL for both instance keys and the persisted LastAddress.
+        /// </summary>
+        private void ResetSavedNavigationState(System.Collections.Generic.IReadOnlyDictionary<string, string> definition, string matchedKey)
+        {
+            var cleared = WorkspaceSessionState.Reset(Settings.InstanceId);
+            if (definition.TryGetValue(nameof(WebContentSettings.InstanceId), out var rawInstanceId) &&
+                Guid.TryParse(rawInstanceId, out var definitionInstanceId) &&
+                definitionInstanceId != Settings.InstanceId)
+            {
+                cleared |= WorkspaceSessionState.Reset(definitionInstanceId);
+            }
+
+            cleared |= Settings.ResetPersistedLastAddress();
+            if (cleared)
+            {
+                EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"Workspace definition updated ({matchedKey}); saved navigation state reset so the browser starts at the new home address.");
+            }
         }
 
         public override void Close()

@@ -276,10 +276,15 @@ namespace WebContent.Client
             if (WebView == null) return;
             try
             {
-                var uri = WebContentConfiguration.CreateNavigationUri(url, Strings.HomeAddress);
+                if (!WebContentConfiguration.TryCreateNavigationUri(url, out var uri))
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Refused to navigate browser {Id}: invalid address '{url}'.");
+                    return;
+                }
+
                 if (WebView.CoreWebView2 != null)
                 {
-                    WebView.CoreWebView2.Navigate(uri.ToString());
+                    WebView.CoreWebView2.Navigate(uri.AbsoluteUri);
                     WebView.Focus();
                 }
                 else

@@ -36,6 +36,7 @@
             this.lblSectionBehavior = new System.Windows.Forms.Label();
             this.lblSectionPrivacy = new System.Windows.Forms.Label();
             this.lblSectionAdvanced = new System.Windows.Forms.Label();
+            this.lblConfigError = new System.Windows.Forms.Label();
             this.SuspendLayout();
             // 
             // lblName
@@ -235,11 +236,24 @@
             this.chkEnableDevTools.UseVisualStyleBackColor = true;
             this.chkEnableDevTools.CheckedChanged += new System.EventHandler(this.OnUserChange);
             // 
+            // lblConfigError
+            // 
+            this.lblConfigError.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblConfigError.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblConfigError.ForeColor = System.Drawing.Color.Firebrick;
+            this.lblConfigError.Location = new System.Drawing.Point(16, 362);
+            this.lblConfigError.Name = "lblConfigError";
+            this.lblConfigError.Size = new System.Drawing.Size(528, 38);
+            this.lblConfigError.TabIndex = 19;
+            this.lblConfigError.Visible = false;
+            // 
             // WorkspaceUserControl
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoScroll = true;
+            this.Controls.Add(this.lblConfigError);
             this.Controls.Add(this.chkEnableDevTools);
             this.Controls.Add(this.chkIsolateBrowserInstances);
             this.Controls.Add(this.lblSectionAdvanced);
@@ -260,7 +274,7 @@
             this.Controls.Add(this.txtName);
             this.Controls.Add(this.lblName);
             this.Name = "WorkspaceUserControl";
-            this.Size = new System.Drawing.Size(560, 380);
+            this.Size = new System.Drawing.Size(560, 410);
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -287,5 +301,6 @@
         private System.Windows.Forms.Label lblSectionBehavior;
         private System.Windows.Forms.Label lblSectionPrivacy;
         private System.Windows.Forms.Label lblSectionAdvanced;
+        private System.Windows.Forms.Label lblConfigError;
     }
 }

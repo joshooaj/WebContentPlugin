@@ -266,6 +266,8 @@ namespace WebContent.Client
                 {
                     _viewItemManager.Settings.LastAddress = Address;
                 }
+
+                _viewItemManager.Settings.RecordSessionAddress(Address);
             }
         }
 
@@ -362,7 +364,7 @@ namespace WebContent.Client
 
         private void RestoreAddressIfNeeded()
         {
-            var restoreAddress = GetRestoreAddress();
+            var restoreAddress = ResolveRestoreAddress();
             if (string.IsNullOrWhiteSpace(restoreAddress))
             {
                 restoreAddress = Strings.HomeAddress;
@@ -376,14 +378,14 @@ namespace WebContent.Client
             }
         }
 
-        private string GetRestoreAddress()
+        /// <summary>
+        /// Address a fresh or recreated browser for this view item should start at: this session's
+        /// recorded URL, else the persisted LastAddress (when RememberLastAddress is on), else home.
+        /// </summary>
+        internal string ResolveRestoreAddress()
         {
-            if (_viewItemManager?.Settings.RememberLastAddress == true && !string.IsNullOrWhiteSpace(_viewItemManager.Settings.LastAddress))
-            {
-                return _viewItemManager.Settings.LastAddress;
-            }
-
-            return Home;
+            var settings = _viewItemManager?.Settings;
+            return settings != null ? settings.ResolveRestoreAddress() : Home;
         }
 
         private static bool IsSameAddress(string first, string second)
@@ -398,18 +400,12 @@ namespace WebContent.Client
                 return string.Empty;
             }
 
-            var trimmed = address.Trim();
-            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absoluteUri))
+            if (WebContentConfiguration.TryCreateNavigationUri(address, out var uri))
             {
-                return absoluteUri.AbsoluteUri.TrimEnd('/');
+                return uri.AbsoluteUri.TrimEnd('/');
             }
 
-            if (Uri.TryCreate($"https://{trimmed}", UriKind.Absolute, out var normalizedUri))
-            {
-                return normalizedUri.AbsoluteUri.TrimEnd('/');
-            }
-
-            return trimmed.TrimEnd('/');
+            return address.Trim().TrimEnd('/');
         }
 
         private void ApplyWorkspaceState(WorkSpaceState state)

@@ -37,7 +37,20 @@ namespace WebContent.Client
                 WebContentConfiguration.GetString(GetProperty, Strings.HomeAddress, nameof(HomeAddress), "Address"));
             set
             {
-                var normalizedAddress = WebContentConfiguration.NormalizeHomeAddress(value);
+                string normalizedAddress;
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    normalizedAddress = WebContentConfiguration.NormalizeHomeAddress(value);
+                }
+                else if (WebContentConfiguration.TryCreateNavigationUri(value, out var uri))
+                {
+                    normalizedAddress = uri.AbsoluteUri;
+                }
+                else
+                {
+                    throw new ArgumentException(string.Format(Strings.InvalidAddressMessage, value), nameof(value));
+                }
+
                 if (string.Equals(HomeAddress, normalizedAddress, StringComparison.OrdinalIgnoreCase)) return;
                 SetProperty(nameof(HomeAddress), normalizedAddress);
                 SetProperty("Address", normalizedAddress);
@@ -186,6 +199,58 @@ namespace WebContent.Client
                 SetProperty(nameof(InstanceId), value.ToString());
                 OnPropertyChanged();
             }
+        }
+
+        /// <summary>
+        /// Fingerprint of the admin workspace definition that seeded this view item (ticket #9).
+        /// Empty for standalone (manually placed) view items, which disables session URL tracking.
+        /// </summary>
+        public string DefinitionFingerprint =>
+            WebContentConfiguration.GetString(GetProperty, string.Empty, WorkspaceViewItemSync.FingerprintKey);
+
+        /// <summary>
+        /// Updates the session-scoped last-visited URL for this workspace tab. No-op for
+        /// standalone items (no definition fingerprint).
+        /// </summary>
+        public void RecordSessionAddress(string address)
+        {
+            var fingerprint = DefinitionFingerprint;
+            if (string.IsNullOrWhiteSpace(fingerprint))
+            {
+                return;
+            }
+
+            WorkspaceSessionState.Record(InstanceId, fingerprint, address);
+        }
+
+        /// <summary>
+        /// Address a fresh browser for this tab should restore to: this session's recorded URL,
+        /// else the persisted LastAddress (when RememberLastAddress is on), else the home URL.
+        /// </summary>
+        public string ResolveRestoreAddress()
+        {
+            var fingerprint = DefinitionFingerprint;
+            var recorded = string.IsNullOrWhiteSpace(fingerprint)
+                ? null
+                : WorkspaceSessionState.TryGetRecordedUrl(InstanceId, fingerprint);
+            return WorkspaceSessionState.ResolveRestoreAddress(recorded, LastAddress, RememberLastAddress, HomeAddress);
+        }
+
+        /// <summary>
+        /// Clears the cross-session LastAddress so an admin definition update restores the new
+        /// home URL (ticket #9). Session state is cleared separately via WorkspaceSessionState.Reset.
+        /// Returns true when a value was actually cleared.
+        /// </summary>
+        public bool ResetPersistedLastAddress()
+        {
+            if (string.IsNullOrEmpty(LastAddress))
+            {
+                return false;
+            }
+
+            SetProperty(nameof(LastAddress), string.Empty);
+            OnPropertyChanged();
+            return true;
         }
 
         private WebContentViewItemManager _viewItemManager;

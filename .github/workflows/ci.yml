@@ -25,6 +25,21 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Regression suite
+        shell: pwsh
+        run: .\verify.ps1
+
   build:
     name: Build
     runs-on: windows-latest

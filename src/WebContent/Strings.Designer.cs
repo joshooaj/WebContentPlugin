@@ -196,6 +196,24 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to &quot;{0}&quot; is not a valid address. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL..
+        /// </summary>
+        internal static string InvalidAddressMessage {
+            get {
+                return ResourceManager.GetString("InvalidAddressMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Invalid address.
+        /// </summary>
+        internal static string InvalidAddressTitle {
+            get {
+                return ResourceManager.GetString("InvalidAddressTitle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Isolate this browser instance.
         /// </summary>
         internal static string IsolateBrowserInstancesLabel {
@@ -210,6 +228,15 @@ namespace WebContent {
         internal static string IsolateBrowserInstancesToolTip {
             get {
                 return ResourceManager.GetString("IsolateBrowserInstancesToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A home address is required. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL..
+        /// </summary>
+        internal static string MissingHomeAddressMessage {
+            get {
+                return ResourceManager.GetString("MissingHomeAddressMessage", resourceCulture);
             }
         }
         
@@ -255,6 +282,42 @@ namespace WebContent {
         internal static string ZoomLevelLabel {
             get {
                 return ResourceManager.GetString("ZoomLevelLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Web Content workspace &quot;{0}&quot; has a configuration error: {1} Correct the workspace definition in the Management Client..
+        /// </summary>
+        internal static string WorkspaceConfigErrorNotification {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorNotification", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to the saved workspace configuration is corrupt and could not be parsed..
+        /// </summary>
+        internal static string WorkspaceConfigErrorMalformedJson {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorMalformedJson", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Saved configuration is broken: {0} Press Save to rewrite a clean definition from the values shown..
+        /// </summary>
+        internal static string WorkspaceConfigErrorAdminBanner {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorAdminBanner", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to no browser page with a home address is configured for this workspace..
+        /// </summary>
+        internal static string WorkspaceConfigErrorMissingBrowserConfig {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorMissingBrowserConfig", resourceCulture);
             }
         }
     }

@@ -112,6 +112,7 @@ namespace WebContent.Admin
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
             var properties = item?.Properties;
+            var configError = WorkspaceConfiguration.DetectError(properties);
 
             _userControl.WorkspaceName = item.Name;
 
@@ -133,6 +134,14 @@ namespace WebContent.Admin
                     _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
                     _userControl.EnableDevTools = settings.EnableDevTools;
                     _userControl.FillContent();
+                    if (configError != WorkspaceConfigError.None)
+                    {
+                        SignalBrokenConfiguration(item, configError);
+                    }
+                    else
+                    {
+                        _userControl.ClearConfigurationError();
+                    }
                     return;
                 }
             }
@@ -150,6 +159,27 @@ namespace WebContent.Admin
             _userControl.IsolateBrowserInstances = WebContentConfiguration.GetBoolean(properties, false, "IsolateBrowserInstances");
             _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
             _userControl.FillContent();
+
+            if (configError != WorkspaceConfigError.None)
+            {
+                SignalBrokenConfiguration(item, configError);
+            }
+            else
+            {
+                _userControl.ClearConfigurationError();
+            }
+        }
+
+        /// <summary>
+        /// Ticket #27: a definition that failed detection loads with fallback values that look
+        /// healthy, so the admin page must say so. The banner names the defect and the page is
+        /// marked dirty after the fill completes (the shell resets dirty state synchronously),
+        /// enabling Save to rewrite a clean definition from what the admin sees.
+        /// </summary>
+        private void SignalBrokenConfiguration(Item item, WorkspaceConfigError configError)
+        {
+            _userControl?.SignalLoadDefect(string.Format(Strings.WorkspaceConfigErrorAdminBanner, WebContent.Client.WorkspaceConfigErrorText.Describe(configError)));
+            EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item?.Name}' loaded with a configuration error ({configError}); the page shows a warning and marks itself dirty so Save can rewrite a clean definition.");
         }
 
         public override string GetItemName()
@@ -172,7 +202,22 @@ namespace WebContent.Admin
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Saving workspace configuration for item: {CurrentItem.Name} (FQID: {CurrentItem.FQID}).");
             CurrentItem.Name = _userControl?.WorkspaceName ?? CurrentItem.Name;
 
-            var homeAddress = WebContentConfiguration.NormalizeHomeAddress(_userControl?.HomeAddress);
+            var rawHomeAddress = _userControl?.HomeAddress;
+            if (string.IsNullOrWhiteSpace(rawHomeAddress))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): home address is empty.");
+                MessageBox.Show(Strings.MissingHomeAddressMessage, Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (!WebContentConfiguration.TryCreateNavigationUri(rawHomeAddress, out var homeAddressUri))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid home address '{rawHomeAddress}'.");
+                MessageBox.Show(string.Format(Strings.InvalidAddressMessage, rawHomeAddress), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            var homeAddress = homeAddressUri.AbsoluteUri;
             var hideToolbar = _userControl?.HideToolbar ?? false;
             var hideAddress = !hideToolbar && (_userControl?.HideAddress ?? false);
 
