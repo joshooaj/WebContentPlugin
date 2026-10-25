@@ -34,7 +34,7 @@ if ($IncludePluginBuild) {
     }
     else {
         & $msbuild (Join-Path $repoRoot 'src/WebContent/WebContent.csproj') /t:Build /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
-        # sbom-tool "_manifest already exists" post-build noise is harmless; exit code is authoritative.
+        # PostBuildEvent sbom generation is warning-free and self-overwriting (-D true); exit code is authoritative.
         $gates.Add([pscustomobject]@{ Name = 'Plugin build'; ExitCode = $LASTEXITCODE })
     }
 }

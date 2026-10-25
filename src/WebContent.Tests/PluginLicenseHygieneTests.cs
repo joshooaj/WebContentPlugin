@@ -34,7 +34,7 @@ namespace WebContent.Tests
         [Fact]
         public void DeletedLicenseClassesDoNotReappear()
         {
-            var pluginRoot = FindPluginSourceRoot();
+            var pluginRoot = Path.Combine(RepoLocator.FindRepoRoot(), "src", "WebContent");
             var offenders = DeletedLicenseFiles
                 .Select(f => Path.Combine(pluginRoot, f.Replace('/', Path.DirectorySeparatorChar)))
                 .Where(File.Exists)
@@ -46,7 +46,7 @@ namespace WebContent.Tests
         [Fact]
         public void NoPluginSourceReferencesTheRemovedLicenseApiSurface()
         {
-            var pluginRoot = FindPluginSourceRoot();
+            var pluginRoot = Path.Combine(RepoLocator.FindRepoRoot(), "src", "WebContent");
             var violations = new List<string>();
 
             foreach (var file in Directory.EnumerateFiles(pluginRoot, "*.cs", SearchOption.AllDirectories))
@@ -65,24 +65,6 @@ namespace WebContent.Tests
             }
 
             Assert.Empty(violations);
-        }
-
-        private static string FindPluginSourceRoot()
-        {
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir != null)
-            {
-                var candidate = Path.Combine(dir.FullName, "src", "WebContent");
-                if (File.Exists(Path.Combine(candidate, "WebContentPluginDefinition.cs")))
-                {
-                    return candidate;
-                }
-
-                dir = dir.Parent;
-            }
-
-            throw new InvalidOperationException(
-                "Could not locate src/WebContent from the test assembly directory; the hygiene guard must run from a repository checkout.");
         }
     }
 }

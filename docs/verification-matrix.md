@@ -11,7 +11,7 @@ named log marker. An area is **verified** only when all of its rows pass.
 | Regression suite (all automated rows) | `dotnet test src/WebContent.Tests` | exit 0, zero failed |
 | One-command gate script | `.\verify.ps1` (add `-IncludePluginBuild` on a VS2022 machine) | exit 0, prints `Release gate: PASS` |
 | CI | `Tests` job in `.github/workflows/ci.yml` (runs on PRs and pushes) | job green before merge to `main`; the installer only publishes from `main` |
-| Plugin build | `msbuild src/WebContent/WebContent.csproj /t:Build /p:Configuration=Debug /p:Platform=x64` | exit 0 (`sbom-tool _manifest` noise is harmless) |
+| Plugin build | `msbuild src/WebContent/WebContent.csproj /t:Build /p:Configuration=Debug /p:Platform=x64` | exit 0, no sbom-tool warnings (PostBuildEvent passes `-D true`, so stale `_manifest` dirs self-overwrite) |
 | Manual host checks | Steps below, run against a deployed plugin per `AGENTS.md` | each row's expected outcome and log marker observed |
 
 Manual-check logs: Smart Client → `%ProgramData%\Milestone\XProtect Smart Client\MIPLog.txt`
@@ -31,6 +31,7 @@ is not evidence the plugin never ran.
 | Long-session stability | #15 | `BrowserRegistryTests.Repeated_Create_Release_Reclaim_Cycles_Keep_Tracking_Bounded`, `CallbackOwnershipTests`, `BrowserProfileKeyTests` (profile isolation) | See MC-1 and MC-6 below |
 | Session state (last-URL restore) | #9 | `WorkspaceSessionStateTests` (record/overwrite per instance key, fingerprint guard makes a definition edit unreadable, reset, blank-fingerprint standalone exclusion, restore precedence recorded → persisted → home, definition-update detection from fingerprints) | See MC-7 below: workspace switch restores the page, restart resets to home |
 | Configuration error visibility | #9 | `WorkspaceDefinitionTests` (`ConfigurationError` classifies malformed JSON, blob-without-items, no-home-address item, nothing configured; malformed JSON reported even when legacy properties would rescue it; `SelectVisible` keeps named-but-broken tabs and still skips unnamed/unpermitted) | See MC-8 below: broken tab appears with a WorkSpaceNotification warning |
+| SBOM integrity | #25 | `SbomGenerationGuardTests` (PostBuildEvent keeps a quoted absolute `-bc "$(MSBuildProjectDirectory)"` component path and `-D true`; the original bug let the CWD-relative `-bc .\` point at the build drop, so zero packages were detected) | `.\build.ps1` throws unless `output\WebContent\_manifest\spdx_2.2\manifest.spdx.json` lists referenced packages; CI Build job shows `SBOM OK` and no "no packages detected" annotation |
 
 ## Manual host checks
 
