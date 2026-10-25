@@ -103,6 +103,7 @@ namespace WebContent.Admin
             chkMuteAudio.Checked = false;
             chkIsolateBrowserInstances.Checked = false;
             chkEnableDevTools.Checked = false;
+            lblConfigError.Visible = false;
         }
 
         internal void FillContent()
@@ -126,13 +127,35 @@ namespace WebContent.Admin
         }
 
         /// <summary>
-        /// Marks the page dirty without any user edit (ticket #27). Used when the stored
-        /// configuration is broken so the Management Client Save button is enabled right away
-        /// and one click can rewrite a clean definition from the displayed values.
+        /// Ticket #27: a definition that failed detection loads with fallback values, so the page
+        /// must both say so (red banner) and become dirty so the shell's Save button is enabled.
+        /// The change event is re-raised after the current fill completes because the shell resets
+        /// dirty state once <c>FillUserControl</c> returns — a synchronous raise is swallowed.
         /// </summary>
-        internal void MarkDirty()
+        internal void SignalLoadDefect(string bannerText)
         {
-            OnUserChange();
+            lblConfigError.Text = bannerText;
+            lblConfigError.Visible = true;
+
+            if (IsHandleCreated)
+            {
+                BeginInvoke((MethodInvoker)delegate { OnUserChange(); });
+            }
+            else
+            {
+                HandleCreated += DeferredUserChangeOnce;
+            }
+        }
+
+        internal void ClearConfigurationError()
+        {
+            lblConfigError.Visible = false;
+        }
+
+        private void DeferredUserChangeOnce(object sender, EventArgs e)
+        {
+            HandleCreated -= DeferredUserChangeOnce;
+            BeginInvoke((MethodInvoker)delegate { OnUserChange(); });
         }
     }
 }

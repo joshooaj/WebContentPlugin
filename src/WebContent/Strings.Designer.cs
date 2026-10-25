@@ -304,6 +304,15 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Saved configuration is broken: {0} Press Save to rewrite a clean definition from the values shown..
+        /// </summary>
+        internal static string WorkspaceConfigErrorAdminBanner {
+            get {
+                return ResourceManager.GetString("WorkspaceConfigErrorAdminBanner", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to no browser page with a home address is configured for this workspace..
         /// </summary>
         internal static string WorkspaceConfigErrorMissingBrowserConfig {

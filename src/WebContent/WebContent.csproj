@@ -106,6 +106,7 @@
     <Compile Include="Client\WebContentViewItemManager.cs" />
     <Compile Include="Client\WebContentViewItemPlugin.cs" />
     <Compile Include="Client\WebContentWorkSpacePlugin.cs" />
+    <Compile Include="Client\WorkspaceConfigErrorText.cs" />
     <Compile Include="Client\WorkspaceDefinition.cs" />
     <Compile Include="Client\WorkspaceDefinitionFingerprint.cs" />
     <Compile Include="Client\WorkspaceInstanceProperties.cs" />

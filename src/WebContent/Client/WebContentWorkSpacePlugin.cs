@@ -56,7 +56,7 @@ namespace WebContent.Client
             if (_configError != WorkspaceConfigError.None)
             {
                 Notification = _configErrorNotification;
-                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Configuration error for workspace '{_workspaceName}' ({_workspaceId}): {DescribeConfigError(_configError)} The tab stays visible with a WorkSpaceNotification (ticket #9).");
+                EnvironmentManager.Instance.Log(true, nameof(WebContentWorkSpacePlugin), $"Configuration error for workspace '{_workspaceName}' ({_workspaceId}): {WorkspaceConfigErrorText.Describe(_configError)} The tab stays visible with a WorkSpaceNotification (ticket #9).");
             }
 
             try
@@ -235,20 +235,7 @@ namespace WebContent.Client
             return new WorkSpaceNotification(
                 WorkSpaceNotification.SEVERITY_MEDIUM,
                 1,
-                string.Format(Strings.WorkspaceConfigErrorNotification, workspaceName, DescribeConfigError(configError)));
-        }
-
-        private static string DescribeConfigError(WorkspaceConfigError configError)
-        {
-            switch (configError)
-            {
-                case WorkspaceConfigError.MalformedJson:
-                    return Strings.WorkspaceConfigErrorMalformedJson;
-                case WorkspaceConfigError.MissingBrowserConfig:
-                    return Strings.WorkspaceConfigErrorMissingBrowserConfig;
-                default:
-                    return string.Empty;
-            }
+                string.Format(Strings.WorkspaceConfigErrorNotification, workspaceName, WorkspaceConfigErrorText.Describe(configError)));
         }
     }
 }

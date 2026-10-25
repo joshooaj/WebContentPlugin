@@ -198,6 +198,9 @@
   <data name="WorkspaceConfigErrorMalformedJson" xml:space="preserve">
     <value>the saved workspace configuration is corrupt and could not be parsed.</value>
   </data>
+  <data name="WorkspaceConfigErrorAdminBanner" xml:space="preserve">
+    <value>Saved configuration is broken: {0} Press Save to rewrite a clean definition from the values shown.</value>
+  </data>
   <data name="WorkspaceConfigErrorMissingBrowserConfig" xml:space="preserve">
     <value>no browser page with a home address is configured for this workspace.</value>
   </data>

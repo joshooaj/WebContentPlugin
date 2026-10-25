@@ -112,7 +112,7 @@ namespace WebContent.Admin
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
             var properties = item?.Properties;
-            var hasConfigError = WorkspaceConfiguration.DetectError(properties) != WorkspaceConfigError.None;
+            var configError = WorkspaceConfiguration.DetectError(properties);
 
             _userControl.WorkspaceName = item.Name;
 
@@ -134,9 +134,13 @@ namespace WebContent.Admin
                     _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
                     _userControl.EnableDevTools = settings.EnableDevTools;
                     _userControl.FillContent();
-                    if (hasConfigError)
+                    if (configError != WorkspaceConfigError.None)
                     {
-                        MarkBrokenForQuickRepair(item);
+                        SignalBrokenConfiguration(item, configError);
+                    }
+                    else
+                    {
+                        _userControl.ClearConfigurationError();
                     }
                     return;
                 }
@@ -156,21 +160,26 @@ namespace WebContent.Admin
             _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
             _userControl.FillContent();
 
-            if (hasConfigError)
+            if (configError != WorkspaceConfigError.None)
             {
-                MarkBrokenForQuickRepair(item);
+                SignalBrokenConfiguration(item, configError);
+            }
+            else
+            {
+                _userControl.ClearConfigurationError();
             }
         }
 
         /// <summary>
-        /// Ticket #27: a stored definition that failed detection loads with its fallback values,
-        /// and the page is marked dirty on load so the Management Client Save button is enabled
-        /// immediately — one click rewrites a clean definition from what the admin sees.
+        /// Ticket #27: a definition that failed detection loads with fallback values that look
+        /// healthy, so the admin page must say so. The banner names the defect and the page is
+        /// marked dirty after the fill completes (the shell resets dirty state synchronously),
+        /// enabling Save to rewrite a clean definition from what the admin sees.
         /// </summary>
-        private void MarkBrokenForQuickRepair(Item item)
+        private void SignalBrokenConfiguration(Item item, WorkspaceConfigError configError)
         {
-            _userControl?.MarkDirty();
-            EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item?.Name}' loaded with a configuration error; the page is marked dirty so Save can rewrite a clean definition immediately.");
+            _userControl?.SignalLoadDefect(string.Format(Strings.WorkspaceConfigErrorAdminBanner, WebContent.Client.WorkspaceConfigErrorText.Describe(configError)));
+            EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item?.Name}' loaded with a configuration error ({configError}); the page shows a warning and marks itself dirty so Save can rewrite a clean definition.");
         }
 
         public override string GetItemName()
