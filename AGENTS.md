@@ -11,7 +11,7 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
   # msbuild path when not on PATH: C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe
   ```
 
-- `PostBuildEvent` `sbom-tool` runs with `-D true` (stale `_manifest` self-overwrites) and `-bc $(ProjectDir)` (absolute component path — build events run with CWD = output dir, so a relative `-bc .\` would scan the drop and detect zero packages). A sbom-tool failure now fails the build with MSB3073. Judge success by exit code plus files in `output\WebContent\` (9 files + `runtimes` folder).
+- `PostBuildEvent` `sbom-tool` runs with `-D true` (stale `_manifest` self-overwrites) and `-bc "$(MSBuildProjectDirectory)"` (quoted absolute component path — build events run with CWD = output dir, so a relative `-bc .\` would scan the drop and detect zero packages; `$(ProjectDir)` ends in a backslash that breaks quoting). A sbom-tool failure now fails the build with MSB3073. Judge success by exit code plus files in `output\WebContent\` (9 files + `runtimes` folder).
 - Full installer: `.\build.ps1` restores dotnet tools, caches the WebView2 runtime into `.cache`, then `msbuild src/Setup/setup.wixproj /t:Rebuild` (needs msbuild on PATH; CI adds it via setup-msbuild).
 
 ## Test
