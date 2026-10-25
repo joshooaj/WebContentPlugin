@@ -112,6 +112,7 @@ namespace WebContent.Admin
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
             var properties = item?.Properties;
+            var hasConfigError = WorkspaceConfiguration.DetectError(properties) != WorkspaceConfigError.None;
 
             _userControl.WorkspaceName = item.Name;
 
@@ -133,6 +134,10 @@ namespace WebContent.Admin
                     _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
                     _userControl.EnableDevTools = settings.EnableDevTools;
                     _userControl.FillContent();
+                    if (hasConfigError)
+                    {
+                        MarkBrokenForQuickRepair(item);
+                    }
                     return;
                 }
             }
@@ -150,6 +155,22 @@ namespace WebContent.Admin
             _userControl.IsolateBrowserInstances = WebContentConfiguration.GetBoolean(properties, false, "IsolateBrowserInstances");
             _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
             _userControl.FillContent();
+
+            if (hasConfigError)
+            {
+                MarkBrokenForQuickRepair(item);
+            }
+        }
+
+        /// <summary>
+        /// Ticket #27: a stored definition that failed detection loads with its fallback values,
+        /// and the page is marked dirty on load so the Management Client Save button is enabled
+        /// immediately — one click rewrites a clean definition from what the admin sees.
+        /// </summary>
+        private void MarkBrokenForQuickRepair(Item item)
+        {
+            _userControl?.MarkDirty();
+            EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item?.Name}' loaded with a configuration error; the page is marked dirty so Save can rewrite a clean definition immediately.");
         }
 
         public override string GetItemName()

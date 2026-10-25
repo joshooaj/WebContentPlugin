@@ -85,7 +85,7 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
 1. Create (or take) a workspace whose `WorkspaceConfig` property is unusable — corrupt the JSON directly in the database (or clear the property and the legacy Address/HomeAddress properties of a workspace item).
 2. Restart the Smart Client. Expected: the workspace tab **still appears** (no silent disappearance) and shows a WorkSpaceNotification warning whose text names the workspace and says it "has a configuration error" (corrupt-JSON vs no-browser-config wording).
 3. Expected log marker in MIPLog.txt: `Configuration error for workspace '<name>'`.
-4. Expected browser content: the tab renders the fallback home page; correcting the definition in Management Client and re-logging in clears the notification.
+4. Expected browser content: the tab renders the fallback home page. Open the workspace in the Management Client: the **Save button is enabled immediately** (no need to nudge any setting — ticket #27 dirty-on-load for broken configs); one Save rewrites a clean definition, and re-logging in clears the notification.
 
 ## Known high-risk regressions → pinned by
 

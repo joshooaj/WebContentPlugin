@@ -124,5 +124,15 @@ namespace WebContent.Admin
         {
             ConfigurationChangedByUser?.Invoke(this, EventArgs.Empty);
         }
+
+        /// <summary>
+        /// Marks the page dirty without any user edit (ticket #27). Used when the stored
+        /// configuration is broken so the Management Client Save button is enabled right away
+        /// and one click can rewrite a clean definition from the displayed values.
+        /// </summary>
+        internal void MarkDirty()
+        {
+            OnUserChange();
+        }
     }
 }
