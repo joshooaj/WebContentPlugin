@@ -61,6 +61,60 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Back.
+        /// </summary>
+        internal static string AddressBarBackToolTip {
+            get {
+                return ResourceManager.GetString("AddressBarBackToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Forward.
+        /// </summary>
+        internal static string AddressBarForwardToolTip {
+            get {
+                return ResourceManager.GetString("AddressBarForwardToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Reload.
+        /// </summary>
+        internal static string AddressBarReloadToolTip {
+            get {
+                return ResourceManager.GetString("AddressBarReloadToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Home.
+        /// </summary>
+        internal static string AddressBarHomeToolTip {
+            get {
+                return ResourceManager.GetString("AddressBarHomeToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Print.
+        /// </summary>
+        internal static string AddressBarPrintToolTip {
+            get {
+                return ResourceManager.GetString("AddressBarPrintToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Enter address: example.com, server:8443, or a full URL.
+        /// </summary>
+        internal static string AddressBarPlaceholder {
+            get {
+                return ResourceManager.GetString("AddressBarPlaceholder", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Allow audio notifications.
         /// </summary>
         internal static string AllowAudioNotificationsLabel {

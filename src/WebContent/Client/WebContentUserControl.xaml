@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:client="clr-namespace:VideoOS.Platform.Client;assembly=VideoOS.Platform"
-             xmlns:fa="clr-namespace:FontAwesome.WPF;assembly=FontAwesome.WPF"
+             xmlns:platformUiControls="clr-namespace:VideoOS.Platform.UI.Controls;assembly=VideoOS.Platform"
              xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
              xmlns:local="clr-namespace:WebContent.Client"
              mc:Ignorable="d" 
@@ -16,24 +16,37 @@
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
     </UserControl.Resources>
     <DockPanel Name="BrowserControl">
-        <DockPanel Name="Toolbar" DockPanel.Dock="Top" LastChildFill="True" Visibility="{Binding ToolbarVisibility, Mode=OneWay}" PreviewMouseDown="WebContentUserControl_PreviewMouseDown" Background="Transparent">
-            <Button Command="{Binding BackCommand}" Margin="2">
-                <fa:ImageAwesome Name="NavBack" Icon="ChevronLeft" Height="12"/>
-            </Button>
-            <Button Command="{Binding ForwardCommand}" Margin="2">
-                <fa:ImageAwesome Name="NavForward" Icon="ChevronRight" Height="12"/>
-            </Button>
-            <Button Command="{Binding ReloadCommand}" Margin="2">
-                <fa:ImageAwesome Name="NavRefresh" Icon="Refresh" Height="12"/>
-            </Button>
-            <Button Command="{Binding HomeCommand}" CommandParameter="{Binding Home}" Margin="2">
-                <fa:ImageAwesome Name="NavHome" Icon="Home" Height="12"/>
-            </Button>
-            <Button Command="{Binding PrintCommand}" Margin="2">
-                <fa:ImageAwesome Name="NavPrint" Icon="Print" Height="12"/>
-            </Button>
-            <TextBox Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" FontWeight="Medium" Margin="2" Padding="5 0 0 0" IsEnabled="{Binding IsAddressEnabled}" />
-        </DockPanel>
+        <StackPanel Name="Toolbar" DockPanel.Dock="Top" Visibility="{Binding ToolbarVisibility, Mode=OneWay}" PreviewMouseDown="WebContentUserControl_PreviewMouseDown" Background="Transparent">
+            <DockPanel Name="ToolbarRow" LastChildFill="True">
+                <platformUiControls:VideoOSButtonTransparentSmall Name="NavBack" Command="{Binding BackCommand}" Margin="0 2 1 2">
+                    <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                        <platformUiControls:VideoOSIconBuiltInSource Icon="Chevron_Left"/>
+                    </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <platformUiControls:VideoOSButtonTransparentSmall Name="NavForward" Command="{Binding ForwardCommand}" Margin="1 2">
+                    <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                        <platformUiControls:VideoOSIconBuiltInSource Icon="Chevron_Right"/>
+                    </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <platformUiControls:VideoOSButtonTransparentSmall Name="NavReload" Command="{Binding ReloadCommand}" Margin="1 2">
+                    <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                        <platformUiControls:VideoOSIconBuiltInSource Icon="Refresh"/>
+                    </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <platformUiControls:VideoOSButtonTransparentSmall Name="NavHome" Command="{Binding HomeCommand}" CommandParameter="{Binding Home}" Margin="1 2">
+                    <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                        <platformUiControls:VideoOSIconBuiltInSource Icon="Home"/>
+                    </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <platformUiControls:VideoOSButtonTransparentSmall Name="NavPrint" DockPanel.Dock="Right" Command="{Binding PrintCommand}" Margin="2">
+                    <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                        <platformUiControls:VideoOSIconBuiltInSource Icon="Print"/>
+                    </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <platformUiControls:VideoOSTextBoxSmall Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" Margin="0 2 2 2" IsEnabled="{Binding IsAddressEnabled}" />
+            </DockPanel>
+            <platformUiControls:VideoOSInlineMessageSmall Name="addressWarning" Appearance="Error" Visibility="Collapsed" MinLines="1" MaxLines="2" Margin="0 0 0 2" />
+        </StackPanel>
         <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown">
             <TextBlock Name="FloatingPlaceholder" Visibility="{Binding IsWorkspaceFloating, Converter={StaticResource BooleanToVisibilityConverter}}"
                        HorizontalAlignment="Center" VerticalAlignment="Center"

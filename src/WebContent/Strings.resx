@@ -117,6 +117,24 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="AddressBarBackToolTip" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="AddressBarForwardToolTip" xml:space="preserve">
+    <value>Forward</value>
+  </data>
+  <data name="AddressBarReloadToolTip" xml:space="preserve">
+    <value>Reload</value>
+  </data>
+  <data name="AddressBarHomeToolTip" xml:space="preserve">
+    <value>Home</value>
+  </data>
+  <data name="AddressBarPrintToolTip" xml:space="preserve">
+    <value>Print</value>
+  </data>
+  <data name="AddressBarPlaceholder" xml:space="preserve">
+    <value>Enter address: example.com, server:8443, or a full URL</value>
+  </data>
   <data name="AllowAudioNotificationsLabel" xml:space="preserve">
     <value>Allow audio notifications</value>
   </data>

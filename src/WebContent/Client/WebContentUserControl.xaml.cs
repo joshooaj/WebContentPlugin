@@ -10,6 +10,7 @@ using Microsoft.Web.WebView2.Wpf;
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.Messaging;
+using VideoOS.Platform.UI.Controls;
 using WebContent;
 
 namespace WebContent.Client
@@ -21,8 +22,8 @@ namespace WebContent.Client
     {
         private static readonly object ActiveControlsSync = new object();
         private static readonly Dictionary<Guid, List<WeakReference<WebContentUserControl>>> ActiveControlsByBrowserId = new Dictionary<Guid, List<WeakReference<WebContentUserControl>>>();
-        private static readonly Brush InvalidAddressBrush = Brushes.OrangeRed;
 
+        private readonly AddressBarInteraction _addressBarInteraction = new AddressBarInteraction();
         private WebContentViewModel _viewModel;
         private bool _isClosed;
         public override bool ShowToolbar => false;
@@ -30,8 +31,7 @@ namespace WebContent.Client
         public WebContentUserControl()
         {
             InitializeComponent();
-            addressBar.TextChanged += OnAddressBarTextChanged;
-            _viewModel = DataContext as WebContentViewModel;
+            WireUp();
 
             if (DesignerProperties.GetIsInDesignMode(this))
             {
@@ -47,14 +47,32 @@ namespace WebContent.Client
         {
             // FYI DataContext is null until InitializeComponent() is called
             InitializeComponent();
+            WireUp();
+            _viewModel.ViewItemManager = viewItemManager;
+        }
+
+        private void WireUp()
+        {
+            LocalizeToolbar();
             addressBar.TextChanged += OnAddressBarTextChanged;
             _viewModel = DataContext as WebContentViewModel;
-            _viewModel.ViewItemManager = viewItemManager;
-            //PreviewMouseDown += WebContentUserControl_PreviewMouseDown;
+        }
+
+        // x:Static resolves static members by reflection at BAML load time and only sees
+        // public ones; Strings is internal, so the localized toolbar texts are applied here.
+        private void LocalizeToolbar()
+        {
+            NavBack.ToolTip = Strings.AddressBarBackToolTip;
+            NavForward.ToolTip = Strings.AddressBarForwardToolTip;
+            NavReload.ToolTip = Strings.AddressBarReloadToolTip;
+            NavHome.ToolTip = Strings.AddressBarHomeToolTip;
+            NavPrint.ToolTip = Strings.AddressBarPrintToolTip;
+            addressBar.PlaceholderText = Strings.AddressBarPlaceholder;
         }
 
         private void OnAddressBarTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
         {
+            _addressBarInteraction.ClearWarning();
             ClearAddressFeedback();
         }
 
@@ -215,43 +233,46 @@ namespace WebContent.Client
 
         private void addressBar_KeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key == Key.Enter)
-            {
-                var address = addressBar.Text;
-                if (Keyboard.Modifiers == ModifierKeys.Control && address.IndexOf(".") < 0)
-                {
-                    address += ".com";
-                }
-
-                if (WebContentConfiguration.TryCreateNavigationUri(address, out var uri))
-                {
-                    ClearAddressFeedback();
-                    _viewModel.Browser.Address = uri.AbsoluteUri;
-                }
-                else
-                {
-                    ShowInvalidAddressFeedback(address);
-                }
-                e.Handled = true;
-            }
-        }
-
-        private void ShowInvalidAddressFeedback(string rawAddress)
-        {
-            EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Rejected invalid address input for view item {_viewModel?.Id}: '{rawAddress}'.");
-            addressBar.BorderBrush = InvalidAddressBrush;
-            addressBar.ToolTip = string.Format(Strings.InvalidAddressMessage, rawAddress);
-        }
-
-        private void ClearAddressFeedback()
-        {
-            if (!ReferenceEquals(addressBar.BorderBrush, InvalidAddressBrush))
+            if (e.Key != Key.Enter)
             {
                 return;
             }
 
-            addressBar.ClearValue(BorderBrushProperty);
-            addressBar.ClearValue(ToolTipProperty);
+            switch (_addressBarInteraction.HandleEnter(addressBar.Text, e.IsRepeat, out var uri))
+            {
+                case AddressEntryOutcome.Accepted:
+                    ClearAddressFeedback();
+                    _viewModel.Browser.Address = uri.AbsoluteUri;
+                    break;
+                case AddressEntryOutcome.Rejected:
+                    EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Rejected invalid address input for view item {_viewModel?.Id}: '{addressBar.Text}'.");
+                    ShowInvalidAddressFeedback();
+                    break;
+                case AddressEntryOutcome.IgnoredRepeat:
+                    break;
+            }
+            e.Handled = true;
+        }
+
+        private void ShowInvalidAddressFeedback()
+        {
+            addressBar.State = VideoOSTextBoxBase.States.Error;
+            addressWarning.Content = _addressBarInteraction.WarningMessage;
+            addressWarning.Visibility = Visibility.Visible;
+        }
+
+        private void ClearAddressFeedback()
+        {
+            if (addressBar.State != VideoOSTextBoxBase.States.Normal)
+            {
+                addressBar.State = VideoOSTextBoxBase.States.Normal;
+            }
+
+            if (addressWarning.Visibility != Visibility.Collapsed)
+            {
+                addressWarning.Content = null;
+                addressWarning.Visibility = Visibility.Collapsed;
+            }
         }
 
         private void ViewItemWpfUserControl_MouseDown(object sender, MouseButtonEventArgs e)
