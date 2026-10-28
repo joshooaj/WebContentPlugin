@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebContent", "WebContent\We
 EndProject
 Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "setup", "Setup\setup.wixproj", "{AB6D7257-BF41-489E-A208-EBF6A3379715}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebContent.UxTests", "..\tests\ux\WebContent.UxTests\WebContent.UxTests.csproj", "{8383F61E-B8F5-CBBD-1F61-D5E382DF5C38}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +23,10 @@ Global
 		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Debug|x64.Build.0 = Debug|x64
 		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Release|x64.ActiveCfg = Release|x64
 		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Release|x64.Build.0 = Release|x64
+		{8383F61E-B8F5-CBBD-1F61-D5E382DF5C38}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8383F61E-B8F5-CBBD-1F61-D5E382DF5C38}.Debug|x64.Build.0 = Debug|Any CPU
+		{8383F61E-B8F5-CBBD-1F61-D5E382DF5C38}.Release|x64.ActiveCfg = Release|Any CPU
+		{8383F61E-B8F5-CBBD-1F61-D5E382DF5C38}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

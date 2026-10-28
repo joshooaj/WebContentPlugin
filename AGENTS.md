@@ -1,6 +1,6 @@
 # WebContentPlugin
 
-Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent` targets .NET Framework 4.7.2 in legacy csproj style; `src/WebContent.Tests` targets net8.0.
+Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent` targets .NET Framework 4.7.2 in legacy csproj style; `src/WebContent.Tests` targets net10.0.
 
 ## Build
 

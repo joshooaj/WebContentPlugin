@@ -405,3 +405,5 @@ FodyWeavers.xsd
 *.sln.iml
 
 .env
+tests/ux/uxconfig.json
+artifacts/
