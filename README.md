@@ -63,10 +63,6 @@ get a code signing certificate setup.
 The installer is very simple and has no options. Acknowledge the license, and then it will install the Microsoft Edge
 WebView2 Runtime if necessary, and place the plugin files in `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\`.
 
-![Microsoft Edge download warning](./docs/assets/images/download-warning.png)
-
-![Microsoft Edge download warning](./docs/assets/images/download-warning2.png)
-
 ### Add Web Content to a view
 
 1. Open a new Smart Client instance (plugins are only discovered during startup) and login.
@@ -83,6 +79,23 @@ WebView2 Runtime if necessary, and place the plugin files in `C:\Program Files\V
 3. Click the **Setup** button again to exit setup mode.
 
 ![Screenshot of web content view item properties](./docs/assets/images/properties.png)
+
+## Workspace administration (Management Client)
+
+The plugin also integrates with the XProtect Management Client. Under **Cascadia Technology**, a
+**Web Content Workspaces** node lets administrators centrally define workspaces: their home address,
+display options, behavior (background running, audio notifications, history clearing), privacy and
+advanced options such as session isolation and developer tools.
+
+![Web Content Workspaces configured in the Management Client](./docs/assets/images/mc-workspace.png)
+
+### Per-role security
+
+Each workspace is a securable item. On the **Cascadia Technology** tab of a role's security settings,
+select a workspace and grant or revoke the granular claims for that role, such as viewing and managing
+the web content workspace.
+
+![Cascadia Technology security tab for a role in the Management Client](./docs/assets/images/mc-role-security.png)
 
 ## License
 
