@@ -20,8 +20,8 @@ updates:
       github-actions-minor-and-patch:
         patterns: ["*"]
         update-types:
-          - version-update:semver-minor
-          - version-update:semver-patch
+          - minor
+          - patch
 
   # Recursive from the repo root: picks up the .config/dotnet-tools.json CLI tools
   # manifest, plus the PackageReferences in src/WebContent and src/WebContent.Tests
@@ -34,5 +34,5 @@ updates:
       nuget-minor-and-patch:
         patterns: ["*"]
         update-types:
-          - version-update:semver-minor
-          - version-update:semver-patch
+          - minor
+          - patch
