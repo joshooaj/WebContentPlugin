@@ -1,0 +1,38 @@
+# Dependabot version updates (ticket #30).
+#
+# Surfaces kept fresh:
+#   - GitHub Actions workflow pins (SHA + trailing version comment stay in sync)
+#   - the .NET CLI tools manifest (.config/dotnet-tools.json: nbgv, wix, sbom-tool)
+#   - NuGet PackageReferences (src/WebContent, src/WebContent.Tests)
+#
+# Minor+patch bumps are grouped per ecosystem into one PR; majors open as their own
+# PRs (no ignore-conditions — CI green/red is the judge). All feeds are public
+# nuget.org; MilestoneSystems.VideoOS.Platform is public and resolves without
+# credentials, so no ignore-conditions for it either.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions-minor-and-patch:
+        patterns: ["*"]
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+
+  # Recursive from the repo root: picks up the .config/dotnet-tools.json CLI tools
+  # manifest, plus the PackageReferences in src/WebContent and src/WebContent.Tests
+  # (and tests/ux, which the updater discovers along the way).
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      nuget-minor-and-patch:
+        patterns: ["*"]
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
