@@ -23,11 +23,15 @@ updates:
           - minor
           - patch
 
-  # Recursive from the repo root: picks up the .config/dotnet-tools.json CLI tools
-  # manifest, plus the PackageReferences in src/WebContent and src/WebContent.Tests
-  # (and tests/ux, which the updater discovers along the way).
+  # "/" picks up the .config/dotnet-tools.json CLI tools manifest; the NuGet
+  # provider does not recurse into subdirectories, so the projects with
+  # PackageReferences are listed explicitly (tests/ux deliberately excluded —
+  # CI does not gate that project).
   - package-ecosystem: nuget
-    directory: "/"
+    directories:
+      - "/"
+      - "/src/WebContent"
+      - "/src/WebContent.Tests"
     schedule:
       interval: weekly
     groups:
