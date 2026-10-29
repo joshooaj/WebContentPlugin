@@ -26,6 +26,15 @@ namespace WebContent
     internal class WorkspaceConfiguration
     {
         internal const string WorkspaceConfigKey = "WorkspaceConfig";
+
+        /// <summary>
+        /// The placeholder name the admin <see cref="Admin.WorkspaceItemManager"/> gives a freshly
+        /// created workspace item before the user completes it. The initial save carries an empty
+        /// home address, so <see cref="DetectError"/> sees MissingBrowserConfig; that is not a
+        /// broken saved definition, it is a new workspace nobody has saved yet.
+        /// </summary>
+        internal const string NewWorkspacePlaceholderName = "Enter a name";
+
         [DataMember(Name = "version")]
         public int Version { get; set; }
 
@@ -175,6 +184,18 @@ namespace WebContent
 
             var legacyHome = WebContentConfiguration.GetString(properties, string.Empty, "HomeAddress", "Address");
             return string.IsNullOrWhiteSpace(legacyHome) ? WorkspaceConfigError.MissingBrowserConfig : WorkspaceConfigError.None;
+        }
+
+        /// <summary>
+        /// True when the workspace is a freshly created, never-completed placeholder: it still
+        /// carries the <see cref="NewWorkspacePlaceholderName"/> default name and its definition
+        /// has no usable home address. Admin pages must not present this state as a broken saved
+        /// configuration, because the user never had a chance to save the values first.
+        /// </summary>
+        internal static bool IsUnfinishedNewWorkspace(string itemName, IDictionary<string, string> properties)
+        {
+            return string.Equals(itemName, NewWorkspacePlaceholderName, StringComparison.Ordinal)
+                   && DetectError(properties) != WorkspaceConfigError.None;
         }
     }
 

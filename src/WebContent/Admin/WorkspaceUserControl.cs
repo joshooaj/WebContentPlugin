@@ -136,7 +136,22 @@ namespace WebContent.Admin
         {
             lblConfigError.Text = bannerText;
             lblConfigError.Visible = true;
+            RaiseDeferredUserChange();
+        }
 
+        /// <summary>
+        /// A freshly created workspace loads with empty values that the user is about to complete.
+        /// That is not a defect, so no banner is shown — but the fill still resets the shell's
+        /// dirty state, so the deferred change event is raised to keep Save enabled.
+        /// </summary>
+        internal void SignalUnfinishedNewItem()
+        {
+            lblConfigError.Visible = false;
+            RaiseDeferredUserChange();
+        }
+
+        private void RaiseDeferredUserChange()
+        {
             if (IsHandleCreated)
             {
                 BeginInvoke((MethodInvoker)delegate { OnUserChange(); });

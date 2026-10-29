@@ -136,7 +136,7 @@ namespace WebContent.Admin
                     _userControl.FillContent();
                     if (configError != WorkspaceConfigError.None)
                     {
-                        SignalBrokenConfiguration(item, configError);
+                        SignalBrokenConfiguration(item, properties, configError);
                     }
                     else
                     {
@@ -162,7 +162,7 @@ namespace WebContent.Admin
 
             if (configError != WorkspaceConfigError.None)
             {
-                SignalBrokenConfiguration(item, configError);
+                SignalBrokenConfiguration(item, properties, configError);
             }
             else
             {
@@ -175,9 +175,19 @@ namespace WebContent.Admin
         /// healthy, so the admin page must say so. The banner names the defect and the page is
         /// marked dirty after the fill completes (the shell resets dirty state synchronously),
         /// enabling Save to rewrite a clean definition from what the admin sees.
+        /// One state is not a defect: the placeholder item left behind by <see cref="CreateItem"/>
+        /// never has a home address yet, so it loads with the banner suppressed — still dirty, so
+        /// Save stays enabled while the user completes the new workspace.
         /// </summary>
-        private void SignalBrokenConfiguration(Item item, WorkspaceConfigError configError)
+        private void SignalBrokenConfiguration(Item item, IDictionary<string, string> properties, WorkspaceConfigError configError)
         {
+            if (WorkspaceConfiguration.IsUnfinishedNewWorkspace(item?.Name, properties))
+            {
+                _userControl?.SignalUnfinishedNewItem();
+                EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Workspace '{item?.Name}' (FQID: {item?.FQID}) is a new placeholder nobody has saved yet; no configuration-error banner is shown, but the page stays dirty so Save can complete the definition.");
+                return;
+            }
+
             _userControl?.SignalLoadDefect(string.Format(Strings.WorkspaceConfigErrorAdminBanner, WebContent.Client.WorkspaceConfigErrorText.Describe(configError)));
             EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item?.Name}' loaded with a configuration error ({configError}); the page shows a warning and marks itself dirty so Save can rewrite a clean definition.");
         }
@@ -278,7 +288,7 @@ namespace WebContent.Admin
                 Kind = WebContentPluginDefinition.WorkspaceKind
             };
 
-            CurrentItem = new Item(fqid, "Enter a name");
+            CurrentItem = new Item(fqid, WorkspaceConfiguration.NewWorkspacePlaceholderName);
             var defaultConfig = WorkspaceConfiguration.CreateDefault(string.Empty);
             SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, defaultConfig.Serialize());
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Creating new workspace item. FQID: {fqid}.");
