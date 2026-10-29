@@ -195,6 +195,12 @@
   <data name="MissingHomeAddressMessage" xml:space="preserve">
     <value>A home address is required. Enter a host name (example.com), a host and port (server:8443), or a full http/https URL.</value>
   </data>
+  <data name="MissingNameMessage" xml:space="preserve">
+    <value>A workspace name is required. Enter a name before saving.</value>
+  </data>
+  <data name="MissingNameTitle" xml:space="preserve">
+    <value>Missing name</value>
+  </data>
   <data name="MuteAudioLabel" xml:space="preserve">
     <value>Mute audio</value>
   </data>

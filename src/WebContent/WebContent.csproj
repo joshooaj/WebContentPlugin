@@ -64,6 +64,7 @@
       <DependentUpon>RootNodeUserControl.cs</DependentUpon>
     </Compile>
     <Compile Include="Admin\WorkspaceItemManager.cs" />
+    <Compile Include="Admin\WorkspaceNameValidation.cs" />
     <Compile Include="Admin\WorkspaceUserControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

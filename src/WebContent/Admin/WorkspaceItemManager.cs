@@ -210,7 +210,16 @@ namespace WebContent.Admin
             if (CurrentItem == null) return false;
             
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Saving workspace configuration for item: {CurrentItem.Name} (FQID: {CurrentItem.FQID}).");
-            CurrentItem.Name = _userControl?.WorkspaceName ?? CurrentItem.Name;
+
+            var name = _userControl?.WorkspaceName;
+            if (WorkspaceNameValidation.IsEmpty(name))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace (FQID: {CurrentItem.FQID}): the workspace name is empty.");
+                MessageBox.Show(Strings.MissingNameMessage, Strings.MissingNameTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            CurrentItem.Name = name;
 
             var rawHomeAddress = _userControl?.HomeAddress;
             if (string.IsNullOrWhiteSpace(rawHomeAddress))
