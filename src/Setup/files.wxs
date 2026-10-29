@@ -1,9 +1,16 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <!-- Harvest of the plugin build drop (ticket #31). WiX v7 removed Heat, so the
+        drop is harvested with the built-in Files element: every file under
+        $(var.HarvestPath) (mirroring subdirectory structure, into INSTALLFOLDER).
+        The VideoOS exclusion below preserves filter.xsl's rule: assemblies whose
+        name contains VideoOS must not be bundled (the host provides them in the
+        GAC). If the drop's contents ever change, re-verify the MSI file listing. -->
     <Fragment>
-        <ComponentGroup Id="PluginContent" Directory="INSTALLFOLDER">
-            <Component>
-                <File Source="WebContent.dll" />
-            </Component>
+        <ComponentGroup Id="WebContentAssemblies" Directory="INSTALLFOLDER">
+            <Files Include="$(var.HarvestPath)\**">
+                <Exclude Files="$(var.HarvestPath)\*VideoOS*" />
+                <Exclude Files="$(var.HarvestPath)\**\*VideoOS*" />
+            </Files>
         </ComponentGroup>
     </Fragment>
 </Wix>
