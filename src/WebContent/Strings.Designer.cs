@@ -295,6 +295,24 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to A workspace name is required. Enter a name before saving..
+        /// </summary>
+        internal static string MissingNameMessage {
+            get {
+                return ResourceManager.GetString("MissingNameMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Missing name.
+        /// </summary>
+        internal static string MissingNameTitle {
+            get {
+                return ResourceManager.GetString("MissingNameTitle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Mute audio.
         /// </summary>
         internal static string MuteAudioLabel {
