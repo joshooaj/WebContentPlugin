@@ -13,6 +13,7 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
 
 - `PostBuildEvent` `sbom-tool` runs with `-D true` (stale `_manifest` self-overwrites) and `-bc "$(MSBuildProjectDirectory)"` (quoted absolute component path — build events run with CWD = output dir, so a relative `-bc .\` would scan the drop and detect zero packages; `$(ProjectDir)` ends in a backslash that breaks quoting). A sbom-tool failure now fails the build with MSB3073. Judge success by exit code plus files in `output\WebContent\` (9 files + `runtimes` folder).
 - Full installer: `.\build.ps1` restores dotnet tools, caches the WebView2 runtime into `.cache`, then `msbuild src/Setup/setup.wixproj /t:Rebuild` (needs msbuild on PATH; CI adds it via setup-msbuild).
+- WiX version lockstep (ticket #31): the `wix` CLI version in `.config/dotnet-tools.json`, the `WixToolset.Sdk/<version>` attribute on `src/Setup/setup.wixproj`, and every `WixToolset.*` extension `PackageReference` in that project must all be bumped together to the same version — moving only one breaks the installer build. WiX major bumps also need the `<AcceptEula>` value refreshed (v7: `wix7`), and the v7 CLI refuses every command until that EULA is accepted (MSBuild passes it from the project; ad hoc CLI usage needs `-acceptEula wix7`). Heat was removed in v7; the drop harvest in `src/Setup/files.wxs` uses the built-in `Files` element instead. Dependabot PRs that bump only some WiX surfaces must never be merged alone — close them and do a coordinated bump.
 
 ## Test
 

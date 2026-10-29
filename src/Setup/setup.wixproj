@@ -1,27 +1,28 @@
-<Project Sdk="WixToolset.Sdk/5.0.1">
+<!--
+    WiX version lockstep (ticket #31): the wix CLI in .config/dotnet-tools.json,
+    the WixToolset.Sdk/<version> attribute of this file, and the WixToolset.*
+    extension PackageReferences below must all move together to the same
+    WiX version. A bump that moves only one of them breaks the installer build.
+    WiX major bumps also need the AcceptEula value refreshed (v7: wix7).
+-->
+<Project Sdk="WixToolset.Sdk/7.0.1">
     <PropertyGroup>
         <BuildVersion>0.1.1</BuildVersion>
-        <DefineConstants>Version=$(BuildVersion)</DefineConstants>
+        <HarvestPath>..\..\output\WebContent</HarvestPath>
+        <DefineConstants>Version=$(BuildVersion);HarvestPath=$(HarvestPath)</DefineConstants>
         <OutputPath>..\..\output\Setup</OutputPath>
         <OutputName>CascadiaWebContentPlugin.$(BuildVersion)</OutputName>
         <SuppressIces>ICE61</SuppressIces>
-        <HarvestPath>..\..\output\WebContent</HarvestPath>
+        <!-- WiX v7 enforces the OSMF EULA; direct acceptance for CI (docs: firegiant /wix/osmf). -->
+        <AcceptEula>wix7</AcceptEula>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="WixToolset.Heat" Version="5.0.1" />
-        <PackageReference Include="WixToolset.UI.wixext" Version="5.0.1" />
+        <PackageReference Include="WixToolset.UI.wixext" Version="7.0.1" />
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="../WebContent/WebContent.csproj" />
-        <HarvestDirectory Include="$(HarvestPath)">
-            <ComponentGroupName>WebContentAssemblies</ComponentGroupName>
-            <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
-            <SuppressRootDirectory>true</SuppressRootDirectory>
-            <SuppressRegistry>true</SuppressRegistry>
-            <Transforms>filter.xsl</Transforms>
-        </HarvestDirectory>
     </ItemGroup>
 
     <PropertyGroup>
