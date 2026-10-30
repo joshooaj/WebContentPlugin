@@ -92,7 +92,7 @@ namespace WebContent.Admin
 
         public override ItemNodeUserControl GenerateOverviewUserControl()
         {
-            return new VideoOS.Platform.UI.HelpUserControl(ResourceLoader.CompanyLogo, "Web Content Workspace", "Create dedicated workspaces for hosting web content in Smart Client.");
+            return new WorkspaceOverviewUserControl();
         }
 
         public override void ClearUserControl()
