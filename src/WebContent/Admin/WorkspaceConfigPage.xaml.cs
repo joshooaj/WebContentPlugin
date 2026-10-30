@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,6 +16,7 @@ namespace WebContent.Admin
     public partial class WorkspaceConfigPage : UserControl
     {
         private bool _syncingZoom;
+        private bool _proxyTestRunning;
 
         internal event EventHandler ConfigurationChanged;
 
@@ -34,6 +36,8 @@ namespace WebContent.Admin
             chkProxyEnabled.Content = Strings.ProxyEnabledLabel;
             lblProxyTargets.Text = Strings.ProxyTargetsLabel + ":";
             lblProxyTargetsHint.Text = Strings.ProxyTargetsHint;
+            lblProxyTestUrl.Text = Strings.ProxyTestFetchLabel + ":";
+            lblProxyTestHint.Text = Strings.ProxyTestFetchHint;
         }
 
         public string WorkspaceName
@@ -158,6 +162,9 @@ namespace WebContent.Admin
             chkEnableDevTools.IsChecked = false;
             chkProxyEnabled.IsChecked = false;
             txtProxyTargets.Text = string.Empty;
+            txtProxyTestUrl.Text = string.Empty;
+            lblProxyTestResult.Text = string.Empty;
+            lblProxyTestResult.Visibility = Visibility.Collapsed;
             configError.Visibility = Visibility.Collapsed;
             chkHideAddress.IsEnabled = true;
         }
@@ -220,6 +227,80 @@ namespace WebContent.Admin
         private void OnProxyTargetsTextChanged(object sender, TextChangedEventArgs e)
         {
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Ticket #53 demo harness: sends a proxy-fetch request from the Management Client over
+        /// classic MIP messaging (ProxyFetchClient.Active, provisioned during Init) and shows the
+        /// status line, body size, and duration that came back from the Event Server fetcher.
+        /// The await continues off the UI thread, so result display re-dispatches onto the
+        /// page's dispatcher.
+        /// </summary>
+        private async void OnProxyTestFetch(object sender, RoutedEventArgs e)
+        {
+            if (_proxyTestRunning)
+            {
+                return;
+            }
+
+            _proxyTestRunning = true;
+            btnProxyTestFetch.IsEnabled = false;
+            lblProxyTestResult.Visibility = Visibility.Visible;
+            lblProxyTestResult.Text = Strings.ProxyTestFetchRunning;
+
+            try
+            {
+                var client = ProxyFetchClient.Active;
+                if (client == null || !client.IsReady)
+                {
+                    lblProxyTestResult.Text = Strings.ProxyTestFetchNotConnected;
+                    return;
+                }
+
+                var url = (txtProxyTestUrl.Text ?? string.Empty).Trim();
+                var stopwatch = Stopwatch.StartNew();
+                var result = await client.FetchAsync(url).ConfigureAwait(false);
+                stopwatch.Stop();
+
+                string outcome;
+                if (result.Success)
+                {
+                    outcome = string.Format(
+                        CultureInfo.InvariantCulture,
+                        Strings.ProxyTestFetchSuccessFormat,
+                        result.StatusCode,
+                        result.Body == null ? 0L : (long)result.Body.LongLength,
+                        stopwatch.Elapsed.TotalSeconds);
+                }
+                else
+                {
+                    outcome = string.Format(
+                        CultureInfo.InvariantCulture,
+                        Strings.ProxyTestFetchFailureFormat,
+                        result.ErrorCode,
+                        stopwatch.Elapsed.TotalSeconds,
+                        result.ErrorMessage);
+                }
+
+                Dispatcher.Invoke(() => lblProxyTestResult.Text = outcome);
+            }
+            catch (Exception exception)
+            {
+                Dispatcher.Invoke(() => lblProxyTestResult.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    Strings.ProxyTestFetchFailureFormat,
+                    ProxyFetchErrorCodes.Error,
+                    0d,
+                    exception.Message));
+            }
+            finally
+            {
+                _proxyTestRunning = false;
+                if (btnProxyTestFetch != null)
+                {
+                    btnProxyTestFetch.IsEnabled = true;
+                }
+            }
         }
     }
 }

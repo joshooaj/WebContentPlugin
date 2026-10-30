@@ -99,6 +99,19 @@
       <TextBlock x:Name="lblProxyTargetsHint" Style="{StaticResource SecondaryTextStyle}"
                  TextWrapping="Wrap" Margin="0,2,0,0" />
 
+      <!-- Ticket #53 demo harness: Management Client-driven proxy fetch across MIP messaging. -->
+      <TextBlock x:Name="lblProxyTestUrl" Style="{StaticResource FieldLabelStyle}" Text="Test proxy fetch:" Margin="0,10,0,2" />
+      <StackPanel Orientation="Horizontal">
+        <TextBox x:Name="txtProxyTestUrl" Style="{StaticResource FormTextBoxStyle}" Width="470"
+                 VerticalAlignment="Center" MaxLength="2048" />
+        <Button x:Name="btnProxyTestFetch" Content="Fetch via Event Server" Margin="10,0,0,0"
+                Padding="10,4" VerticalAlignment="Center" Click="OnProxyTestFetch" />
+      </StackPanel>
+      <TextBlock x:Name="lblProxyTestHint" Style="{StaticResource SecondaryTextStyle}"
+                 TextWrapping="Wrap" Margin="0,2,0,0" />
+      <TextBlock x:Name="lblProxyTestResult" Style="{StaticResource SecondaryTextStyle}"
+                 TextWrapping="Wrap" Margin="0,4,0,0" FontWeight="Bold" Visibility="Collapsed" />
+
     </StackPanel>
   </ScrollViewer>
 </UserControl>

@@ -104,6 +104,12 @@
     <Compile Include="Client\WebContentExportManager.cs" />
     <Compile Include="WebContentConfiguration.cs" />
     <Compile Include="ProxyPolicy.cs" />
+    <Compile Include="ProxyFetchContract.cs" />
+    <Compile Include="ProxyFetchFramer.cs" />
+    <Compile Include="ProxyFetchCorrelation.cs" />
+    <Compile Include="ProxyFetchTransport.cs" />
+    <Compile Include="ProxyFetchBackgroundPlugin.cs" />
+    <Compile Include="ProxyFetchClient.cs" />
     <Compile Include="WorkspaceConfiguration.cs" />
     <Compile Include="WebContentPluginDefinition.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

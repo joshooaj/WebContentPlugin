@@ -473,5 +473,59 @@ namespace WebContent {
                 return ResourceManager.GetString("ProxyDisplayEnabledPrefix", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Test proxy fetch.
+        /// </summary>
+        internal static string ProxyTestFetchLabel {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Sends a proxy-fetch request from this Management Client across MIP messaging to the Event Server and reports what came back. Requires the Web Content plugin loaded on the Event Server (restart the Event Server service after deployment)..
+        /// </summary>
+        internal static string ProxyTestFetchHint {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Fetching through the Event Server....
+        /// </summary>
+        internal static string ProxyTestFetchRunning {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchRunning", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy fetch harness is not connected. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment..
+        /// </summary>
+        internal static string ProxyTestFetchNotConnected {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchNotConnected", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to HTTP {0} - {1} bytes fetched in {2:0.0}s.
+        /// </summary>
+        internal static string ProxyTestFetchSuccessFormat {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchSuccessFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy fetch {0} after {1:0.0}s - {2}.
+        /// </summary>
+        internal static string ProxyTestFetchFailureFormat {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchFailureFormat", resourceCulture);
+            }
+        }
     }
 }

@@ -30,6 +30,10 @@
     <Compile Include="..\WebContent\Client\WorkspaceViewItemSync.cs" Link="WorkspaceViewItemSync.cs" />
     <Compile Include="..\WebContent\WebContentConfiguration.cs" Link="WebContentConfiguration.cs" />
     <Compile Include="..\WebContent\ProxyPolicy.cs" Link="ProxyPolicy.cs" />
+    <Compile Include="..\WebContent\ProxyFetchContract.cs" Link="ProxyFetchContract.cs" />
+    <Compile Include="..\WebContent\ProxyFetchFramer.cs" Link="ProxyFetchFramer.cs" />
+    <Compile Include="..\WebContent\ProxyFetchCorrelation.cs" Link="ProxyFetchCorrelation.cs" />
+    <Compile Include="..\WebContent\ProxyFetchTransport.cs" Link="ProxyFetchTransport.cs" />
     <Compile Include="..\WebContent\WorkspaceConfiguration.cs" Link="WorkspaceConfiguration.cs" />
   </ItemGroup>
 </Project>

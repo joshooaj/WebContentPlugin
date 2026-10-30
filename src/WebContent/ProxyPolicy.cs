@@ -29,6 +29,16 @@ namespace WebContent
         }
 
         /// <summary>
+        /// True for absolute http(s) uris — the scheme gate every proxy-fetch flow (admin harness,
+        /// Event Server request handling, transport) applies before touching the network.
+        /// </summary>
+        internal static bool IsHttpUri(Uri uri)
+        {
+            return uri != null &&
+                (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+        }
+
+        /// <summary>
         /// The canonical origin form used for both stored allowlist entries and request matching.
         /// </summary>
         internal static string CanonicalOrigin(Uri uri)

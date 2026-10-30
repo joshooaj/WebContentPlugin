@@ -33,6 +33,7 @@ is not evidence the plugin never ran.
 | Configuration error visibility | #9 | `WorkspaceDefinitionTests` (`ConfigurationError` classifies malformed JSON, blob-without-items, no-home-address item, nothing configured; malformed JSON reported even when legacy properties would rescue it; `SelectVisible` keeps named-but-broken tabs and still skips unnamed/unpermitted) | See MC-8 below: broken tab appears with a WorkSpaceNotification warning |
 | SBOM integrity | #25 | `SbomGenerationGuardTests` (PostBuildEvent keeps a quoted absolute `-bc "$(MSBuildProjectDirectory)"` component path and `-D true`; the original bug let the CWD-relative `-bc .\` point at the build drop, so zero packages were detected) | `.\build.ps1` throws unless `output\WebContent\_manifest\spdx_2.2\manifest.spdx.json` lists referenced packages; CI Build job shows `SBOM OK` and no "no packages detected" annotation |
 | Proxy configuration roundtrip | #52 | `ProxyConfigurationTests` (definitions saved before the proxy existed mean proxy-off; toggle+targets survive the serialized roundtrip), `ProxyPolicyTests` (admin entries canonicalize to scheme/host/port origins; garbage rejected; exact-origin matching; duplicates/overlaps collapse), `WorkspacePropertiesTests` (JSON-blob and legacy paths emit canonical `ProxyEnabled`/`ProxyTargets`, hand-crafted target gibberish skipped) | See MC-9 below: admin toggle round-trips to the Smart Client properties page; invalid target save refused with log marker |
+| Proxy fetch messaging (Event Server fetcher) | #53 | `ProxyFetchContractGuardTests` (message ids never end in "Command" so SecurityLevel.Normal clients can send; payload types are plugin-namespace `[Serializable]` with public fields — the whitelist case that keeps `MessageCommunicationSettings.config` unnecessary; frame-kind/error-code constants stable), `ProxyFetchFramerTests` (meta frame Sequence=-1 then base64 chunk frames 0..N-1 with IsLastChunk; failure is a lone frame), `ProxyFetchCorrelationTests` (meta+chunks→complete body; out-of-order buffered; failure frame surfaces error code; foreign correlation ids ignored; timeout), `ProxyFetchTransportTests` (real HttpListener: status+headers captured, size cap aborts, connect/read budgets, refused connection maps to Unreachable), `EventServerLoadGuardTests` (plugin.def load env includes `Service`; the definition exposes `BackgroundPlugins` with a Service-targeted plugin and declares both fetch message ids in `PluginDefinedMessageIds`) | See ES-1 and MC-10 below: Event Server loads the fetcher, and the Management Client harness fetches a page through it with failures logged |
 
 ## Manual host checks
 
@@ -96,6 +97,34 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
 3. Toggle the proxy off, Save, and check the target list is still present in the stored definition (off-toggle preserves allowlisted targets; MC-9 pin for the wipe bug found in review).
 4. With the proxy enabled, enter an invalid target line (`ftp://x`, `not a url`) and Save: refused with a message naming the line; MC log marker: `Rejected save for workspace '<name>' (FQID: ...): invalid proxy target`. Enabled with no targets at all is refused likewise (`proxy enabled but no target allowlisted`).
 
+### ES-1 Event Server fetcher load and answer (#53)
+
+1. Deploy the new drop per `AGENTS.md`, then restart the XProtect Event Server service (it only
+   loads MIP plugins at service start; plugin.def gained the `Service` load environment).
+2. Expected marker in the Event Server's `Logs\MIP.log` (ProgramData for the Event Server):
+   `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest)`. A startup
+   failure logs `Proxy fetcher failed to start: ...` instead.
+3. No `MessageCommunicationSettings.config` whitelist edit is needed: every payload type
+   (`ProxyFetchRequestPayload`, `ProxyFetchResponsePayload`, `ProxyFetchHeader`) lives in the
+   plugin's own namespace, which the messaging layer trusts by default. The escape hatch only
+   becomes necessary if a payload ever references a foreign assembly type — then that type would
+   have to be added to the config file next to the host executable.
+
+### MC-10 Management Client proxy-fetch harness (#53)
+
+1. Restart Management Client with the new drop. Open a Web Content workspace definition — the
+   proxy section now has a "Test proxy fetch" row (URL textbox + button).
+2. Enter a URL the **server** network can reach (e.g. `https://www.example.com/`) and click
+   "Fetch via Event Server". Expected: status line shows 200 with body size and duration within
+   a few seconds.
+3. Failure cases: enter `http://10.255.255.1/` (unreachable) → the result shows `Unreachable`
+   after the ~5 s connect budget, and the Event Server log gains `Proxy fetch failed
+   (code=Unreachable, target=...)`. Enter `not a url` → `BadRequest` refusal logged as
+   `Proxy fetch request ... refused: the url was not an absolute http(s) uri`. Successes are
+   deliberately not logged (fetches become high-frequency once views use the proxy).
+4. If the Event Server has no plugin loaded, the harness shows the not-connected message without
+   sending anything.
+
 ## Known high-risk regressions → pinned by
 
 | Regression (remediation it would undo) | Pinned by |
@@ -110,6 +139,8 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
 | Broken workspace config silently hiding its tab again (#9) | `WorkspaceDefinitionTests` (`ConfigurationError` + `SelectVisible` visibility pins), MC-8 |
 | Proxy allowlist lost on toggle-off, or proxy silently defaulting on for old definitions (#52) | `ProxyConfigurationTests` (legacy blob = proxy off; roundtrip), MC-9 |
 | Inconsistent proxy-target canonicalization between admin and runtime flows (#52) | `ProxyPolicyTests` + `WorkspacePropertiesTests` (shared `ProxyPolicy` canonical form in both save and Build paths) |
+| Fetch message ids renamed to something ending in "Command", or payloads moved to a non-whitelisted type, silently breaking SecurityLevel.Normal clients or deserialization (#53) | `ProxyFetchContractGuardTests` (id-suffix + serializability/whitelist pins), ES-1 |
+| Chunk framer or correlation reassembler losing frames/order so the client sees truncated bodies (#53) | `ProxyFetchFramerTests`, `ProxyFetchCorrelationTests`, `ProxyFetchTransportTests` |
 
 ## Scope notes (deliberate)
 
@@ -118,4 +149,4 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
   ever refactored, extract the policy into a pure class first and move MC-4's backoff
   assertions into the suite.
 - WebView2/Smart Client UI behavior (actual page render, WPF address-bar visuals) cannot be
-  unit-tested at the pure seams; MC-1–MC-9 are the release gate for those.
+  unit-tested at the pure seams; MC-1–MC-10 (plus ES-1) are the release gate for those.

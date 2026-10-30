@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VideoOS.Platform;
 using VideoOS.Platform.Admin;
+using VideoOS.Platform.Background;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.Messaging;
 using WebContent.Admin;
@@ -25,6 +26,7 @@ namespace WebContent
         private readonly List<object> _workspaceMessageRegistrations = new List<object>();
         private readonly List<WorkSpacePlugin> _workSpacePlugins = new List<WorkSpacePlugin>();
         private readonly WorkspacePluginFactory _workspacePluginFactory = new WorkspacePluginFactory();
+        private readonly List<BackgroundPlugin> _backgroundPlugins = new List<BackgroundPlugin>();
 
         private DateTime _nextWorkspaceRetryUtc = DateTime.MinValue;
         private DateTime _lastWorkspaceFailureLogUtc = DateTime.MinValue;
@@ -58,6 +60,23 @@ namespace WebContent
         public override AdminPlacementHint AdminPlacementHint => AdminPlacementHint.Root;
 
         public override List<ViewItemPlugin> ViewItemPlugins { get; } = new List<ViewItemPlugin>();
+
+        /// <summary>
+        /// Server-side proxy fetcher (#53). The host instantiates background plugins for the
+        /// environments declared in TargetEnvironments, so this reaches the Event Server only;
+        /// Smart Client and Management Client hosts never run it.
+        /// </summary>
+        public override List<BackgroundPlugin> BackgroundPlugins => _backgroundPlugins;
+
+        /// <summary>
+        /// The classic MIP messaging ids the proxy-fetch exchange uses (#53), registered in the
+        /// message id vocabulary so tooling sees them as plugin-owned traffic.
+        /// </summary>
+        public override List<string> PluginDefinedMessageIds { get; } = new List<string>
+        {
+            ProxyMessageIds.FetchRequestId,
+            ProxyMessageIds.FetchResponseId,
+        };
 
         public override List<WorkSpacePlugin> WorkSpacePlugins
         {
@@ -114,6 +133,10 @@ namespace WebContent
             switch (EnvironmentManager.Instance.EnvironmentType)
             {
                 case EnvironmentType.Administration:
+                    // Management Client harness for the proxy-fetch exchange (#53): lets the admin
+                    // config page fire a test fetch from the MC across to the Event Server.
+                    ProxyFetchClient.Active = new ProxyFetchClient();
+                    ProxyFetchClient.Active.Setup(EnvironmentManager.Instance.MasterSite == null ? null : EnvironmentManager.Instance.MasterSite.ServerId);
                     break;
                 case EnvironmentType.SmartClient:
                     ViewItemPlugins.Add(new WebContentViewItemPlugin());
@@ -122,8 +145,13 @@ namespace WebContent
                     EnsureWorkspacesLoaded(force: false, reason: "Smart Client Init");
                     break;
                 case EnvironmentType.Standalone:
-                case EnvironmentType.Service:
                 case EnvironmentType.ManagementServer:
+                    break;
+                case EnvironmentType.Service:
+                    // Event Server: host the proxy-fetch background plugin. Nothing Smart Client-
+                    // or view-specific may run here - the WebView2 view stack is never loaded.
+                    _backgroundPlugins.Add(new ProxyFetchBackgroundPlugin());
+                    break;
                 default:
                     break;
             }
@@ -134,7 +162,15 @@ namespace WebContent
             StopWorkspaceRetryTimer();
             UnregisterWorkspaceRecoveryReceivers();
 
+            var proxyHarness = ProxyFetchClient.Active;
+            if (proxyHarness != null)
+            {
+                ProxyFetchClient.Active = null;
+                proxyHarness.Close();
+            }
+
             ViewItemPlugins.Clear();
+            _backgroundPlugins.Clear();
             lock (_workspaceSync)
             {
                 _workSpacePlugins.Clear();

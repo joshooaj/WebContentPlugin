@@ -258,4 +258,22 @@
   <data name="ProxyDisplayEnabledPrefix" xml:space="preserve">
     <value>Enabled - allowlisted targets:</value>
   </data>
+  <data name="ProxyTestFetchLabel" xml:space="preserve">
+    <value>Test proxy fetch</value>
+  </data>
+  <data name="ProxyTestFetchHint" xml:space="preserve">
+    <value>Sends a proxy-fetch request from this Management Client across MIP messaging to the Event Server and reports what came back. Requires the Web Content plugin loaded on the Event Server (restart the Event Server service after deployment).</value>
+  </data>
+  <data name="ProxyTestFetchRunning" xml:space="preserve">
+    <value>Fetching through the Event Server...</value>
+  </data>
+  <data name="ProxyTestFetchNotConnected" xml:space="preserve">
+    <value>The proxy fetch harness is not connected. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment.</value>
+  </data>
+  <data name="ProxyTestFetchSuccessFormat" xml:space="preserve">
+    <value>HTTP {0} - {1} bytes fetched in {2:0.0}s</value>
+  </data>
+  <data name="ProxyTestFetchFailureFormat" xml:space="preserve">
+    <value>Proxy fetch {0} after {1:0.0}s - {2}</value>
+  </data>
 </root>
