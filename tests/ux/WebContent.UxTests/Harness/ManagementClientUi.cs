@@ -69,6 +69,81 @@ public static class ManagementClientUi
     }
 
     /// <summary>
+    /// Closes the "ItemName.set ... Not valid to set dirty state at the line!!!" error dialog MC
+    /// raises when its tree rename flow misbehaves. The dialog is modal and blocks every later
+    /// UIA interaction, so it must be dismissed before continuing.
+    /// </summary>
+    public static void DismissItemNameSetErrors(ClientSession session)
+    {
+        foreach (var dialog in session.Windows().ToList())
+        {
+            var title = dialog.Name ?? string.Empty;
+            if (!title.Contains("ItemName.set", StringComparison.OrdinalIgnoreCase)
+                && !title.Contains("dirty state", StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                var ok = dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                    .FirstOrDefault(b => string.Equals((b.Name ?? string.Empty).Trim(), "OK", StringComparison.OrdinalIgnoreCase));
+                if (ok != null) ok.Patterns.Invoke.Pattern.Invoke();
+                else dialog.Close();
+                Thread.Sleep(800);
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>
+    /// Cancels the WinForms tree's inline rename editor. While editing, the tree hosts the node
+    /// name in a ControlType.Edit control (WindowsForms10.EDIT) positioned inside the tree column;
+    /// the screenshot shows the node with a pencil badge and the label underlined. Pressing ESC on
+    /// the focused tree cancels it, and a single click on the label restores clean selection.
+    /// Call right before any capture that includes the tree.
+    /// </summary>
+    public static void ExitTreeEditMode(Window mainWindow, string name)
+    {
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            if (!TreeEditActive(mainWindow, name)) return;
+            var item = FindTreeItem(mainWindow, name);
+            try { if (item != null) item.Focus(); } catch { }
+            FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE);
+            Thread.Sleep(700);
+            // Re-select via UIA only: a mouse click on the label of a selected node is exactly
+            // what arms the rename editor in the first place.
+            try { if (item != null && item.Patterns.SelectionItem.IsSupported) item.Patterns.SelectionItem.Pattern.Select(); } catch { }
+            Thread.Sleep(700);
+        }
+        if (TreeEditActive(mainWindow, name))
+            throw new InvalidOperationException($"Tree node '{name}' stayed in inline edit mode after repeated ESC.");
+    }
+
+    /// <summary>
+    /// True when the tree column hosts an Edit control whose value equals the node name (inline
+    /// rename). Detail-pane edits like txtName hold the same value but sit outside the tree column.
+    /// </summary>
+    private static bool TreeEditActive(Window mainWindow, string name)
+    {
+        var tree = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PlatformTree"));
+        if (tree == null) return false;
+        var tr = tree.BoundingRectangle;
+        if (tr.Width <= 0) return false;
+        foreach (var edit in mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit)))
+        {
+            try
+            {
+                var r = edit.BoundingRectangle;
+                if (r.Width <= 0 || r.X + r.Width < tr.X || r.X > tr.X + tr.Width) continue;
+                if (edit.Patterns.Value.IsSupported &&
+                    string.Equals(edit.Patterns.Value.Pattern.Value.Value, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Selects a tree node by name. SelectionItem.Select scrolls an off-screen node into view
     /// (proven to work on nodes below the tree fold); a real mouse click on the label afterwards
     /// gives the WinForms TreeView keyboard focus so subsequent LEFT/RIGHT/keys land on the tree.
@@ -86,7 +161,12 @@ public static class ManagementClientUi
         catch { }
         Thread.Sleep(400);
         ClickLabel(mainWindow, item);
-        Thread.Sleep(800);
+        // MC's tree has LabelEdit active: clicking the label of an already-selected node arms
+        // the inline rename editor. ESC on the freshly focused tree cancels that arming; without
+        // this, the captured node renders in edit mode and rename commits can even raise
+        // "ItemName.set ...: Not valid to set dirty state at the line!!!" error dialogs.
+        FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE);
+        Thread.Sleep(300);
     }
 
     /// <summary>Closes any leftover login/connection dialog that would steal keyboard focus from the tree.</summary>

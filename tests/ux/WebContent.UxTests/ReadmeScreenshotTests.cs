@@ -164,6 +164,12 @@ public class ReadmeScreenshotTests
             Thread.Sleep(1500);
             mcMain = mc.Windows().First(w => (w.Name ?? string.Empty).Contains("Management Client"));
 
+            // The tree's inline rename editor can arm itself during selection (a WindowsForms
+            // Edit hosting the node name appears inside the tree column). Cancelling it keeps the
+            // node rendered as a plain selected row instead of an edit-mode badge.
+            ManagementClientUi.DismissItemNameSetErrors(mc);
+            ManagementClientUi.ExitTreeEditMode(mcMain, config.McWorkspaceName);
+
             Artifacts.WriteText("mc-workspace-tree.txt", TreeDump.Of(mcMain, 8));
             var tree = mcMain.FindFirstDescendant(cf => cf.ByControlType(ControlType.Tree))
                 ?? throw new InvalidOperationException("Management Client tree not found.");
@@ -213,7 +219,31 @@ public class ReadmeScreenshotTests
                     if (dr.Width > 0)
                         FlaUI.Core.Input.Mouse.Click(new System.Drawing.Point(dr.X + Math.Max(25, dr.Width / 2), dr.Y + dr.Height / 2));
                     Thread.Sleep(1500);
+
+                    // Expand the workspace node so each defined workspace shows as its own child
+                    // row in the security tree: individual per-workspace permission assignment is
+                    // what the README shot is meant to illustrate.
+                    try { if (leaf.Patterns.ExpandCollapse.IsSupported) leaf.Patterns.ExpandCollapse.Pattern.Expand(); } catch { }
+                    Thread.Sleep(800);
+                    var expanded = detailTree.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem))
+                        .Any(t => string.Equals(t.Name, config.McWorkspaceName, StringComparison.OrdinalIgnoreCase));
+                    if (!expanded)
+                    {
+                        try { leaf.Focus(); } catch { }
+                        FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.RIGHT);
+                        Thread.Sleep(800);
+                    }
+                    // Keep the workspace node itself selected: the "Security settings for" grid
+                    // beside the tree belongs to it, and the click keeps the row highlighted.
+                    dr = leaf.BoundingRectangle;
+                    if (dr.Width > 0)
+                        FlaUI.Core.Input.Mouse.Click(new System.Drawing.Point(dr.X + Math.Max(25, dr.Width / 2), dr.Y + dr.Height / 2));
+                    Thread.Sleep(1200);
                 }
+
+                // Re-arm guard for the second shot: the PlatformTree must not render edit mode.
+                ManagementClientUi.DismissItemNameSetErrors(mc);
+                ManagementClientUi.ExitTreeEditMode(mcMain, config.McWorkspaceName);
 
                 // Re-click the (already-selected) role row on its label so the grid shows the
                 // selection highlight again without triggering a selection-changed reload.
