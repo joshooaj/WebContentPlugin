@@ -26,7 +26,7 @@ public static class ManagementClientUi
         {
             var item = FindTreeItem(mainWindow, name);
             if (item != null) return item;
-            Thread.Sleep(1000);
+            Thread.Sleep(250);
         }
         throw new TimeoutException($"Tree item '{name}' never appeared.");
     }
@@ -43,7 +43,7 @@ public static class ManagementClientUi
             var item = FindTreeItem(mainWindow, name);
             if (item != null) return item;
             FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.DOWN);
-            Thread.Sleep(350);
+            Thread.Sleep(50);
         }
         return FindTreeItem(mainWindow, name);
     }
@@ -57,7 +57,7 @@ public static class ManagementClientUi
             var item = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem))
                 .FirstOrDefault(t => (t.Name ?? string.Empty).Contains(fragment, StringComparison.OrdinalIgnoreCase));
             if (item != null) return item;
-            Thread.Sleep(1000);
+            Thread.Sleep(50);
         }
         throw new TimeoutException($"Tree item containing '{fragment}' never appeared.");
     }
@@ -65,7 +65,82 @@ public static class ManagementClientUi
     public static void SelectTreeItem(Window mainWindow, string name)
     {
         SelectNode(mainWindow, name);
-        Thread.Sleep(1000);
+        Thread.Sleep(50);
+    }
+
+    /// <summary>
+    /// Closes the "ItemName.set ... Not valid to set dirty state at the line!!!" error dialog MC
+    /// raises when its tree rename flow misbehaves. The dialog is modal and blocks every later
+    /// UIA interaction, so it must be dismissed before continuing.
+    /// </summary>
+    public static void DismissItemNameSetErrors(ClientSession session)
+    {
+        foreach (var dialog in session.Windows().ToList())
+        {
+            var title = dialog.Name ?? string.Empty;
+            if (!title.Contains("ItemName.set", StringComparison.OrdinalIgnoreCase)
+                && !title.Contains("dirty state", StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                var ok = dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                    .FirstOrDefault(b => string.Equals((b.Name ?? string.Empty).Trim(), "OK", StringComparison.OrdinalIgnoreCase));
+                if (ok != null) ok.Patterns.Invoke.Pattern.Invoke();
+                else dialog.Close();
+                Thread.Sleep(800);
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>
+    /// Cancels the WinForms tree's inline rename editor. While editing, the tree hosts the node
+    /// name in a ControlType.Edit control (WindowsForms10.EDIT) positioned inside the tree column;
+    /// the screenshot shows the node with a pencil badge and the label underlined. Pressing ESC on
+    /// the focused tree cancels it, and a single click on the label restores clean selection.
+    /// Call right before any capture that includes the tree.
+    /// </summary>
+    public static void ExitTreeEditMode(Window mainWindow, string name)
+    {
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            if (!TreeEditActive(mainWindow, name)) return;
+            var item = FindTreeItem(mainWindow, name);
+            try { if (item != null) item.Focus(); } catch { }
+            FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE);
+            Thread.Sleep(700);
+            // Re-select via UIA only: a mouse click on the label of a selected node is exactly
+            // what arms the rename editor in the first place.
+            try { if (item != null && item.Patterns.SelectionItem.IsSupported) item.Patterns.SelectionItem.Pattern.Select(); } catch { }
+            Thread.Sleep(700);
+        }
+        if (TreeEditActive(mainWindow, name))
+            throw new InvalidOperationException($"Tree node '{name}' stayed in inline edit mode after repeated ESC.");
+    }
+
+    /// <summary>
+    /// True when the tree column hosts an Edit control whose value equals the node name (inline
+    /// rename). Detail-pane edits like txtName hold the same value but sit outside the tree column.
+    /// </summary>
+    private static bool TreeEditActive(Window mainWindow, string name)
+    {
+        var tree = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PlatformTree"));
+        if (tree == null) return false;
+        var tr = tree.BoundingRectangle;
+        if (tr.Width <= 0) return false;
+        foreach (var edit in mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit)))
+        {
+            try
+            {
+                var r = edit.BoundingRectangle;
+                if (r.Width <= 0 || r.X + r.Width < tr.X || r.X > tr.X + tr.Width) continue;
+                if (edit.Patterns.Value.IsSupported &&
+                    string.Equals(edit.Patterns.Value.Pattern.Value.Value, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch { }
+        }
+        return false;
     }
 
     /// <summary>
@@ -86,7 +161,12 @@ public static class ManagementClientUi
         catch { }
         Thread.Sleep(400);
         ClickLabel(mainWindow, item);
-        Thread.Sleep(800);
+        // MC's tree has LabelEdit active: clicking the label of an already-selected node arms
+        // the inline rename editor. ESC on the freshly focused tree cancels that arming; without
+        // this, the captured node renders in edit mode and rename commits can even raise
+        // "ItemName.set ...: Not valid to set dirty state at the line!!!" error dialogs.
+        FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE);
+        Thread.Sleep(300);
     }
 
     /// <summary>Closes any leftover login/connection dialog that would steal keyboard focus from the tree.</summary>
@@ -138,7 +218,7 @@ public static class ManagementClientUi
         {
             FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.APPS);
         }
-        Thread.Sleep(1500);
+        Thread.Sleep(1000);
 
         var names = new List<string>();
         foreach (var window in session.Windows())
@@ -157,7 +237,7 @@ public static class ManagementClientUi
     public static List<string> RightClickAndDumpMenu(Window mainWindow, AutomationElement treeItem)
     {
         treeItem.RightClick();
-        Thread.Sleep(1500);
+        Thread.Sleep(1000);
         var items = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem))
             .Select(m => m.Name ?? string.Empty).Where(n => n.Length > 0).ToList();
         return items;
@@ -302,12 +382,14 @@ public static class ManagementClientUi
     }
 
     /// <summary>
-    /// Returns the tree to the canonical clean state: Home expanded, every child of Home collapsed
-    /// (optionally allowing some nodes to stay open, e.g. the plugin node the caller will use next).
-    /// Repeatedly locates the first expanded non-root node in document order, then drives the
-    /// WinForms TreeView itself: real-click Home (focus + selection at the top), walk DOWN with the
-    /// keyboard to the node's visible index, press LEFT (collapse). Plugin-injected nodes ignore
-    /// DoDefaultAction/double-click toggles, so the keyboard route is the reliable one.
+    /// Returns the tree to the canonical clean state: Home expanded, every level-1 child of Home
+    /// collapsed (optionally allowing some nodes to stay open, e.g. the plugin node the caller will
+    /// use next). In one snapshot of the realized rows a level-1 node is expanded exactly when the
+    /// row directly after it is indented deeper (larger BoundingRectangle.X); all level-1 rows
+    /// share one indent X. Double-clicking an expanded level-1 node's label collapses it, and the
+    /// TreeView re-realizes the rows beneath — which pulls previously off-screen level-1 nodes into
+    /// the classification on later rounds. Nodes whose double-click does not take are retried via
+    /// the keyboard route (click Home, walk DOWN, press LEFT).
     /// </summary>
     public static void CollapseTreeToRoot(Window mainWindow, int timeoutSeconds = 150, string[] allowExpanded = null)
     {
@@ -319,9 +401,11 @@ public static class ManagementClientUi
         while (DateTime.UtcNow < deadline)
         {
             WheelTree(mainWindow, -12);
-            var items = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem)).ToList();
+            var treeNav = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TreeNavigation"));
+            var items = (treeNav ?? (AutomationElement)mainWindow)
+                .FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem)).ToList();
             var home = items.FirstOrDefault(t => (t.Name ?? string.Empty).StartsWith("Home", StringComparison.OrdinalIgnoreCase));
-            if (home == null) { Artifacts.WriteText("mc-collapse-log.txt", log.AppendLine("Home not realized").ToString()); return; }
+            if (home == null) { Artifacts.WriteText("mc-collapse-log.txt", log.AppendLine("Home not found").ToString()); return; }
 
             // MC persists tree collapse state between sessions: the whole tree can start collapsed.
             if (items.Count == 1)
@@ -334,50 +418,59 @@ public static class ManagementClientUi
                 continue;
             }
 
-            var culprit = FindExpandedNonRoot(items, home.Name, allow, strikes);
-            if (culprit == null)
+            var homeIdx = items.IndexOf(home);
+            if (homeIdx + 1 >= items.Count) { log.AppendLine("Home is the last realized row"); break; }
+
+            // Level-1 rows share the X of the first realized row below Home. A level-1 node is
+            // expanded exactly when the next realized row is indented deeper under it (larger X).
+            var level1X = items[homeIdx + 1].BoundingRectangle.X;
+            var expanded = new List<(int Index, AutomationElement Node)>();
+            for (var i = homeIdx + 1; i + 1 < items.Count; i++)
             {
-                var stubborn = ExpandedNonRootNames(items, home.Name, allow);
-                if (stubborn.Count == 0 || strikes.Count > 0)
-                {
-                    if (stubborn.Count > 0) log.AppendLine("accepting stubborn-expanded: " + string.Join(", ", stubborn));
-                    Artifacts.WriteText("mc-collapse-log.txt", log.ToString());
-                    return;
-                }
+                var node = items[i];
+                if (allow.Contains(node.Name ?? string.Empty)) continue;
+                var a = node.BoundingRectangle;
+                var b = items[i + 1].BoundingRectangle;
+                if (a.Width <= 0 || b.Width <= 0) continue;
+                if (Math.Abs(a.X - level1X) > 1) continue;
+                if (b.X <= a.X + 5) continue;
+                bool offscreen;
+                try { offscreen = node.IsOffscreen; } catch { offscreen = false; }
+                if (offscreen) continue;
+                expanded.Add((i, node));
             }
 
-            var name = culprit?.Name ?? string.Empty;
-            strikes[name] = strikes.GetValueOrDefault(name) + 1;
-            var idx = items.FindIndex(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
-            log.AppendLine($"collapse '{name}' idx={idx} strike={strikes[name]}");
-            KeyboardWalkTo(mainWindow, home, idx);
-            var walked = items[idx];
-            if (_selectionObservable == true && !IsNodeSelected(walked))
+            if (expanded.Count == 0)
             {
-                log.AppendLine($"  walk failed (node not selected); skipping LEFT");
-                continue;
+                log.AppendLine($"tree collapsed to root (realized items={items.Count}, homeIdx={homeIdx}, level1X={level1X})");
+                Artifacts.WriteText("mc-collapse-log.txt", log.ToString());
+                return;
             }
-            FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.LEFT);
-            Thread.Sleep(800);
+
+            foreach (var pair in expanded)
+            {
+                var name = pair.Node.Name ?? string.Empty;
+                strikes[name] = strikes.GetValueOrDefault(name) + 1;
+                log.AppendLine($"collapse level-1 '{name}' idx={pair.Index} strike={strikes[name]}");
+                var pt = strikes[name] >= MaxStrikesPerNode ? null : ClickablePoint(pair.Node);
+                if (pt.HasValue)
+                {
+                    FlaUI.Core.Input.Mouse.DoubleClick(pt.Value);
+                    Thread.Sleep(400);
+                }
+                else
+                {
+                    // Double-click silently not taking on this node: the keyboard route proven for
+                    // plugin-injected nodes — click Home (focus + select index 0), walk DOWN to the
+                    // node's visible index, press LEFT to collapse.
+                    KeyboardWalkTo(mainWindow, home, pair.Index);
+                    FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.LEFT);
+                    Thread.Sleep(800);
+                }
+            }
         }
         Artifacts.WriteText("mc-collapse-log.txt", log.ToString());
         throw new TimeoutException("Could not collapse the Management Client tree to the Home root.");
-    }
-
-    /// <summary>First realized node that has an indented child right after it (skips Home, allowed names, strike-exhausted names).</summary>
-    private static AutomationElement FindExpandedNonRoot(List<AutomationElement> items, string homeName,
-        HashSet<string> allow, Dictionary<string, int> strikes)
-    {
-        for (var i = 0; i + 1 < items.Count; i++)
-        {
-            if (string.Equals(items[i].Name, homeName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (allow.Contains(items[i].Name ?? string.Empty)) continue;
-            if (strikes.GetValueOrDefault(items[i].Name ?? string.Empty) >= MaxStrikesPerNode) continue;
-            var a = items[i].BoundingRectangle;
-            var b = items[i + 1].BoundingRectangle;
-            if (a.Width > 0 && b.Width > 0 && b.X > a.X + 5) return items[i];
-        }
-        return null;
     }
 
     /// <summary>
@@ -426,19 +519,26 @@ public static class ManagementClientUi
         return false;
     }
 
-    /// <summary>Names of realized nodes (excluding Home and allowed names) with an indented child directly after them.</summary>
-    private static List<string> ExpandedNonRootNames(List<AutomationElement> items, string homeName, HashSet<string> allow)
+    /// <summary>
+    /// Polls until the navigation tree exists and its first TreeItem (the Home root) is realized.
+    /// MC realizes the tree some time AFTER the main window appears, so this replaces fixed
+    /// startup sleeps: it proceeds as soon as CollapseTreeToRoot can actually do work.
+    /// </summary>
+    public static bool WaitForTreeReady(Window mainWindow, int timeoutSeconds = 30)
     {
-        var names = new List<string>();
-        for (var i = 0; i + 1 < items.Count; i++)
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
         {
-            if (homeName != null && string.Equals(items[i].Name, homeName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (allow.Contains(items[i].Name ?? string.Empty)) continue;
-            var a = items[i].BoundingRectangle;
-            var b = items[i + 1].BoundingRectangle;
-            if (a.Width > 0 && b.Width > 0 && b.X > a.X + 5) names.Add(items[i].Name ?? "?");
+            try
+            {
+                if (mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TreeNavigation")) != null
+                    && mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem)).Length > 0)
+                    return true;
+            }
+            catch { }
+            Thread.Sleep(300);
         }
-        return names;
+        return false;
     }
 
     /// <summary>Scrolls the navigation tree with the mouse wheel (negative = up). MC trees ignore keyboard scrolling.</summary>
@@ -451,13 +551,13 @@ public static class ManagementClientUi
         var cx = (int)(r.X + r.Width / 2);
         var cy = (int)(r.Y + Math.Min(r.Height / 2, 300));
         FlaUI.Core.Input.Mouse.Position = new System.Drawing.Point(cx, cy);
-        Thread.Sleep(300);
+        Thread.Sleep(150);
         for (var i = 0; i < Math.Abs(clicks); i++)
         {
             InputUtil.Wheel(cx, cy, clicks > 0 ? -120 : 120);
-            Thread.Sleep(150);
+            Thread.Sleep(40);
         }
-        Thread.Sleep(600);
+        Thread.Sleep(250);
     }
 
     /// <summary>
@@ -551,6 +651,40 @@ public static class ManagementClientUi
         {
             FlaUI.Core.Input.Keyboard.Type(value);
         }
+    }
+
+    /// <summary>
+    /// Drives a checkbox in the detail pane (WPF hosted control: AutomationId is the x:Name)
+    /// to the requested state using the UIA Toggle pattern.
+    /// </summary>
+    public static void EnsureCheckBox(Window mainWindow, string automationId, bool on)
+    {
+        var box = ExpectControl(mainWindow, automationId, 30);
+        var desired = on ? FlaUI.Core.Definitions.ToggleState.On : FlaUI.Core.Definitions.ToggleState.Off;
+        for (var attempt = 0; attempt < 5 && box.Patterns.Toggle.Pattern.ToggleState.Value != desired; attempt++)
+        {
+            try { box.Patterns.Toggle.Pattern.Toggle(); } catch { box.Click(); }
+            Thread.Sleep(500);
+        }
+        if (box.Patterns.Toggle.Pattern.ToggleState.Value != desired)
+            throw new InvalidOperationException($"Checkbox '{automationId}' never reached state {(on ? "On" : "Off")}.");
+    }
+
+    /// <summary>
+    /// Deletes the named workspace item through its tree context menu when it exists.
+    /// Returns false when the item was not present at all.
+    /// </summary>
+    public static bool DeleteWorkspaceIfPresent(ClientSession session, Window mainWindow, string name)
+    {
+        var item = FindTreeItem(mainWindow, name);
+        if (item == null) return false;
+        OpenContextMenu(session, mainWindow, item);
+        if (!(ClickMenuItem(session, "Delete") || ClickMenuItem(session, "Remove")))
+            throw new InvalidOperationException($"No Delete entry in the context menu of '{name}'.");
+        AcceptConfirmation(session);
+        Save(mainWindow);
+        Thread.Sleep(1500);
+        return true;
     }
 
     public static bool Save(Window mainWindow, int timeoutSeconds = 20)

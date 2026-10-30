@@ -1,0 +1,75 @@
+<UserControl x:Class="WebContent.Admin.WorkspaceOverviewPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="820" d:DesignWidth="900"
+             Background="White">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/WebContent;component/Admin/AdminPageStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel MaxWidth="860" Margin="24,20,24,32">
+
+      <TextBlock Style="{StaticResource PageTitleStyle}" Text="Web Content Workspaces" />
+      <TextBlock Style="{StaticResource BodyTextStyle}" Margin="0,6,0,14"
+                 Text="Workspaces are centrally administered browser tabs for Smart Client. Define one here, and every authorized user gets it as a dedicated tab backed by the evergreen Microsoft Edge WebView2 runtime - no per-view setup needed on each workstation." />
+
+      <Border Style="{StaticResource CardStyle}" Padding="10">
+        <Image Source="pack://application:,,,/WebContent;component/Resources/WorkspaceScreenshot.png"
+                 Stretch="Uniform" MaxHeight="420" StretchDirection="DownOnly"
+                 SnapsToDevicePixels="True" />
+      </Border>
+      <TextBlock Style="{StaticResource SecondaryTextStyle}" Margin="0,4,0,18"
+                 Text="A Web Content workspace named 'Demo Workspace' opened in the Smart Client, showing a portal page inside the browser tab." />
+
+      <TextBlock Style="{StaticResource PageTitleStyle}" FontSize="16" Text="Get started in three steps" />
+
+      <Grid Margin="0,10,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="40" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource StepBadgeStyle}" Margin="0,2,0,16">
+          <TextBlock Style="{StaticResource StepNumberStyle}" Text="1" />
+        </Border>
+        <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,14">
+          <TextBlock Style="{StaticResource StepTitleStyle}" Text="Create a workspace" />
+          <TextBlock Style="{StaticResource BodyTextStyle}"
+                     Text="In the navigation tree, expand Cascadia Technology, select Web Content Workspaces, and click New. Give the workspace a name and a home address, then adjust the display, behavior, privacy, and advanced options for your site. Click Save." />
+        </StackPanel>
+
+        <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource StepBadgeStyle}" Margin="0,2,0,16">
+          <TextBlock Style="{StaticResource StepNumberStyle}" Text="2" />
+        </Border>
+        <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,14">
+          <TextBlock Style="{StaticResource StepTitleStyle}" Text="Grant permission to a role" />
+          <TextBlock Style="{StaticResource BodyTextStyle}"
+                     Text="Workspaces are securable items. Open Security Roles, pick a role, and on the Cascadia Technology tab select the workspace and grant View Web Content Workspace. Grant Manage Web Content Workspace only to administrators who may edit the definition." />
+        </StackPanel>
+
+        <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource StepBadgeStyle}" Margin="0,2,0,16">
+          <TextBlock Style="{StaticResource StepNumberStyle}" Text="3" />
+        </Border>
+        <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,14">
+          <TextBlock Style="{StaticResource StepTitleStyle}" Text="View it in Smart Client" />
+          <TextBlock Style="{StaticResource BodyTextStyle}"
+                     Text="Sign in to the Smart Client. Each workspace the user's role may view appears as its own tab at the top of the window, named after the workspace. New or renamed workspaces appear the next time the Smart Client starts or reloads its configuration." />
+        </StackPanel>
+      </Grid>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

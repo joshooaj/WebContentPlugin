@@ -40,9 +40,14 @@ public sealed class UxConfig
     /// <summary>Role whose security tab is shown in the Management Client README screenshot.</summary>
     public string RoleName { get; private init; }
 
-    public static UxConfig Load()
+    /// <summary>
+    /// Whether the configured workspace is expected to hide its address bar. The Smart Client
+    /// address-bar tests use this to assert the right contract (bar absent vs bar present).
+    /// </summary>
+    public bool HideAddress { get; private init; }
+
+    public static UxConfig Load(string repoRoot)
     {
-        var repoRoot = FindRepoRoot();
         var envFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var envPath = Path.Combine(repoRoot, ".env");
         if (File.Exists(envPath))
@@ -66,6 +71,10 @@ public sealed class UxConfig
                 if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
                     envFile[prop.Name] = prop.Value.GetString();
+                }
+                else if (prop.Value.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                {
+                    envFile[prop.Name] = prop.Value.GetBoolean().ToString();
                 }
             }
         }
@@ -99,11 +108,18 @@ public sealed class UxConfig
             McWorkspaceName = Pick("UX_MC_WORKSPACE_NAME", "mcWorkspaceName") ?? "Demo Workspace",
             PluginNodeName = Pick("UX_PLUGIN_NODE_NAME", "pluginNodeName") ?? "Cascadia Technology",
             RoleName = Pick("UX_ROLE_NAME", "roleName") ?? "Operators",
+            HideAddress = bool.TryParse(Pick("UX_HIDE_ADDRESS", "hideAddress"), out var hideAddress) && hideAddress,
         };
 
         if (!File.Exists(config.SmartClientExe)) throw new FileNotFoundException($"Smart Client exe not found: {config.SmartClientExe}");
         if (!File.Exists(config.AdminClientExe)) throw new FileNotFoundException($"Management Client exe not found: {config.AdminClientExe}");
         return config;
+    }
+
+    public static UxConfig Load()
+    {
+        var repoRoot = FindRepoRoot();
+        return Load(repoRoot);
     }
 
     private static string FindRepoRoot()

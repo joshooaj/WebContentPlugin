@@ -45,6 +45,7 @@
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="WindowsFormsIntegration" />
     <Reference Include="System.Xaml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -63,13 +64,17 @@
     <Compile Include="Admin\RootNodeUserControl.Designer.cs">
       <DependentUpon>RootNodeUserControl.cs</DependentUpon>
     </Compile>
+    <Compile Include="Admin\WorkspaceConfigPage.xaml.cs">
+      <DependentUpon>WorkspaceConfigPage.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Admin\WorkspaceItemManager.cs" />
     <Compile Include="Admin\WorkspaceNameValidation.cs" />
+    <Compile Include="Admin\WorkspaceOverviewPage.xaml.cs">
+      <DependentUpon>WorkspaceOverviewPage.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Admin\WorkspaceOverviewUserControl.cs" />
     <Compile Include="Admin\WorkspaceUserControl.cs">
       <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Admin\WorkspaceUserControl.Designer.cs">
-      <DependentUpon>WorkspaceUserControl.cs</DependentUpon>
     </Compile>
     <Compile Include="Client\AddressBarInteraction.cs" />
     <Compile Include="Client\BitmapExtensions.cs" />
@@ -131,9 +136,6 @@
     <EmbeddedResource Include="Admin\RootNodeUserControl.resx">
       <DependentUpon>RootNodeUserControl.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="Admin\WorkspaceUserControl.resx">
-      <DependentUpon>WorkspaceUserControl.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="Strings.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Strings.Designer.cs</LastGenOutput>
@@ -145,6 +147,18 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
+    <Page Include="Admin\AdminPageStyles.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Admin\WorkspaceConfigPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Admin\WorkspaceOverviewPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Client\WebContentPropertiesUserControl.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -172,6 +186,7 @@
     <Resource Include="Resources\CompanyLogo.png" />
     <Resource Include="Resources\icon.ico" />
     <Resource Include="Resources\WebContentIcon.png" />
+    <Resource Include="Resources\WorkspaceScreenshot.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>

@@ -1,0 +1,92 @@
+<UserControl x:Class="WebContent.Admin.WorkspaceConfigPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="560" d:DesignWidth="760"
+             Background="White">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/WebContent;component/Admin/AdminPageStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel MaxWidth="760" Margin="20,16,20,24">
+
+      <!-- Ticket #27: broken-definition banner, shown by SignalLoadDefect. -->
+      <Border x:Name="configError" Style="{StaticResource ErrorBannerStyle}" Visibility="Collapsed">
+        <TextBlock x:Name="configErrorText" Style="{StaticResource ErrorBannerTextStyle}" />
+      </Border>
+
+      <Border Style="{StaticResource CardStyle}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="150" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Name:" />
+          <TextBox x:Name="txtName" Grid.Row="0" Grid.Column="1"
+                   Style="{StaticResource FormTextBoxStyle}" Text="New Workspace"
+                   MaxLength="128" TextChanged="OnUserChanged" />
+
+          <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Home address:" />
+          <TextBox x:Name="txtHomeAddress" Grid.Row="1" Grid.Column="1"
+                   Style="{StaticResource FormTextBoxStyle}"
+                   MaxLength="2048" TextChanged="OnUserChanged" />
+        </Grid>
+      </Border>
+
+      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Display" />
+      <CheckBox x:Name="chkHideToolbar" Content="Hide toolbar"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnHideToolbarChanged" Unchecked="OnHideToolbarChanged" />
+      <CheckBox x:Name="chkHideAddress" Content="Hide address"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <TextBlock x:Name="lblZoomLevel" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Zoom level:" Margin="0,6,12,6" />
+        <TextBox x:Name="txtZoomLevel" Grid.Column="1" Style="{StaticResource FormTextBoxStyle}"
+                 Width="70" Text="100" TextAlignment="Right"
+                 MaxLength="4" TextChanged="OnZoomLevelTextChanged" />
+        <Slider x:Name="zoomSlider" Grid.Column="2" Minimum="25" Maximum="500" Value="100"
+                TickFrequency="25" TickPlacement="BottomRight" IsSnapToTickEnabled="False"
+                LargeChange="25" SmallChange="5" VerticalAlignment="Center"
+                Margin="12,0,0,0" MaxWidth="360" HorizontalAlignment="Left" Width="360"
+                ValueChanged="OnZoomSliderValueChanged" />
+      </Grid>
+
+      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Behavior" />
+      <CheckBox x:Name="chkRememberLastAddress" Content="Remember last address"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+      <CheckBox x:Name="chkAllowBackgroundBrowser" Content="Allow browser to run in background"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+      <CheckBox x:Name="chkAllowAudioNotifications" Content="Allow audio notifications"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+      <CheckBox x:Name="chkMuteAudio" Content="Mute audio"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+
+      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Privacy" />
+      <CheckBox x:Name="chkClearBrowsingDataOnExit" Content="Clear history on exit"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+
+      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Advanced" />
+      <CheckBox x:Name="chkIsolateBrowserInstances" Content="Isolate this browser instance"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+      <CheckBox x:Name="chkEnableDevTools" Content="Enable developer tools (F12)"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -168,6 +168,15 @@ namespace WebContent.Client
             internal set
             {
                 _viewItemManager = value;
+                if (value != null)
+                {
+                    // Regression fix: XAML bindings evaluated AddressVisibility during
+                    // InitializeComponent() while this manager was still unattached, which made the
+                    // getter return Visible (manager null). Without this notification the address
+                    // bar stayed visible for the whole session even when the workspace sets
+                    // HideAddress=true; only ReloadProperties (property-change events) re-raises it.
+                    OnPropertyChanged(nameof(AddressVisibility));
+                }
             }
         }
 
