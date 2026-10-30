@@ -233,8 +233,8 @@ namespace WebContent.Admin
         /// Ticket #53 demo harness: sends a proxy-fetch request from the Management Client over
         /// classic MIP messaging (ProxyFetchClient.Active, provisioned during Init) and shows the
         /// status line, body size, and duration that came back from the Event Server fetcher.
-        /// The await continues off the UI thread, so result display re-dispatches onto the
-        /// page's dispatcher.
+        /// No ConfigureAwait(false) anywhere: this is a WPF event handler, and every statement
+        /// after the await - including the finally block - must stay on the UI thread.
         /// </summary>
         private async void OnProxyTestFetch(object sender, RoutedEventArgs e)
         {
@@ -259,13 +259,12 @@ namespace WebContent.Admin
 
                 var url = (txtProxyTestUrl.Text ?? string.Empty).Trim();
                 var stopwatch = Stopwatch.StartNew();
-                var result = await client.FetchAsync(url).ConfigureAwait(false);
+                var result = await client.FetchAsync(url);
                 stopwatch.Stop();
 
-                string outcome;
                 if (result.Success)
                 {
-                    outcome = string.Format(
+                    lblProxyTestResult.Text = string.Format(
                         CultureInfo.InvariantCulture,
                         Strings.ProxyTestFetchSuccessFormat,
                         result.StatusCode,
@@ -274,24 +273,22 @@ namespace WebContent.Admin
                 }
                 else
                 {
-                    outcome = string.Format(
+                    lblProxyTestResult.Text = string.Format(
                         CultureInfo.InvariantCulture,
                         Strings.ProxyTestFetchFailureFormat,
                         result.ErrorCode,
                         stopwatch.Elapsed.TotalSeconds,
                         result.ErrorMessage);
                 }
-
-                Dispatcher.Invoke(() => lblProxyTestResult.Text = outcome);
             }
             catch (Exception exception)
             {
-                Dispatcher.Invoke(() => lblProxyTestResult.Text = string.Format(
+                lblProxyTestResult.Text = string.Format(
                     CultureInfo.InvariantCulture,
                     Strings.ProxyTestFetchFailureFormat,
                     ProxyFetchErrorCodes.Error,
                     0d,
-                    exception.Message));
+                    exception.Message);
             }
             finally
             {
