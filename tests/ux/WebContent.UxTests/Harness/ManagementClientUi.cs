@@ -553,6 +553,40 @@ public static class ManagementClientUi
         }
     }
 
+    /// <summary>
+    /// Drives a checkbox in the detail pane (WPF hosted control: AutomationId is the x:Name)
+    /// to the requested state using the UIA Toggle pattern.
+    /// </summary>
+    public static void EnsureCheckBox(Window mainWindow, string automationId, bool on)
+    {
+        var box = ExpectControl(mainWindow, automationId, 30);
+        var desired = on ? FlaUI.Core.Definitions.ToggleState.On : FlaUI.Core.Definitions.ToggleState.Off;
+        for (var attempt = 0; attempt < 5 && box.Patterns.Toggle.Pattern.ToggleState.Value != desired; attempt++)
+        {
+            try { box.Patterns.Toggle.Pattern.Toggle(); } catch { box.Click(); }
+            Thread.Sleep(500);
+        }
+        if (box.Patterns.Toggle.Pattern.ToggleState.Value != desired)
+            throw new InvalidOperationException($"Checkbox '{automationId}' never reached state {(on ? "On" : "Off")}.");
+    }
+
+    /// <summary>
+    /// Deletes the named workspace item through its tree context menu when it exists.
+    /// Returns false when the item was not present at all.
+    /// </summary>
+    public static bool DeleteWorkspaceIfPresent(ClientSession session, Window mainWindow, string name)
+    {
+        var item = FindTreeItem(mainWindow, name);
+        if (item == null) return false;
+        OpenContextMenu(session, mainWindow, item);
+        if (!(ClickMenuItem(session, "Delete") || ClickMenuItem(session, "Remove")))
+            throw new InvalidOperationException($"No Delete entry in the context menu of '{name}'.");
+        AcceptConfirmation(session);
+        Save(mainWindow);
+        Thread.Sleep(1500);
+        return true;
+    }
+
     public static bool Save(Window mainWindow, int timeoutSeconds = 20)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
