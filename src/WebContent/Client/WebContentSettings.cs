@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using WebContent;
@@ -187,6 +188,41 @@ namespace WebContent.Client
                 if (EnableDevTools == value) return;
                 SetProperty(nameof(EnableDevTools), WebContentConfiguration.FormatBoolean(value));
                 OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// Ticket #52: admin-owned proxy state for this workspace. Read-only on the client: the
+        /// Smart Client user can see whether the browser routes through the VMS server and which
+        /// targets are allowlisted, but only the Management Client admin may change it.
+        /// </summary>
+        public string ProxyLabel => Strings.ProxyLabel;
+
+        public bool ProxyEnabled => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(ProxyEnabled));
+
+        public string ProxyDisplay
+        {
+            get
+            {
+                if (!ProxyEnabled)
+                {
+                    return Strings.ProxyDisplayDisabled;
+                }
+
+                var rawTargets = WebContentConfiguration.GetString(GetProperty, string.Empty, "ProxyTargets");
+                var targets = new List<string>();
+                foreach (var target in (rawTargets ?? string.Empty).Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = target.Trim();
+                    if (trimmed.Length > 0)
+                    {
+                        targets.Add(trimmed);
+                    }
+                }
+
+                return targets.Count == 0
+                    ? Strings.ProxyDisplayEnabledNoTargets
+                    : Strings.ProxyDisplayEnabledPrefix + " " + string.Join(", ", targets);
             }
         }
 

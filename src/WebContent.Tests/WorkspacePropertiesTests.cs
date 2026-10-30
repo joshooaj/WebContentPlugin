@@ -226,6 +226,74 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void Json_Blob_Proxy_On_Emits_Canonical_Proxy_Properties()
+        {
+            var id = Guid.NewGuid();
+            var config = CreateConfig("camera.example");
+            var settings = config.Items[0].Settings;
+            settings.ProxyEnabled = true;
+            settings.ProxyTargets = new List<ProxyTargetConfiguration>
+            {
+                new ProxyTargetConfiguration { Scheme = "https", Host = "10.0.0.5", Port = 8443 },
+                new ProxyTargetConfiguration { Scheme = "http", Host = "Cam2.local", Port = 80 },
+            };
+            var source = new Dictionary<string, string> { [WorkspaceConfiguration.WorkspaceConfigKey] = config.Serialize() };
+
+            var properties = WorkspaceProperties.Build(id, "Ops", source, FallbackHomeAddress);
+
+            Assert.Equal("True", properties["ProxyEnabled"]);
+            Assert.Equal("https://10.0.0.5:8443,http://cam2.local", properties["ProxyTargets"]);
+        }
+
+        [Fact]
+        public void Json_Blob_Proxy_Off_Emits_Disabled_State()
+        {
+            var id = Guid.NewGuid();
+            var source = new Dictionary<string, string>
+            {
+                [WorkspaceConfiguration.WorkspaceConfigKey] = CreateConfig("example.com").Serialize()
+            };
+
+            var properties = WorkspaceProperties.Build(id, "Ops", source, FallbackHomeAddress);
+
+            Assert.Equal("False", properties["ProxyEnabled"]);
+            Assert.Equal(string.Empty, properties["ProxyTargets"]);
+        }
+
+        [Fact]
+        public void Legacy_Path_Proxy_Is_Off()
+        {
+            var id = Guid.NewGuid();
+            var source = new Dictionary<string, string> { ["Address"] = "intranet.local" };
+
+            var properties = WorkspaceProperties.Build(id, "Ops", source, FallbackHomeAddress);
+
+            Assert.Equal("False", properties["ProxyEnabled"]);
+            Assert.Equal(string.Empty, properties["ProxyTargets"]);
+        }
+
+        [Fact]
+        public void HandCraftedProxyTargetGibberish_IsSkipped_AndValidEntriesSurvive()
+        {
+            var id = Guid.NewGuid();
+            var config = CreateConfig("camera.example");
+            var settings = config.Items[0].Settings;
+            settings.ProxyEnabled = true;
+            settings.ProxyTargets = new List<ProxyTargetConfiguration>
+            {
+                new ProxyTargetConfiguration { Scheme = "ftp", Host = "files.example", Port = 21 },
+                new ProxyTargetConfiguration { Scheme = "https", Host = " ", Port = 8443 },
+                new ProxyTargetConfiguration { Scheme = "https", Host = "cam2.local", Port = 70000 },
+                new ProxyTargetConfiguration { Scheme = "https", Host = "10.0.0.5", Port = 8443 },
+            };
+            var source = new Dictionary<string, string> { [WorkspaceConfiguration.WorkspaceConfigKey] = config.Serialize() };
+
+            var properties = WorkspaceProperties.Build(id, "Ops", source, FallbackHomeAddress);
+
+            Assert.Equal("https://10.0.0.5:8443", properties["ProxyTargets"]);
+        }
+
+        [Fact]
         public void Source_Properties_Are_Not_Mutated()
         {
             var id = Guid.NewGuid();

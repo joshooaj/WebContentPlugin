@@ -87,6 +87,18 @@
       <CheckBox x:Name="chkEnableDevTools" Content="Enable developer tools (F12)"
                 Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
 
+      <!-- Ticket #52: server-side proxy toggle + target allowlist. Routing itself ships in #54; -->
+      <!-- here the setting only travels to the view item properties. -->
+      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Proxy" />
+      <CheckBox x:Name="chkProxyEnabled" Content="Route web traffic through the VMS server proxy"
+                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+      <TextBlock x:Name="lblProxyTargets" Style="{StaticResource FieldLabelStyle}" Text="Proxy targets:" Margin="0,6,0,2" />
+      <TextBox x:Name="txtProxyTargets" Style="{StaticResource FormTextBoxStyle}"
+                 AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="56"
+                 VerticalScrollBarVisibility="Auto" MaxLength="4096" TextChanged="OnProxyTargetsTextChanged" />
+      <TextBlock x:Name="lblProxyTargetsHint" Style="{StaticResource SecondaryTextStyle}"
+                 TextWrapping="Wrap" Margin="0,2,0,0" />
+
     </StackPanel>
   </ScrollViewer>
 </UserControl>

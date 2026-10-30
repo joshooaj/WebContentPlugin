@@ -231,4 +231,31 @@
   <data name="WorkspaceLabel" xml:space="preserve">
     <value>Workspace</value>
   </data>
+  <data name="ProxyEnabledLabel" xml:space="preserve">
+    <value>Route web traffic through the VMS server proxy</value>
+  </data>
+  <data name="ProxyTargetsLabel" xml:space="preserve">
+    <value>Proxy targets</value>
+  </data>
+  <data name="ProxyTargetsHint" xml:space="preserve">
+    <value>One target per line, for example https://10.0.0.5:8443. Only allowlisted targets can be reached through the proxy.</value>
+  </data>
+  <data name="InvalidProxyTargetMessage" xml:space="preserve">
+    <value>"{0}" is not a valid proxy target. Enter a target with scheme, host and port, for example https://10.0.0.5:8443.</value>
+  </data>
+  <data name="MissingProxyTargetsMessage" xml:space="preserve">
+    <value>The proxy is enabled but no target is allowlisted. Add at least one proxy target or disable the proxy.</value>
+  </data>
+  <data name="ProxyLabel" xml:space="preserve">
+    <value>Proxy:</value>
+  </data>
+  <data name="ProxyDisplayDisabled" xml:space="preserve">
+    <value>Disabled - browser connects directly</value>
+  </data>
+  <data name="ProxyDisplayEnabledNoTargets" xml:space="preserve">
+    <value>Enabled - no targets allowlisted</value>
+  </data>
+  <data name="ProxyDisplayEnabledPrefix" xml:space="preserve">
+    <value>Enabled - allowlisted targets:</value>
+  </data>
 </root>

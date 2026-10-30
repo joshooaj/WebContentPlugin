@@ -31,6 +31,9 @@ namespace WebContent.Admin
             chkClearBrowsingDataOnExit.Content = Strings.ClearBrowsingDataOnExitLabel;
             chkIsolateBrowserInstances.Content = Strings.IsolateBrowserInstancesLabel;
             chkEnableDevTools.Content = Strings.EnableDevToolsLabel;
+            chkProxyEnabled.Content = Strings.ProxyEnabledLabel;
+            lblProxyTargets.Text = Strings.ProxyTargetsLabel + ":";
+            lblProxyTargetsHint.Text = Strings.ProxyTargetsHint;
         }
 
         public string WorkspaceName
@@ -123,6 +126,22 @@ namespace WebContent.Admin
             set => chkEnableDevTools.IsChecked = value;
         }
 
+        public bool ProxyEnabled
+        {
+            get => chkProxyEnabled.IsChecked == true;
+            set => chkProxyEnabled.IsChecked = value;
+        }
+
+        /// <summary>
+        /// The allowlisted proxy targets, one origin per line as the admin types them
+        /// (ticket #52). The item manager validates and canonicalizes the lines on save.
+        /// </summary>
+        public string ProxyTargetsText
+        {
+            get => txtProxyTargets.Text;
+            set => txtProxyTargets.Text = value ?? string.Empty;
+        }
+
         public void ClearUserControl()
         {
             txtName.Text = "New Workspace";
@@ -137,6 +156,8 @@ namespace WebContent.Admin
             chkMuteAudio.IsChecked = false;
             chkIsolateBrowserInstances.IsChecked = false;
             chkEnableDevTools.IsChecked = false;
+            chkProxyEnabled.IsChecked = false;
+            txtProxyTargets.Text = string.Empty;
             configError.Visibility = Visibility.Collapsed;
             chkHideAddress.IsEnabled = true;
         }
@@ -193,6 +214,11 @@ namespace WebContent.Admin
                 txtZoomLevel.Text = e.NewValue.ToString("F0", CultureInfo.InvariantCulture);
                 _syncingZoom = false;
             }
+            ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void OnProxyTargetsTextChanged(object sender, TextChangedEventArgs e)
+        {
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
         }
     }

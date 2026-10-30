@@ -63,6 +63,8 @@
                     TickFrequency="25"
                     IsSnapToTickEnabled="True"/>
             </DockPanel>
+            <TextBlock Margin="5" FontWeight="Bold" Text="{Binding ProxyLabel, Mode=OneTime}"/>
+            <TextBlock Margin="5,0,5,5" TextWrapping="Wrap" Text="{Binding ProxyDisplay}"/>
             <Button Margin="5" Content="{Binding ClearBrowsingDataNowLabel}" Click="ClearBrowsingDataButton_Click"/>
         </StackPanel>
     </Grid>

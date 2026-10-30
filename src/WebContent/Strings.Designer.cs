@@ -392,5 +392,86 @@ namespace WebContent {
                 return ResourceManager.GetString("WorkspaceConfigErrorMissingBrowserConfig", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Route web traffic through the VMS server proxy.
+        /// </summary>
+        internal static string ProxyEnabledLabel {
+            get {
+                return ResourceManager.GetString("ProxyEnabledLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy targets.
+        /// </summary>
+        internal static string ProxyTargetsLabel {
+            get {
+                return ResourceManager.GetString("ProxyTargetsLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to One target per line, for example https://10.0.0.5:8443. Only allowlisted targets can be reached through the proxy..
+        /// </summary>
+        internal static string ProxyTargetsHint {
+            get {
+                return ResourceManager.GetString("ProxyTargetsHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to "{0}" is not a valid proxy target. Enter a target with scheme, host and port, for example https://10.0.0.5:8443..
+        /// </summary>
+        internal static string InvalidProxyTargetMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyTargetMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy is enabled but no target is allowlisted. Add at least one proxy target or disable the proxy..
+        /// </summary>
+        internal static string MissingProxyTargetsMessage {
+            get {
+                return ResourceManager.GetString("MissingProxyTargetsMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy:.
+        /// </summary>
+        internal static string ProxyLabel {
+            get {
+                return ResourceManager.GetString("ProxyLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Disabled - browser connects directly.
+        /// </summary>
+        internal static string ProxyDisplayDisabled {
+            get {
+                return ResourceManager.GetString("ProxyDisplayDisabled", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Enabled - no targets allowlisted.
+        /// </summary>
+        internal static string ProxyDisplayEnabledNoTargets {
+            get {
+                return ResourceManager.GetString("ProxyDisplayEnabledNoTargets", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Enabled - allowlisted targets:.
+        /// </summary>
+        internal static string ProxyDisplayEnabledPrefix {
+            get {
+                return ResourceManager.GetString("ProxyDisplayEnabledPrefix", resourceCulture);
+            }
+        }
     }
 }

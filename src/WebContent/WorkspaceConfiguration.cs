@@ -217,7 +217,6 @@ namespace WebContent
     {
         [DataMember(Name = "homeAddress")]
         public string HomeAddress { get; set; }
-
         [DataMember(Name = "hideToolbar")]
         public bool HideToolbar { get; set; }
 
@@ -247,5 +246,32 @@ namespace WebContent
 
         [DataMember(Name = "enableDevTools")]
         public bool EnableDevTools { get; set; }
+
+        /// <summary>
+        /// Ticket #52: server-side proxy toggle for this workspace. Absent from definitions saved
+        /// before the proxy existed, which deserializes to false - proxy off.
+        /// </summary>
+        [DataMember(Name = "proxyEnabled")]
+        public bool ProxyEnabled { get; set; }
+
+        /// <summary>
+        /// Ticket #52: targets the proxy is permitted to reach (scheme, host, port). Null for
+        /// definitions that predate the proxy or where the admin added none.
+        /// </summary>
+        [DataMember(Name = "proxyTargets")]
+        public List<ProxyTargetConfiguration> ProxyTargets { get; set; }
+    }
+
+    [DataContract]
+    internal class ProxyTargetConfiguration
+    {
+        [DataMember(Name = "scheme")]
+        public string Scheme { get; set; }
+
+        [DataMember(Name = "host")]
+        public string Host { get; set; }
+
+        [DataMember(Name = "port")]
+        public int Port { get; set; }
     }
 }

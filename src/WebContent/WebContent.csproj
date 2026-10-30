@@ -103,6 +103,7 @@
     </Compile>
     <Compile Include="Client\WebContentExportManager.cs" />
     <Compile Include="WebContentConfiguration.cs" />
+    <Compile Include="ProxyPolicy.cs" />
     <Compile Include="WorkspaceConfiguration.cs" />
     <Compile Include="WebContentPluginDefinition.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

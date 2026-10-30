@@ -133,6 +133,8 @@ namespace WebContent.Admin
                     _userControl.MuteAudio = settings.MuteAudio;
                     _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
                     _userControl.EnableDevTools = settings.EnableDevTools;
+                    _userControl.ProxyEnabled = settings.ProxyEnabled;
+                    _userControl.ProxyTargetsText = DescribeProxyTargets(settings.ProxyTargets);
                     _userControl.FillContent();
                     if (configError != WorkspaceConfigError.None)
                     {
@@ -158,6 +160,8 @@ namespace WebContent.Admin
             _userControl.MuteAudio = WebContentConfiguration.GetBoolean(properties, false, "MuteAudio");
             _userControl.IsolateBrowserInstances = WebContentConfiguration.GetBoolean(properties, false, "IsolateBrowserInstances");
             _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
+            _userControl.ProxyEnabled = false;
+            _userControl.ProxyTargetsText = string.Empty;
             _userControl.FillContent();
 
             if (configError != WorkspaceConfigError.None)
@@ -240,6 +244,16 @@ namespace WebContent.Admin
             var hideToolbar = _userControl?.HideToolbar ?? false;
             var hideAddress = !hideToolbar && (_userControl?.HideAddress ?? false);
 
+            var proxyEnabled = _userControl?.ProxyEnabled ?? false;
+            List<ProxyTargetConfiguration> proxyTargets = null;
+            if (proxyEnabled)
+            {
+                if (!TryBuildProxyTargets(_userControl.ProxyTargetsText, out proxyTargets))
+                {
+                    return false;
+                }
+            }
+
             SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
             SetOrRemoveProperty(CurrentItem, "HomeAddress", homeAddress);
             SetOrRemoveProperty(CurrentItem, "RememberLastAddress", WebContentConfiguration.FormatBoolean(_userControl?.RememberLastAddress ?? false));
@@ -267,6 +281,8 @@ namespace WebContent.Admin
                 settings.MuteAudio = _userControl?.MuteAudio ?? false;
                 settings.IsolateBrowserInstances = _userControl?.IsolateBrowserInstances ?? false;
                 settings.EnableDevTools = _userControl?.EnableDevTools ?? false;
+                settings.ProxyEnabled = proxyEnabled;
+                settings.ProxyTargets = proxyTargets;
             }
 
             SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, config.Serialize());
@@ -287,6 +303,80 @@ namespace WebContent.Admin
             {
                 item.Properties[key] = value;
             }
+        }
+
+        /// <summary>
+        /// Ticket #52: parses the admin's one-origin-per-line proxy targets into canonical
+        /// scheme/host/port records. An invalid line rejects the save (same posture as the home
+        /// address), duplicates and other overlapping entries collapse onto one record, and an
+        /// enabled proxy with no targets at all is rejected so the toggle can never mean
+        /// "allow nothing" by accident.
+        /// </summary>
+        private bool TryBuildProxyTargets(string targetsText, out List<ProxyTargetConfiguration> targets)
+        {
+            targets = new List<ProxyTargetConfiguration>();
+            var seenOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var rawLine in (targetsText ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!ProxyPolicy.TryNormalizeTarget(line, out var origin))
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy target '{line}'.");
+                    MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, line), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+
+                if (!seenOrigins.Add(origin))
+                {
+                    continue;
+                }
+
+                var originUri = new Uri(origin);
+                targets.Add(new ProxyTargetConfiguration
+                {
+                    Scheme = originUri.Scheme,
+                    Host = originUri.Host,
+                    Port = originUri.Port
+                });
+            }
+
+            if (targets.Count == 0)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): proxy enabled but no target allowlisted.");
+                MessageBox.Show(Strings.MissingProxyTargetsMessage, Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Renders stored proxy target records back as canonical one-per-line text for the admin
+        /// page; invalid stored records are dropped rather than shown.
+        /// </summary>
+        private static string DescribeProxyTargets(List<ProxyTargetConfiguration> targets)
+        {
+            if (targets == null || targets.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var lines = new List<string>();
+            foreach (var target in targets)
+            {
+                if (target != null && ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin))
+                {
+                    lines.Add(origin);
+                }
+            }
+
+            return string.Join(Environment.NewLine, lines);
         }
 
         public override Item CreateItem(Item parentItem, FQID suggestedFQID)

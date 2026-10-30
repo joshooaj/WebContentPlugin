@@ -114,6 +114,18 @@ namespace WebContent.Admin
             set => _page.EnableDevTools = value;
         }
 
+        public bool ProxyEnabled
+        {
+            get => _page.ProxyEnabled;
+            set => _page.ProxyEnabled = value;
+        }
+
+        public string ProxyTargetsText
+        {
+            get => _page.ProxyTargetsText;
+            set => _page.ProxyTargetsText = value;
+        }
+
         internal void ClearUserControl()
         {
             _page.ClearUserControl();

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace WebContent.Client
 {
@@ -42,6 +43,8 @@ namespace WebContent.Client
                 properties["MuteAudio"] = WebContentConfiguration.FormatBoolean(settings.MuteAudio);
                 properties["IsolateBrowserInstances"] = WebContentConfiguration.FormatBoolean(settings.IsolateBrowserInstances);
                 properties["EnableDevTools"] = WebContentConfiguration.FormatBoolean(settings.EnableDevTools);
+                properties["ProxyEnabled"] = WebContentConfiguration.FormatBoolean(settings.ProxyEnabled);
+                properties["ProxyTargets"] = BuildProxyTargetsProperty(settings.ProxyTargets);
 
                 return properties;
             }
@@ -79,7 +82,40 @@ namespace WebContent.Client
             properties["EnableDevTools"] = WebContentConfiguration.FormatBoolean(
                 WebContentConfiguration.GetBoolean(sourceProperties, false, "EnableDevTools"));
 
+            properties["ProxyEnabled"] = WebContentConfiguration.FormatBoolean(false);
+            properties["ProxyTargets"] = string.Empty;
+
             return properties;
+        }
+
+        /// <summary>
+        /// Ticket #52: flattens the admin proxy allowlist to the canonical, comma-separated
+        /// origin list the view item consumes. Invalid entries (bad scheme/host/port) are
+        /// dropped; duplicates collapse.
+        /// </summary>
+        private static string BuildProxyTargetsProperty(List<ProxyTargetConfiguration> targets)
+        {
+            if (targets == null || targets.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var canonical = new List<string>();
+            foreach (var target in targets)
+            {
+                if (target == null)
+                {
+                    continue;
+                }
+
+                if (ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin) &&
+                    !canonical.Contains(origin, StringComparer.OrdinalIgnoreCase))
+                {
+                    canonical.Add(origin);
+                }
+            }
+
+            return string.Join(",", canonical);
         }
     }
 }

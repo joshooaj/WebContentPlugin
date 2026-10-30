@@ -29,6 +29,7 @@
     <Compile Include="..\WebContent\Admin\WorkspaceNameValidation.cs" Link="WorkspaceNameValidation.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceViewItemSync.cs" Link="WorkspaceViewItemSync.cs" />
     <Compile Include="..\WebContent\WebContentConfiguration.cs" Link="WebContentConfiguration.cs" />
+    <Compile Include="..\WebContent\ProxyPolicy.cs" Link="ProxyPolicy.cs" />
     <Compile Include="..\WebContent\WorkspaceConfiguration.cs" Link="WorkspaceConfiguration.cs" />
   </ItemGroup>
 </Project>
