@@ -148,10 +148,10 @@ public class ReadmeScreenshotTests
             var mcMain = LoginFlow.WaitForAdminMain(mc);
             SmartClientUi.Maximize(mcMain);
             MaximizeWindow(mc.Process);
-            Thread.Sleep(3000);
             mcMain = mc.Windows().First(w => (w.Name ?? string.Empty).Contains("Management Client"));
             ManagementClientUi.CloseStrayLoginDialogs(mc);
             mcMain = mc.Windows().First(w => (w.Name ?? string.Empty).Contains("Management Client"));
+            ManagementClientUi.WaitForTreeReady(mcMain);
 
             // Tree hygiene for clean shots: Home open, its children collapsed, plugin branch open.
             ManagementClientUi.CollapseTreeToRoot(mcMain, allowExpanded: new[] { config.PluginNodeName });

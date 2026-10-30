@@ -37,10 +37,10 @@ public class ToolbarOptionsTests
         LoginFlow.AcceptCertificateTrust(mc);
         var mcMain = LoginFlow.WaitForAdminMain(mc);
         SmartClientUi.Maximize(mcMain);
-        Thread.Sleep(3000);
         mcMain = mc.Windows().First(w => (w.Name ?? string.Empty).Contains("Management Client"));
         ManagementClientUi.CloseStrayLoginDialogs(mc);
         mcMain = mc.Windows().First(w => (w.Name ?? string.Empty).Contains("Management Client"));
+        ManagementClientUi.WaitForTreeReady(mcMain);
 
         ManagementClientUi.CollapseTreeToRoot(mcMain, allowExpanded: new[] { config.PluginNodeName });
         mcMain = mc.Windows().First(w => (w.Name ?? string.Empty).Contains("Management Client"));

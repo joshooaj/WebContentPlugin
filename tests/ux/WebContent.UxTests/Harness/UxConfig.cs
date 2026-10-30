@@ -46,9 +46,8 @@ public sealed class UxConfig
     /// </summary>
     public bool HideAddress { get; private init; }
 
-    public static UxConfig Load()
+    public static UxConfig Load(string repoRoot)
     {
-        var repoRoot = FindRepoRoot();
         var envFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var envPath = Path.Combine(repoRoot, ".env");
         if (File.Exists(envPath))
@@ -115,6 +114,12 @@ public sealed class UxConfig
         if (!File.Exists(config.SmartClientExe)) throw new FileNotFoundException($"Smart Client exe not found: {config.SmartClientExe}");
         if (!File.Exists(config.AdminClientExe)) throw new FileNotFoundException($"Management Client exe not found: {config.AdminClientExe}");
         return config;
+    }
+
+    public static UxConfig Load()
+    {
+        var repoRoot = FindRepoRoot();
+        return Load(repoRoot);
     }
 
     private static string FindRepoRoot()
