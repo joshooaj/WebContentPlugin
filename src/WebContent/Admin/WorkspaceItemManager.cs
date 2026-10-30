@@ -245,13 +245,9 @@ namespace WebContent.Admin
             var hideAddress = !hideToolbar && (_userControl?.HideAddress ?? false);
 
             var proxyEnabled = _userControl?.ProxyEnabled ?? false;
-            List<ProxyTargetConfiguration> proxyTargets = null;
-            if (proxyEnabled)
+            if (!TryBuildProxyTargets(CurrentItem.Name, CurrentItem.FQID, _userControl?.ProxyTargetsText, proxyEnabled, out var proxyTargets))
             {
-                if (!TryBuildProxyTargets(_userControl.ProxyTargetsText, out proxyTargets))
-                {
-                    return false;
-                }
+                return false;
             }
 
             SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
@@ -307,12 +303,14 @@ namespace WebContent.Admin
 
         /// <summary>
         /// Ticket #52: parses the admin's one-origin-per-line proxy targets into canonical
-        /// scheme/host/port records. An invalid line rejects the save (same posture as the home
-        /// address), duplicates and other overlapping entries collapse onto one record, and an
-        /// enabled proxy with no targets at all is rejected so the toggle can never mean
-        /// "allow nothing" by accident.
+        /// scheme/host/port records. An invalid line rejects the save whatever the proxy toggle
+        /// state (same posture as the home address), duplicates and other overlapping entries
+        /// collapse onto one record, and an enabled proxy with no targets at all is rejected so
+        /// the toggle can never mean "allow nothing" by accident. A disabled proxy keeps the
+        /// targets parsed and stored anyway - turning the proxy off must not erase the allowlist
+        /// the next admin will need (MC-9 in the verification matrix).
         /// </summary>
-        private bool TryBuildProxyTargets(string targetsText, out List<ProxyTargetConfiguration> targets)
+        private static bool TryBuildProxyTargets(string itemName, FQID itemFqid, string targetsText, bool proxyEnabled, out List<ProxyTargetConfiguration> targets)
         {
             targets = new List<ProxyTargetConfiguration>();
             var seenOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -327,7 +325,7 @@ namespace WebContent.Admin
 
                 if (!ProxyPolicy.TryNormalizeTarget(line, out var origin))
                 {
-                    EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy target '{line}'.");
+                    EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): invalid proxy target '{line}'.");
                     MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, line), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
@@ -346,9 +344,9 @@ namespace WebContent.Admin
                 });
             }
 
-            if (targets.Count == 0)
+            if (proxyEnabled && targets.Count == 0)
             {
-                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): proxy enabled but no target allowlisted.");
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): proxy enabled but no target allowlisted.");
                 MessageBox.Show(Strings.MissingProxyTargetsMessage, Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }

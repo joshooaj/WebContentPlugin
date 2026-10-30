@@ -35,8 +35,8 @@ namespace WebContent
         {
             // Uri.Host carries IPv6 hosts already bracketed ("[::1]"), so it needs no re-wrapping.
             var host = uri.Host.ToLowerInvariant();
-            var portPart = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
-            return $"{uri.Scheme.ToLowerInvariant()}://{host}{portPart}";
+            var port = uri.IsDefaultPort ? 0 : uri.Port;
+            return FormatOrigin(uri.Scheme.ToLowerInvariant(), host, port);
         }
 
         /// <summary>
@@ -60,11 +60,10 @@ namespace WebContent
                 return false;
             }
 
-            var ipv6 = hostPart.StartsWith("[", StringComparison.Ordinal) && hostPart.EndsWith("]", StringComparison.Ordinal);
-            if (hostPart.IndexOf(':') >= 0 && !ipv6)
+            if (hostPart.IndexOf(':') >= 0 &&
+                !(hostPart.StartsWith("[", StringComparison.Ordinal) && hostPart.EndsWith("]", StringComparison.Ordinal)))
             {
                 hostPart = $"[{hostPart}]";
-                ipv6 = true;
             }
 
             if (port < 0 || port > 65535)
@@ -72,10 +71,19 @@ namespace WebContent
                 return false;
             }
 
-            var schemeDefault = schemePart == Uri.UriSchemeHttp ? 80 : 443;
-            var portPart = port == 0 || port == schemeDefault ? string.Empty : $":{port}";
-            normalized = $"{schemePart}://{hostPart}{portPart}";
+            normalized = FormatOrigin(schemePart, hostPart, port);
             return true;
+        }
+
+        /// <summary>
+        /// The one origin formatter everything else funnels through: port 0 or the scheme
+        /// default renders without an explicit port.
+        /// </summary>
+        private static string FormatOrigin(string scheme, string host, int port)
+        {
+            var schemeDefault = scheme == Uri.UriSchemeHttp ? 80 : 443;
+            var portPart = port == 0 || port == schemeDefault ? string.Empty : $":{port}";
+            return $"{scheme}://{host}{portPart}";
         }
 
         /// <summary>

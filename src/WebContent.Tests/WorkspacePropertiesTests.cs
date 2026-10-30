@@ -294,6 +294,25 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void Proxy_Off_Preserves_Stored_Targets_For_The_Next_Toggle_On()
+        {
+            var id = Guid.NewGuid();
+            var config = CreateConfig("camera.example");
+            var settings = config.Items[0].Settings;
+            settings.ProxyEnabled = false;
+            settings.ProxyTargets = new List<ProxyTargetConfiguration>
+            {
+                new ProxyTargetConfiguration { Scheme = "https", Host = "10.0.0.5", Port = 8443 },
+            };
+            var source = new Dictionary<string, string> { [WorkspaceConfiguration.WorkspaceConfigKey] = config.Serialize() };
+
+            var properties = WorkspaceProperties.Build(id, "Ops", source, FallbackHomeAddress);
+
+            Assert.Equal("False", properties["ProxyEnabled"]);
+            Assert.Equal("https://10.0.0.5:8443", properties["ProxyTargets"]);
+        }
+
+        [Fact]
         public void Source_Properties_Are_Not_Mutated()
         {
             var id = Guid.NewGuid();

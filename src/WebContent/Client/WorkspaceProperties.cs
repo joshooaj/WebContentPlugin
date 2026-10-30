@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace WebContent.Client
 {
@@ -101,6 +100,7 @@ namespace WebContent.Client
             }
 
             var canonical = new List<string>();
+            var seenOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var target in targets)
             {
                 if (target == null)
@@ -109,7 +109,7 @@ namespace WebContent.Client
                 }
 
                 if (ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin) &&
-                    !canonical.Contains(origin, StringComparer.OrdinalIgnoreCase))
+                    seenOrigins.Add(origin))
                 {
                     canonical.Add(origin);
                 }
