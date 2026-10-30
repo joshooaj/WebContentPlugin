@@ -26,7 +26,7 @@ public static class ManagementClientUi
         {
             var item = FindTreeItem(mainWindow, name);
             if (item != null) return item;
-            Thread.Sleep(1000);
+            Thread.Sleep(250);
         }
         throw new TimeoutException($"Tree item '{name}' never appeared.");
     }
@@ -43,7 +43,7 @@ public static class ManagementClientUi
             var item = FindTreeItem(mainWindow, name);
             if (item != null) return item;
             FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.DOWN);
-            Thread.Sleep(350);
+            Thread.Sleep(50);
         }
         return FindTreeItem(mainWindow, name);
     }
@@ -57,7 +57,7 @@ public static class ManagementClientUi
             var item = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem))
                 .FirstOrDefault(t => (t.Name ?? string.Empty).Contains(fragment, StringComparison.OrdinalIgnoreCase));
             if (item != null) return item;
-            Thread.Sleep(1000);
+            Thread.Sleep(50);
         }
         throw new TimeoutException($"Tree item containing '{fragment}' never appeared.");
     }
@@ -65,7 +65,7 @@ public static class ManagementClientUi
     public static void SelectTreeItem(Window mainWindow, string name)
     {
         SelectNode(mainWindow, name);
-        Thread.Sleep(1000);
+        Thread.Sleep(50);
     }
 
     /// <summary>
@@ -218,7 +218,7 @@ public static class ManagementClientUi
         {
             FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.APPS);
         }
-        Thread.Sleep(1500);
+        Thread.Sleep(1000);
 
         var names = new List<string>();
         foreach (var window in session.Windows())
@@ -237,7 +237,7 @@ public static class ManagementClientUi
     public static List<string> RightClickAndDumpMenu(Window mainWindow, AutomationElement treeItem)
     {
         treeItem.RightClick();
-        Thread.Sleep(1500);
+        Thread.Sleep(1000);
         var items = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem))
             .Select(m => m.Name ?? string.Empty).Where(n => n.Length > 0).ToList();
         return items;

@@ -119,12 +119,12 @@ public static class LoginFlow
                         catch { return false; }
                     }) ?? session.Windows().First(), "cert-prompt");
                     try { pick.button.Patterns.Invoke.Pattern.Invoke(); } catch { pick.button.Click(); }
-                    Thread.Sleep(1000);
+                    Thread.Sleep(250);
                     return;
                 }
             }
 
-            Thread.Sleep(1000);
+            Thread.Sleep(250);
         }
     }
 
