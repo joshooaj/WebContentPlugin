@@ -348,6 +348,44 @@ namespace WebContent.Tests
             Assert.Contains("cam1.test", response);
         }
 
+        [Fact]
+        public async Task DisposesTheTerminatedTunnelWhenTheRequestLoopEnds()
+        {
+            // The TLS wrapper handed back by the unwrap seam is owned by the connection flow: the
+            // leaf-backed SslStream must not outlive the tunnel (and in production its disposal
+            // must not touch the raw socket, which the caller owns).
+            MemoryStream tunnel = null;
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes(
+                "CONNECT cam1.test:8443 HTTP/1.1\r\n\r\nGET /live HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                tunnel = new MemoryStream();
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, new[] { "https://cam1.test:8443" },
+                    query => Task.FromResult(new ProxyFetchResult { Success = true, Body = Encoding.UTF8.GetBytes("ok"), StatusCode = 200 }),
+                    message => { },
+                    (stream, leftover, tunnelOrigin) =>
+                    {
+                        if (leftover != null && leftover.Length > 0)
+                        {
+                            tunnel.Write(leftover, 0, leftover.Length);
+                        }
+
+                        var buffer = new byte[4096];
+                        int read;
+                        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            tunnel.Write(buffer, 0, read);
+                        }
+
+                        tunnel.Position = 0;
+                        return Task.FromResult<Stream>(tunnel);
+                    });
+            }
+
+            Assert.False(tunnel.CanRead);
+        }
+
         private static async Task<string> Handle(
             string request,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,

@@ -110,7 +110,17 @@ namespace WebContent
                         return;
                     }
 
-                    await ServeTunnelRequestsAsync(tunnel, output, canonicalTargets, request.Uri, fetch, log);
+                    try
+                    {
+                        await ServeTunnelRequestsAsync(tunnel, output, canonicalTargets, request.Uri, fetch, log);
+                    }
+                    finally
+                    {
+                        // The TLS wrapper is ours once termination succeeded; the raw socket stream
+                        // stays the caller's (its using-block closes underneath).
+                        try { tunnel.Dispose(); } catch { }
+                    }
+
                     return;
 
                 case ProxyForwardDisposition.ConnectRefused:
