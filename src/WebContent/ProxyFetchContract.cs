@@ -66,8 +66,10 @@ namespace WebContent
 
     /// <summary>
     /// One response header from the fetched target, as the fetcher's HTTP layer captured it.
-    /// Plugin-namespace payload type, so the Event Server whitelist lets it through. Mirrors the
-    /// Chat sample's ChatData wire shape: public [Serializable] class with public fields.
+    /// This type NEVER travels on the wire as an object: it is a member of
+    /// <see cref="ProxyFetchResponsePayload"/>, and the whole payload crosses messaging only as a
+    /// JSON string via <see cref="ProxyFetchWireCodec"/> (#54 - hosts like Smart Client cannot
+    /// bind plugin-namespace types through the platform's Type.GetType rehydration).
     /// </summary>
     [Serializable]
     public class ProxyFetchHeader
@@ -89,8 +91,8 @@ namespace WebContent
 
     /// <summary>
     /// Response payload for every frame kind (Response / Chunk / Failure). Fields irrelevant to a
-    /// kind stay null/default. Plugin-namespace type built only from whitelist-safe primitives and
-    /// List&lt;ProxyFetchHeader&gt;.
+    /// kind stay null/default. Serialized to a JSON string by <see cref="ProxyFetchWireCodec"/>
+    /// before transmit; the platform must never be asked to bind this type itself.
     /// </summary>
     [Serializable]
     public class ProxyFetchResponsePayload

@@ -58,6 +58,9 @@ public class McProxyFetchProbeTests
 
         // 2) Same url the Smart Client browser just tried: discriminates an Event Server-side
         //    problem from a Smart Client-side one when SC's fetch times out but this succeeds.
+        //    (http, not https: the workspace allowlist is scheme-exact and proxied browsers
+        //    refuse https targets by design, so this mirrors the live SC-1 traffic. ES-side
+        //    https fetching stays covered by MC-10 manual step 3's NotAllowed probe only.)
         log.AppendLine($"allowlisted http://httpforever.com/ -> {RunFetch(mcMain, urlBox, "http://httpforever.com/")}");
 
         Artifacts.WriteText("proxy-probe-results.txt", log.ToString());

@@ -18,6 +18,10 @@ namespace WebContent
     /// </summary>
     internal static class ProxyFetchWireCodec
     {
+        // DataContractJsonSerializer instances are documented as thread-safe for concurrent
+        // ReadObject/WriteObject when the type is fixed at construction (as here): the fetcher
+        // runs up to its concurrency cap on the thread pool and the client receives on the
+        // messaging thread, all against these same instances.
         private static readonly DataContractJsonSerializer RequestSerializer =
             new DataContractJsonSerializer(typeof(ProxyFetchRequestPayload));
 

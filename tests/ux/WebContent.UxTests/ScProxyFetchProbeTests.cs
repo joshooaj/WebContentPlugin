@@ -44,14 +44,13 @@ public class ScProxyFetchProbeTests
         main = sc.Windows().First(w => w.AutomationId == "_mainApplicationWindow");
 
         var log = new System.Text.StringBuilder();
+        string failure = null;
+        string title = null;
+        var bodyChars = -1;
+        var directReachedTarget = false;
+        var blockedControl = Environment.GetEnvironmentVariable("WEBCONTENT_SC1_BLOCKED") == "1";
         try
         {
-            // SC-1 negative control (docs/verification-matrix.md): when the client machine's own
-            // route to the target is deliberately broken (hosts entry pointing it at 127.0.0.1),
-            // a direct hit must fail while the proxied page still renders - proving the traffic
-            // originates on the Event Server machine.
-            var blockedControl = Environment.GetEnvironmentVariable("WEBCONTENT_SC1_BLOCKED") == "1";
-
             main = SmartClientUi.SelectWorkspace(main, sc, config.WorkspaceName);
             var item = SmartClientUi.WaitForMipViewItem(main);
             Assert.NotNull(item);
@@ -66,6 +65,22 @@ public class ScProxyFetchProbeTests
             // head start before the first fetch is attempted through the loopback listener.
             Thread.Sleep(6000);
 
+            // SC-1 negative control (docs/verification-matrix.md): when the client machine's own
+            // route to the target is deliberately broken (hosts entry pointing it at 127.0.0.1),
+            // a direct hit must fail while the proxied page still renders - proving the traffic
+            // originates on the Event Server machine. Establish the block BEFORE rendering, so a
+            // run whose block is missing goes red instead of reporting the gap post hoc.
+            if (blockedControl)
+            {
+                directReachedTarget = await DirectGetReachesTargetAsync();
+                if (directReachedTarget)
+                {
+                    throw new InvalidOperationException(
+                        "control INVALID: the client machine still reaches the target directly; add the hosts entry (127.0.0.1 httpforever.com # webcontent-sc-1-block) before this run");
+                }
+                log.AppendLine("control pre-check: direct client-side GET already fails (route is blocked)");
+            }
+
             SmartClientUi.NavigateAddress(addressBar, FetchUrl);
 
             await using var cdp = new CdpConnector();
@@ -76,14 +91,15 @@ public class ScProxyFetchProbeTests
             // satisfy; give it well past the client-side 30 s deadline to be conclusive.
             var body = await page.WaitForSelectorAsync("body", new Microsoft.Playwright.PageWaitForSelectorOptions { Timeout = 45000 });
             var text = body == null ? null : await body.TextContentAsync();
-            var title = await page.TitleAsync();
+            title = await page.TitleAsync();
+            bodyChars = text?.Length ?? -1;
 
             await page.ScreenshotAsync(new Microsoft.Playwright.PageScreenshotOptions
             {
                 Path = Artifacts.PathOf("sc-proxy-probe-page.png"),
             });
 
-            log.AppendLine($"navigated {FetchUrl} -> title='{title}' bodyChars={(text?.Length ?? -1)}");
+            log.AppendLine($"navigated {FetchUrl} -> title='{title}' bodyChars={bodyChars}");
             if (!string.IsNullOrEmpty(text))
             {
                 var snippet = text.Replace('\r', ' ').Replace('\n', ' ');
@@ -92,23 +108,17 @@ public class ScProxyFetchProbeTests
 
             if (blockedControl)
             {
-                // The control is only meaningful if this very process cannot reach the target
-                // directly from the client machine while the browser view above did.
-                using var direct = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-                try
-                {
-                    var response = await direct.GetAsync(FetchUrl);
-                    log.AppendLine($"direct client-side GET -> HTTP {(int)response.StatusCode} (control INVALID: direct path not broken)");
-                }
-                catch (Exception directFailure)
-                {
-                    log.AppendLine($"direct client-side GET -> FAILED as required: {directFailure.GetType().Name}: {directFailure.Message}");
-                }
+                // Re-check after the render: the control must still hold at verdict time.
+                directReachedTarget = await DirectGetReachesTargetAsync();
+                log.AppendLine(directReachedTarget
+                    ? "direct client-side GET -> reached the target (control INVALID: direct path not broken)"
+                    : "direct client-side GET -> FAILED as required while the proxied page rendered");
             }
         }
         catch (Exception ex)
         {
-            log.AppendLine($"probe failed: {ex.GetType().Name}: {ex.Message}");
+            failure = $"{ex.GetType().Name}: {ex.Message}";
+            log.AppendLine($"probe failed: {failure}");
             var fresh = sc.Windows().FirstOrDefault(w => w.AutomationId == "_mainApplicationWindow");
             if (fresh != null)
             {
@@ -121,6 +131,32 @@ public class ScProxyFetchProbeTests
             _output.WriteLine(log.ToString());
             ProcessKiller.KillClients("Client");
             ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+        }
+
+        // The probe goes RED: evidence in the artifacts file is for humans, but a proxy that
+        // never completes, an error page that renders instead of the target, or a control run
+        // whose direct route was never broken must fail the run, not merely record it.
+        Assert.True(failure == null, $"probe run failed: {failure}{Environment.NewLine}{log}");
+        Assert.NotNull(title);
+        Assert.False(title.StartsWith("Web Content proxy:"), $"browser showed the proxy error page instead of the target: '{title}'");
+        Assert.True(bodyChars >= 500, $"target body too small to be the real page ({bodyChars} chars)");
+        if (blockedControl)
+        {
+            Assert.False(directReachedTarget, "SC-1 control invalid: the client reached the target directly while the proxied page rendered");
+        }
+    }
+
+    private static async Task<bool> DirectGetReachesTargetAsync()
+    {
+        using var direct = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        try
+        {
+            await direct.GetAsync(FetchUrl);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 }
