@@ -63,13 +63,34 @@ namespace WebContent
             out ProxyForwardedRequest request,
             out string rejectReason)
         {
-            if (!ProxyForwardCodec.TryParseRequestHead(requestHead, out request, out rejectReason))
+            return Decide(canonicalTargets, requestHead, null, out request, out rejectReason);
+        }
+
+        /// <summary>
+        /// Decide a request head, optionally one read from inside a TLS tunnel the listener itself
+        /// terminated (#56). A tunnel origin makes origin-form targets legal — resolved against
+        /// the tunnel — and outlaws a nested CONNECT.
+        /// </summary>
+        internal static ProxyForwardDisposition Decide(
+            IEnumerable<string> canonicalTargets,
+            string requestHead,
+            Uri tunnelOrigin,
+            out ProxyForwardedRequest request,
+            out string rejectReason)
+        {
+            if (!ProxyForwardCodec.TryParseRequestHead(requestHead, tunnelOrigin, out request, out rejectReason))
             {
                 return ProxyForwardDisposition.BadRequest;
             }
 
             if (request.Method == "CONNECT")
             {
+                if (tunnelOrigin != null)
+                {
+                    rejectReason = "A CONNECT inside an already-terminated TLS tunnel is refused; the tunnel's origin is the only endpoint.";
+                    return ProxyForwardDisposition.MethodNotAllowed;
+                }
+
                 // #56: an allowlisted https origin gets the tunnel TERMINATED at this listener
                 // (ephemeral local certificate, ADR-0002); anything else is refused with the same
                 // origin posture as a plain request, and the browser is never let go direct.

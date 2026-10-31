@@ -152,5 +152,31 @@ namespace WebContent.Tests
             Assert.Equal(ProxyForwardDisposition.BadRequest, decision);
             Assert.Null(request);
         }
+        [Fact]
+        public void InnerTunnelRequestForwardsAgainstTheTunnelOrigin()
+        {
+            // The decrypted inner request of a terminated tunnel (#56): origin-form path, and the
+            // origin gate runs on the tunnel origin, not on any header the client types.
+            var head = "GET /live/index.html HTTP/1.1\r\nHost: cam1.test:8443\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(
+                new[] { "https://cam1.test:8443" }, head, new Uri("https://cam1.test:8443"), out var request, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.Forward, decision);
+            Assert.Equal("https://cam1.test:8443/live/index.html", request.Uri.AbsoluteUri);
+            Assert.Null(rejectReason);
+        }
+
+        [Fact]
+        public void NestedConnectInsideATerminatedTunnelIsRefused()
+        {
+            var head = "CONNECT evil.test:443 HTTP/1.1\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(
+                new[] { "https://cam1.test:8443" }, head, new Uri("https://cam1.test:8443"), out _, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.MethodNotAllowed, decision);
+            Assert.Contains("CONNECT", rejectReason);
+        }
     }
 }

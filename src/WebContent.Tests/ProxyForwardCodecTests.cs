@@ -177,5 +177,42 @@ namespace WebContent.Tests
             Assert.Contains("The origin &#39;http://evil.test&#39; is not allowlisted.", rendered);
             Assert.Matches("(?i)Connection: close", rendered);
         }
+        [Fact]
+        public void InnerTlsRequestCombinesItsOriginFormPathWithTheTunnelOrigin()
+        {
+            // #56: inside a terminated TLS tunnel Chromium speaks ordinary origin-form HTTP.
+            // The tunnel origin — which the listener itself established — supplies the scheme,
+            // host, and port; the Host header is never believed.
+            var head = "GET /live/index.html HTTP/1.1\r\nHost: cam1.test:8443\r\nAccept: */*\r\n\r\n";
+
+            var parsed = ProxyForwardCodec.TryParseRequestHead(head, new Uri("https://cam1.test:8443"), out var request, out var rejectReason);
+
+            Assert.True(parsed, rejectReason);
+            Assert.Equal("/live/index.html", request.RawTarget);
+            Assert.Equal("https://cam1.test:8443/live/index.html", request.Uri.AbsoluteUri);
+        }
+
+        [Fact]
+        public void InnerTlsRequestWithAbsoluteFormAtAnotherOriginIsRejected()
+        {
+            // An absolute target inside the tunnel that names anything but the tunnel's own
+            // origin is a smuggling attempt, not a request the tunnel can serve.
+            var head = "GET http://evil.test/steal HTTP/1.1\r\nHost: evil.test\r\n\r\n";
+
+            var parsed = ProxyForwardCodec.TryParseRequestHead(head, new Uri("https://cam1.test:8443"), out var request, out _);
+
+            Assert.False(parsed);
+            Assert.Null(request);
+        }
+
+        [Fact]
+        public void PlainProxyRequestWithoutATunnelStillRequiresAbsoluteForm()
+        {
+            var head = "GET /monitor/live HTTP/1.1\r\nHost: 10.0.0.5:8080\r\n\r\n";
+
+            var parsed = ProxyForwardCodec.TryParseRequestHead(head, null, out _, out _);
+
+            Assert.False(parsed);
+        }
     }
 }

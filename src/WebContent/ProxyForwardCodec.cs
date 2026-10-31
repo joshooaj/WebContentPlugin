@@ -91,6 +91,19 @@ namespace WebContent
                     return false;
                 }
             }
+            else if (tunnelOrigin != null)
+            {
+                // Inside a terminated tunnel the tunnel IS the origin: origin-form targets
+                // resolve against it, and an absolute-form target may only name the tunnel's
+                // own origin (never smuggle another through the accepted gate).
+                if (!Uri.TryCreate(tunnelOrigin, requestLine[1], out uri) ||
+                    !ProxyPolicy.IsHttpUri(uri) ||
+                    ProxyPolicy.CanonicalOrigin(uri) != ProxyPolicy.CanonicalOrigin(tunnelOrigin))
+                {
+                    rejectReason = $"The in-tunnel request target '{requestLine[1]}' does not belong to the tunnel origin '{tunnelOrigin.OriginalString}'.";
+                    return false;
+                }
+            }
             else if (!Uri.TryCreate(requestLine[1], UriKind.Absolute, out uri))
             {
                 rejectReason = $"The proxy request target '{requestLine[1]}' was not an absolute uri.";
