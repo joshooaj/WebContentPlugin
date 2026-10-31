@@ -144,6 +144,40 @@ namespace WebContent
                 return null;
             }
 
+            // #55: method and body decode against the same verb table the client forwarder uses,
+            // so a crafted or version-skewed payload can never drive the VMS server with an
+            // arbitrary verb. A null method is a pre-#55 GET sender.
+            var method = string.IsNullOrWhiteSpace(payload.Method) ? "GET" : payload.Method.Trim().ToUpperInvariant();
+            if (!ProxyForwardPolicy.IsForwardedMethod(method))
+            {
+                LogRefused(payload, $"'{method}' is outside the relayed method set");
+                TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.BadRequest, $"The proxy does not relay '{method}' requests.");
+                return null;
+            }
+
+            byte[] body = null;
+            if (!string.IsNullOrEmpty(payload.BodyBase64))
+            {
+                try
+                {
+                    body = Convert.FromBase64String(payload.BodyBase64);
+                }
+                catch (FormatException)
+                {
+                    LogRefused(payload, "the request body was not valid base64");
+                    TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.BadRequest, "The proxy-fetch request body was not valid base64.");
+                    return null;
+                }
+            }
+
+            var query = new ProxyFetchQuery
+            {
+                Uri = target,
+                Method = method,
+                Headers = payload.Headers,
+                Body = body,
+            };
+
             string allowReason = null;
             if (_allowlist == null || !_allowlist.IsAllowed(target, out allowReason))
             {
@@ -177,7 +211,7 @@ namespace WebContent
 
                 try
                 {
-                    await ServeFetchAsync(communication, payload, target, requester);
+                    await ServeFetchAsync(communication, payload, query, requester);
                 }
                 finally
                 {
@@ -188,12 +222,13 @@ namespace WebContent
             return null;
         }
 
-        private async Task ServeFetchAsync(MessageCommunication communication, ProxyFetchRequestPayload payload, Uri target, FQID requesterFqid)
+        private async Task ServeFetchAsync(MessageCommunication communication, ProxyFetchRequestPayload payload, ProxyFetchQuery query, FQID requesterFqid)
         {
+            var target = query.Uri;
             try
             {
                 var limits = ProxyFetchLimits.Default();
-                var result = await new ProxyHttpFetcher().FetchAsync(target, limits);
+                var result = await new ProxyHttpFetcher().FetchAsync(query, limits);
 
                 if (!result.Success)
                 {

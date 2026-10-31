@@ -30,6 +30,56 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void RequestCarriesMethodHeadersAndBase64BodyOnTheWire()
+        {
+            // #55: login POSTs cross the wire with method, browser request headers, and body —
+            // still as ONE JSON string, never as plugin types (the #54 Smart Client black hole).
+            var body = System.Text.Encoding.UTF8.GetBytes("user=admin&pass=s3cret&submit=Login");
+            var wire = ProxyFetchWireCodec.ToWire(new ProxyFetchRequestPayload
+            {
+                CorrelationId = "corr-post",
+                Url = "http://10.0.0.5:8080/login",
+                Method = "POST",
+                Headers = new System.Collections.Generic.List<ProxyFetchHeader>
+                {
+                    new ProxyFetchHeader { Name = "Content-Type", Value = "application/x-www-form-urlencoded" },
+                    new ProxyFetchHeader { Name = "Cookie", Value = "sid=abc123" },
+                    new ProxyFetchHeader { Name = "X-Vendor-Auth", Value = "token-9" },
+                },
+                BodyBase64 = Convert.ToBase64String(body),
+            });
+
+            Assert.IsType<string>(wire);
+
+            var back = ProxyFetchWireCodec.RequestFromWire(wire);
+            Assert.NotNull(back);
+            Assert.Equal("corr-post", back.CorrelationId);
+            Assert.Equal("POST", back.Method);
+            Assert.Equal("Cookie", back.Headers[1].Name);
+            Assert.Equal("sid=abc123", back.Headers[1].Value);
+            Assert.Equal("X-Vendor-Auth", back.Headers[2].Name);
+            Assert.Equal(body, Convert.FromBase64String(back.BodyBase64));
+        }
+
+        [Fact]
+        public void PlainGetRequestsStillDecodeWithNullMethodHeadersAndBody()
+        {
+            // Field additions must not disturb the GET path: absent fields decode to null, and
+            // the fetcher treats a null method as GET.
+            var wire = ProxyFetchWireCodec.ToWire(new ProxyFetchRequestPayload
+            {
+                CorrelationId = "corr-get",
+                Url = "http://httpforever.com/",
+            });
+
+            var back = ProxyFetchWireCodec.RequestFromWire(wire);
+            Assert.NotNull(back);
+            Assert.Null(back.Method);
+            Assert.Null(back.Headers);
+            Assert.Null(back.BodyBase64);
+        }
+
+        [Fact]
         public void ResponseFrameRoundTripsEveryFieldTheProtocolUses()
         {
             var frame = new ProxyFetchResponsePayload

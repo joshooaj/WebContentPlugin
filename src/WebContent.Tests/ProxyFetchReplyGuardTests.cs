@@ -38,7 +38,7 @@ namespace WebContent.Tests
             // reply paths.
             Assert.Contains("TransmitFailure(payload.CorrelationId, requester,", fetcher);
             Assert.DoesNotContain("TransmitFailure(payload.CorrelationId, source,", fetcher);
-            Assert.Contains("ServeFetchAsync(communication, payload, target, requester)", fetcher);
+            Assert.Contains("ServeFetchAsync(communication, payload, query, requester)", fetcher);
         }
 
         [Fact]

@@ -8,31 +8,67 @@ using System.Threading.Tasks;
 namespace WebContent
 {
     /// <summary>
-    /// Server-side transport for the proxy-fetch contract (#53): performs one HTTP(S) GET from
-    /// the server network and enforces the ticket's bounds — a connect budget, a per-read stall
+    /// Server-side transport for the proxy-fetch contract (#53; write verbs, request headers,
+    /// and request bodies since #55): replays one proxied browser request
+    /// from the server network and enforces the ticket's bounds — a connect budget, a per-read stall
     /// budget, and a maximum response size — independent of which runtime hosts the plugin (the
     /// .NET Framework HttpWebRequest timeouts double as native bounds, but the explicit
     /// task-budget races below make the behavior identical everywhere).
     ///
     /// A target HTTP error status (404 and friends) is still a successful fetch: the proxy
-    /// relays the target's status line, headers, and page.
+    /// relays the target's status line, headers, and page. So is a 3xx: redirects and their
+    /// Set-Cookie headers ride back to the browser untouched (#55 — the session cookie lives in
+    /// the browser, never in the VMS server: UseCookies and AllowAutoRedirect are both off).
     /// </summary>
     internal sealed class ProxyHttpFetcher
     {
         /// <summary>
-        /// GET the target under the given limits. Never throws: transport outcomes are reported in
+        /// Replay the request carried by the query under the given limits. Never throws: transport
+        /// outcomes are reported in
         /// the returned ProxyFetchResult so framing/logging can react to each failure class.
         /// </summary>
-        internal async Task<ProxyFetchResult> FetchAsync(Uri target, ProxyFetchLimits limits)
+        internal async Task<ProxyFetchResult> FetchAsync(ProxyFetchQuery query, ProxyFetchLimits limits)
         {
+            var target = query == null ? null : query.Uri;
             if (!ProxyPolicy.IsHttpUri(target))
             {
                 return Failure(ProxyFetchErrorCodes.BadRequest, "The proxy-fetch target must be an http(s) url.");
             }
 
             var request = (HttpWebRequest)WebRequest.Create(target);
-            request.Method = "GET";
+            request.Method = string.IsNullOrWhiteSpace(query.Method) ? "GET" : query.Method.Trim().ToUpperInvariant();
             request.UserAgent = "CascadiaWebContentPlugin/MIP-proxy-fetcher";
+
+            // #55 passthrough rules: the browser owns the session. A 3xx and its Set-Cookie values
+            // relay back to the browser instead of being followed or stored here, so no target
+            // credential ever persists on the VMS server. UseCookies only exists on the .NET
+            // Framework host (and matters there: it auto-creates a CookieContainer that would
+            // swallow Set-Cookie); the compat shim is cookie-less by construction.
+            request.AllowAutoRedirect = false;
+            try
+            {
+                var useCookies = typeof(HttpWebRequest).GetProperty("UseCookies");
+                if (useCookies != null && useCookies.CanWrite)
+                {
+                    useCookies.SetValue(request, false);
+                }
+            }
+            catch (Exception)
+            {
+                // Property may be unsupported or read-only on compat stacks.
+            }
+
+            try
+            {
+                // Vendor device servers often stall ~3 s waiting for it; browsers only send it
+                // when they choose to, and that choice is relayed as a header instead.
+                request.ServicePoint.Expect100Continue = false;
+            }
+            catch (Exception)
+            {
+            }
+
+            ApplyRequestHeaders(request, query.Headers);
 
             // On the .NET Framework host these are native enforcement; elsewhere the explicit
             // budgets below enforce the same bounds. The properties sit a full second past the
@@ -45,6 +81,15 @@ namespace WebContent
             catch (Exception)
             {
                 // Property may be unsupported on compat stacks; the budgets cover enforcement.
+            }
+
+            if (query.Body != null && query.Body.Length > 0)
+            {
+                var writeFailure = await WriteRequestBodyAsync(request, query.Body, target, limits);
+                if (writeFailure != null)
+                {
+                    return writeFailure;
+                }
             }
 
             HttpWebResponse response;
@@ -98,6 +143,118 @@ namespace WebContent
             using (response)
             {
                 return await ReadCappedBodyAsync(response, target, limits);
+            }
+        }
+
+        /// <summary>
+        /// #55: replay the browser's request headers on the fetcher's own request. Property-backed
+        /// headers go through their HttpWebRequest properties, connection-level headers are the
+        /// fetcher's own to state (never relayed from the wire — a crafted payload cannot make the
+        /// VMS server speak hop-by-hop verbs at a target), and .NET Framework header restrictions
+        /// degrade to a skip, never a throw.
+        /// </summary>
+        private static void ApplyRequestHeaders(HttpWebRequest request, List<ProxyFetchHeader> headers)
+        {
+            if (headers == null)
+            {
+                return;
+            }
+
+            foreach (var header in headers)
+            {
+                if (header == null || string.IsNullOrEmpty(header.Name) || header.Value == null)
+                {
+                    continue;
+                }
+
+                switch (header.Name.ToUpperInvariant())
+                {
+                    case "USER-AGENT":
+                        request.UserAgent = header.Value;
+                        break;
+                    case "REFERER":
+                        request.Referer = header.Value;
+                        break;
+                    case "CONTENT-TYPE":
+                        request.ContentType = header.Value;
+                        break;
+                    default:
+                        if (TransportBlockedRequestHeaders.Contains(header.Name))
+                        {
+                            break;
+                        }
+
+                        try
+                        {
+                            request.Headers[header.Name] = header.Value;
+                        }
+                        catch (Exception)
+                        {
+                            // Restricted or malformed header names on the host stack: skipping the
+                            // single header beats failing the whole fetch.
+                        }
+
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Request headers the fetcher never replays regardless of what arrived on the wire: they
+        /// describe a connection or body framing the fetcher states itself. Cookie, Authorization,
+        /// Content-Type (property), Accept-*, and custom app headers deliberately pass (#55).
+        /// </summary>
+        private static readonly HashSet<string> TransportBlockedRequestHeaders =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Host",
+                "Content-Length",
+                "Connection",
+                "Keep-Alive",
+                "Proxy-Connection",
+                "Proxy-Authenticate",
+                "Proxy-Authorization",
+                "TE",
+                "Trailer",
+                "Transfer-Encoding",
+                "Upgrade",
+                "Expect",
+            };
+
+        private static async Task<ProxyFetchResult> WriteRequestBodyAsync(HttpWebRequest request, byte[] body, Uri target, ProxyFetchLimits limits)
+        {
+            request.ContentLength = body.Length;
+            try
+            {
+                var streamTask = request.GetRequestStreamAsync();
+                var winner = await Task.WhenAny(streamTask, Task.Delay(limits.ConnectTimeoutMs));
+                if (winner != streamTask)
+                {
+                    try
+                    {
+                        request.Abort();
+                    }
+                    catch (Exception)
+                    {
+                    }
+
+                    return Failure(ProxyFetchErrorCodes.Timeout, $"Could not start sending the request body to {ProxyPolicy.CanonicalOrigin(target)} within {limits.ConnectTimeoutMs} ms.");
+                }
+
+                using (var requestStream = await streamTask)
+                {
+                    await requestStream.WriteAsync(body, 0, body.Length);
+                }
+
+                return null;
+            }
+            catch (WebException webException)
+            {
+                return MapWebException(webException, target, limits);
+            }
+            catch (Exception exception)
+            {
+                return Failure(ProxyFetchErrorCodes.Error, $"{ProxyPolicy.CanonicalOrigin(target)}: request body not sent: {exception.Message}");
             }
         }
 
@@ -162,7 +319,23 @@ namespace WebContent
             var headers = new List<ProxyFetchHeader>();
             foreach (var name in response.Headers.AllKeys)
             {
-                headers.Add(new ProxyFetchHeader { Name = name, Value = response.Headers[name] });
+                // One entry per raw value (#55): indexer access joins repeated values with ", ",
+                // which corrupts repeated Set-Cookie headers (and the comma inside their Expires
+                // dates) — a session cookie that fails to round-trip kills vendor logins.
+                string[] values;
+                try
+                {
+                    values = response.Headers.GetValues(name);
+                }
+                catch (Exception)
+                {
+                    values = new[] { response.Headers[name] };
+                }
+
+                foreach (var value in values ?? new[] { response.Headers[name] })
+                {
+                    headers.Add(new ProxyFetchHeader { Name = name, Value = value });
+                }
             }
 
             // Content-Type/Content-Encoding live on the response object itself and may be missing

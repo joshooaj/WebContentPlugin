@@ -120,10 +120,26 @@ namespace WebContent
         }
 
         /// <summary>
-        /// Send one proxy-fetch request and return the task completed with the reassembled
-        /// outcome. The deadline bounds the whole exchange, not each frame.
+        /// Send one GET proxy-fetch request (the Management Client harness path, #53). The
+        /// browser-facing flows use the full <see cref="ProxyFetchQuery"/> overload below.
         /// </summary>
         internal Task<ProxyFetchResult> FetchAsync(string url, TimeSpan? deadline = null)
+        {
+            Uri target;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out target))
+            {
+                return Task.FromResult(Failure(ProxyFetchErrorCodes.BadRequest, "The proxy-fetch url must be an absolute http(s) uri."));
+            }
+
+            return FetchAsync(new ProxyFetchQuery { Uri = target, Method = "GET" }, deadline);
+        }
+
+        /// <summary>
+        /// Send one proxy-fetch request and return the task completed with the reassembled
+        /// outcome. The deadline bounds the whole exchange, not each frame. Since #55 the method,
+        /// request headers, and body ride along — the JSON-string payload stays one string.
+        /// </summary>
+        internal Task<ProxyFetchResult> FetchAsync(ProxyFetchQuery query, TimeSpan? deadline = null)
         {
             var communication = _communication;
             if (communication == null)
@@ -131,8 +147,8 @@ namespace WebContent
                 return Task.FromResult(Failure(ProxyFetchErrorCodes.Error, "The proxy fetch harness is not connected to the Event Server."));
             }
 
-            Uri target;
-            if (!Uri.TryCreate(url, UriKind.Absolute, out target) || !ProxyPolicy.IsHttpUri(target))
+            Uri target = query == null ? null : query.Uri;
+            if (!ProxyPolicy.IsHttpUri(target))
             {
                 return Task.FromResult(Failure(ProxyFetchErrorCodes.BadRequest, "The proxy-fetch url must be an absolute http(s) uri."));
             }
@@ -156,6 +172,9 @@ namespace WebContent
                         {
                             CorrelationId = correlationId,
                             Url = target.AbsoluteUri,
+                            Method = string.IsNullOrWhiteSpace(query.Method) ? null : query.Method.Trim().ToUpperInvariant(),
+                            Headers = query.Headers != null && query.Headers.Count > 0 ? query.Headers : null,
+                            BodyBase64 = query.Body != null && query.Body.Length > 0 ? Convert.ToBase64String(query.Body) : null,
                         })),
                     null,
                     null,

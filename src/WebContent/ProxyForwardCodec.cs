@@ -7,8 +7,9 @@ namespace WebContent
 {
     /// <summary>
     /// One proxied request the browser sent to the loopback forwarding proxy (#54), as parsed
-    /// from the absolute-form request line plus headers. Bodies are never read: the ES fetcher
-    /// is GET-only, so any method with a body is refused before the body arrives.
+    /// from the absolute-form request line plus headers. The body itself is read separately by
+    /// <see cref="ProxyForwardConnection"/> per Content-Length (#55) and travels to the fetcher
+    /// on <see cref="ProxyFetchQuery"/>.
     /// </summary>
     internal sealed class ProxyForwardedRequest
     {
@@ -119,6 +120,49 @@ namespace WebContent
                 "Upgrade",
                 "Content-Length",
             };
+
+        /// <summary>
+        /// Browser request headers the fetcher must NOT replay at the target (#55): the hop-by-hop
+        /// set plus Host (the fetcher's HttpWebRequest derives it from the uri) and Content-Length
+        /// (restated from the relayed body). Everything else — Cookie, Authorization, Content-Type,
+        /// Accept-*, custom app verbs' headers — passes through unmodified; the proxy never
+        /// injects or inspects credentials.
+        /// </summary>
+        private static readonly HashSet<string> OutboundRequestBlockedHeaders =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Connection",
+                "Keep-Alive",
+                "Proxy-Authenticate",
+                "Proxy-Authorization",
+                "Proxy-Connection",
+                "TE",
+                "Trailer",
+                "Transfer-Encoding",
+                "Upgrade",
+                "Content-Length",
+                "Host",
+            };
+
+        /// <summary>
+        /// The request headers to carry on the wire to the Event Server fetcher: the browser's
+        /// headers minus the outbound-blocked set, original casing and values intact.
+        /// </summary>
+        internal static List<ProxyFetchHeader> ToOutboundRequestHeaders(ProxyForwardedRequest request)
+        {
+            var outbound = new List<ProxyFetchHeader>();
+            foreach (var header in request.Headers)
+            {
+                if (OutboundRequestBlockedHeaders.Contains(header.Key))
+                {
+                    continue;
+                }
+
+                outbound.Add(new ProxyFetchHeader { Name = header.Key, Value = header.Value });
+            }
+
+            return outbound;
+        }
 
         /// <summary>
         /// Render a reassembled fetch outcome (AC3: status code and headers intact) as an HTTP/1.1

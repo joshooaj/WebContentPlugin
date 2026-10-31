@@ -69,6 +69,42 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void BuildsOutboundRequestHeadersKeepingCookieAuthorizationAndCustomAppHeaders()
+        {
+            // #55 AC2: request headers pass through unmodified — the plugin is a pure passthrough
+            // for authentication. Only headers describing the browser's connection to THIS proxy
+            // (hop-by-hop, Host, Content-Length the fetcher restates) are dropped.
+            var head =
+                "POST http://10.0.0.5:8080/api/login HTTP/1.1\r\n" +
+                "Host: 10.0.0.5:8080\r\n" +
+                "Cookie: sid=xyz; theme=dark\r\n" +
+                "Authorization: Bearer t-999\r\n" +
+                "Content-Type: application/json\r\n" +
+                "X-Vendor-Session: s1\r\n" +
+                "Accept-Language: en-US\r\n" +
+                "Connection: keep-alive\r\n" +
+                "Proxy-Connection: keep-alive\r\n" +
+                "Content-Length: 17\r\n" +
+                "\r\n";
+
+            Assert.True(ProxyForwardCodec.TryParseRequestHead(head, out var request, out var rejectReason), rejectReason);
+
+            var outbound = ProxyForwardCodec.ToOutboundRequestHeaders(request);
+
+            Assert.Contains(outbound, h => h.Name == "Cookie" && h.Value == "sid=xyz; theme=dark");
+            Assert.Contains(outbound, h => h.Name == "Authorization" && h.Value == "Bearer t-999");
+            Assert.Contains(outbound, h => h.Name == "X-Vendor-Session" && h.Value == "s1");
+            Assert.Contains(outbound, h => h.Name == "Content-Type" && h.Value == "application/json");
+            Assert.Contains(outbound, h => h.Name == "Accept-Language" && h.Value == "en-US");
+
+            // Connection-describing headers are the fetcher's own to restate at the target.
+            Assert.DoesNotContain(outbound, h => h.Name == "Host");
+            Assert.DoesNotContain(outbound, h => h.Name == "Content-Length");
+            Assert.DoesNotContain(outbound, h => h.Name == "Connection");
+            Assert.DoesNotContain(outbound, h => h.Name == "Proxy-Connection");
+        }
+
+        [Fact]
         public void RendersForwardedResponseWithStatusAndContentHeaders()
         {
             // AC3: a reassembled chunk stream becomes a forwarded response with the target's

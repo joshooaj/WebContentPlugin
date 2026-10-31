@@ -154,9 +154,10 @@ namespace WebContent.Client
 
         /// <summary>
         /// The listener's fetch seam: proxy-fetch over classic MIP messaging to the Event Server
-        /// fetcher (#53). An unconnected channel is an explicit fetch failure, never a direct hit.
+        /// fetcher (#53; method/headers/body since #55). An unconnected channel is an explicit
+        /// fetch failure, never a direct hit.
         /// </summary>
-        private static Task<ProxyFetchResult> FetchThroughMessaging(string url)
+        private static Task<ProxyFetchResult> FetchThroughMessaging(ProxyFetchQuery query)
         {
             var client = ProxyFetchClient.Active;
             if (client == null || !client.IsReady)
@@ -169,7 +170,7 @@ namespace WebContent.Client
                 });
             }
 
-            return client.FetchAsync(url);
+            return client.FetchAsync(query);
         }
 
         /// <summary>

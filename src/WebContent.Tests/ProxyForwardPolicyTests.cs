@@ -36,17 +36,50 @@ namespace WebContent.Tests
             Assert.Contains("somewhere.else.test", rejectReason);
         }
 
-        [Fact]
-        public void RefusesMethodsWithBodyInsteadOfForwardingThem()
+        [Theory]
+        [InlineData("POST")]
+        [InlineData("PUT")]
+        [InlineData("DELETE")]
+        [InlineData("OPTIONS")]
+        [InlineData("PATCH")]
+        [InlineData("HEAD")]
+        public void ForwardsWriteMethodsToAllowlistedOrigins(string method)
         {
-            // The Event Server fetcher (#53) is GET-only; a POST must be refused locally with an
-            // explicit 405, never quietly forwarded and never answered from the client machine.
-            var head = "POST http://10.0.0.5:8080/login HTTP/1.1\r\nContent-Length: 12\r\n\r\nuser=x&pwd=y";
+            // #55: vendor login flows are POSTs with form bodies; background XHR uses PUT/DELETE/
+            // OPTIONS/PATCH. The ES fetcher replays them, so the forwarder no longer refuses them.
+            var head = $"{method} http://10.0.0.5:8080/login HTTP/1.1\r\nContent-Length: 15\r\nContent-Type: application/json\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out var request, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.Forward, decision);
+            Assert.Equal(method, request.Method);
+            Assert.Equal("15", request.Headers["Content-Length"]);
+            Assert.Null(rejectReason);
+        }
+
+        [Fact]
+        public void RefusesUnknownMethodsWith405InsteadOfForwardingThem()
+        {
+            // The method allowlist is explicit: TRACE and junk verbs stay refused, never relayed.
+            var head = "TRACE http://10.0.0.5:8080/debug HTTP/1.1\r\n\r\n";
 
             var decision = ProxyForwardPolicy.Decide(Allowlist, head, out var request, out var rejectReason);
 
             Assert.Equal(ProxyForwardDisposition.MethodNotAllowed, decision);
-            Assert.Contains("POST", rejectReason);
+            Assert.Contains("TRACE", rejectReason);
+        }
+
+        [Fact]
+        public void RefusesWriteMethodsToNonAllowlistedOriginsWith403()
+        {
+            // The origin gate runs for POST exactly as for GET — a POST to an origin no proxied
+            // workspace allowlists never reaches the fetcher.
+            var head = "POST http://elsewhere.test/login HTTP/1.1\r\nContent-Length: 5\r\n\r\nx=1";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out var request, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.OriginNotAllowed, decision);
+            Assert.Contains("elsewhere.test", rejectReason);
         }
 
         [Fact]

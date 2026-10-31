@@ -33,7 +33,7 @@ namespace WebContent.Tests
             };
 
             var fetcher = new ProxyHttpFetcher();
-            var result = await fetcher.FetchAsync(new Uri(_server.UrlFor("/index.html")), ProxyFetchLimits.Default());
+            var result = await fetcher.FetchAsync(Get(_server.UrlFor("/index.html")), ProxyFetchLimits.Default());
 
             Assert.True(result.Success);
             Assert.Equal(200, result.StatusCode);
@@ -58,7 +58,7 @@ namespace WebContent.Tests
             var limits = ProxyFetchLimits.Default();
             limits.MaxResponseBytes = 1000;
 
-            var result = await new ProxyHttpFetcher().FetchAsync(new Uri(_server.UrlFor("/large")), limits);
+            var result = await new ProxyHttpFetcher().FetchAsync(Get(_server.UrlFor("/large")), limits);
 
             Assert.False(result.Success);
             Assert.Equal(ProxyFetchErrorCodes.TooLarge, result.ErrorCode);
@@ -83,7 +83,7 @@ namespace WebContent.Tests
             var limits = ProxyFetchLimits.Default();
             limits.ReadTimeoutMs = 100;
 
-            var result = await new ProxyHttpFetcher().FetchAsync(new Uri(_server.UrlFor("/stalling")), limits);
+            var result = await new ProxyHttpFetcher().FetchAsync(Get(_server.UrlFor("/stalling")), limits);
 
             Assert.False(result.Success);
             Assert.Equal(ProxyFetchErrorCodes.Timeout, result.ErrorCode);
@@ -102,7 +102,7 @@ namespace WebContent.Tests
             var limits = ProxyFetchLimits.Default();
             limits.ConnectTimeoutMs = 200;
 
-            var result = await new ProxyHttpFetcher().FetchAsync(new Uri(_server.UrlFor("/silent")), limits);
+            var result = await new ProxyHttpFetcher().FetchAsync(Get(_server.UrlFor("/silent")), limits);
 
             Assert.False(result.Success);
             Assert.Equal(ProxyFetchErrorCodes.Timeout, result.ErrorCode);
@@ -112,7 +112,7 @@ namespace WebContent.Tests
         public async Task AnUnreachableTargetReportsUnreachableNotSuccess()
         {
             var unusedPort = FreePort();
-            var result = await new ProxyHttpFetcher().FetchAsync(new Uri($"http://127.0.0.1:{unusedPort}/nope"), ProxyFetchLimits.Default());
+            var result = await new ProxyHttpFetcher().FetchAsync(Get($"http://127.0.0.1:{unusedPort}/nope"), ProxyFetchLimits.Default());
 
             Assert.False(result.Success);
             Assert.Equal(ProxyFetchErrorCodes.Unreachable, result.ErrorCode);
@@ -129,7 +129,7 @@ namespace WebContent.Tests
                 context.Response.Close();
             };
 
-            var result = await new ProxyHttpFetcher().FetchAsync(new Uri(_server.UrlFor("/missing")), ProxyFetchLimits.Default());
+            var result = await new ProxyHttpFetcher().FetchAsync(Get(_server.UrlFor("/missing")), ProxyFetchLimits.Default());
 
             // The proxy relays whatever the target answered; a 404 page is still a page.
             Assert.True(result.Success);
@@ -142,10 +142,119 @@ namespace WebContent.Tests
         [InlineData("file:///C:/windows/win.ini")]
         public async Task NonHttpSchemeIsRefusedWithoutTouchingTheNetwork(string target)
         {
-            var result = await new ProxyHttpFetcher().FetchAsync(new Uri(target), ProxyFetchLimits.Default());
+            var result = await new ProxyHttpFetcher().FetchAsync(Get(target), ProxyFetchLimits.Default());
 
             Assert.False(result.Success);
             Assert.Equal(ProxyFetchErrorCodes.BadRequest, result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task ReplaysMethodRequestBodyAndRequestHeadersAtTheTarget()
+        {
+            // #55 AC1/AC2: the vendor login POST arrives at the target with its verb, form body,
+            // Cookie header, content type, and custom app headers intact.
+            string observedMethod = null;
+            string observedBody = null;
+            string observedCookie = null;
+            string observedVendorHeader = null;
+            string observedContentType = null;
+            _server.Handler = async context =>
+            {
+                observedMethod = context.Request.HttpMethod;
+                using (var reader = new StreamReader(context.Request.InputStream))
+                {
+                    observedBody = await reader.ReadToEndAsync();
+                }
+
+                observedCookie = context.Request.Headers["Cookie"];
+                observedVendorHeader = context.Request.Headers["X-Vendor-Auth"];
+                observedContentType = context.Request.ContentType;
+
+                var bytes = Encoding.UTF8.GetBytes("welcome");
+                await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+                context.Response.Close();
+            };
+
+            var query = new ProxyFetchQuery
+            {
+                Uri = new Uri(_server.UrlFor("/login")),
+                Method = "POST",
+                Headers = new List<ProxyFetchHeader>
+                {
+                    new ProxyFetchHeader { Name = "Cookie", Value = "sid=abc" },
+                    new ProxyFetchHeader { Name = "X-Vendor-Auth", Value = "t-7" },
+                    new ProxyFetchHeader { Name = "Content-Type", Value = "application/x-www-form-urlencoded" },
+                },
+                Body = Encoding.UTF8.GetBytes("user=admin&pass=x"),
+            };
+
+            var result = await new ProxyHttpFetcher().FetchAsync(query, ProxyFetchLimits.Default());
+
+            Assert.True(result.Success);
+            Assert.Equal("POST", observedMethod);
+            Assert.Equal("user=admin&pass=x", observedBody);
+            Assert.Equal("sid=abc", observedCookie);
+            Assert.Equal("t-7", observedVendorHeader);
+            Assert.NotNull(observedContentType);
+            Assert.StartsWith("application/x-www-form-urlencoded", observedContentType);
+            Assert.Equal(Encoding.UTF8.GetBytes("welcome"), result.Body);
+        }
+
+        [Fact]
+        public async Task RelaysRedirectsAndSetCookiesInsteadOfFollowingOrStoringThem()
+        {
+            // #55 cookie round-trip: the fetcher answers the 3xx as a completed response with the
+            // Set-Cookie and Location headers intact; it never follows the redirect (that is the
+            // browser's move, back through this same proxy) and keeps no session state itself.
+            _server.Handler = context =>
+            {
+                context.Response.StatusCode = 302;
+                context.Response.RedirectLocation = "/dashboard";
+                context.Response.Headers.Add("Set-Cookie", "SID=xyz; Path=/; HttpOnly");
+                context.Response.Close();
+                return Task.CompletedTask;
+            };
+
+            var result = await new ProxyHttpFetcher().FetchAsync(Get(_server.UrlFor("/login")), ProxyFetchLimits.Default());
+
+            Assert.True(result.Success);
+            Assert.Equal(302, result.StatusCode);
+            Assert.Contains(result.Headers, h => h.Name == "Set-Cookie" && h.Value == "SID=xyz; Path=/; HttpOnly");
+            Assert.Contains(result.Headers, h => h.Name == "Location" && h.Value == "/dashboard");
+        }
+
+        [Fact]
+        public async Task CapturesRepeatedSetCookieValuesAsSeparateHeaders()
+        {
+            // The comma-join hazard: two Set-Cookie values must survive capture as two entries,
+            // not one joined string that the browser then rejects.
+            _server.Handler = context =>
+            {
+                context.Response.Headers.Add("Set-Cookie", "SID=a; Path=/");
+                context.Response.Headers.Add("Set-Cookie", "CSRF=b; Path=/; Secure");
+                context.Response.Close();
+                return Task.CompletedTask;
+            };
+
+            var result = await new ProxyHttpFetcher().FetchAsync(Get(_server.UrlFor("/two-cookies")), ProxyFetchLimits.Default());
+
+            Assert.True(result.Success);
+            var setCookies = new List<string>();
+            foreach (var header in result.Headers)
+            {
+                if (header.Name == "Set-Cookie")
+                {
+                    setCookies.Add(header.Value);
+                }
+            }
+
+            Assert.Contains("SID=a; Path=/", setCookies);
+            Assert.Contains("CSRF=b; Path=/; Secure", setCookies);
+        }
+
+        private static ProxyFetchQuery Get(string url)
+        {
+            return new ProxyFetchQuery { Uri = new Uri(url), Method = "GET" };
         }
 
         public void Dispose()

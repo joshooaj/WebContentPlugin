@@ -19,14 +19,14 @@ namespace WebContent.Client
     /// </summary>
     internal sealed class LoopbackProxyListener
     {
-        private readonly Func<string, Task<ProxyFetchResult>> _fetch;
+        private readonly Func<ProxyFetchQuery, Task<ProxyFetchResult>> _fetch;
         private IReadOnlyList<string> _canonicalTargets;
         private TcpListener _listener;
         private volatile bool _stopping;
 
         internal int Port { get; private set; }
 
-        internal LoopbackProxyListener(IReadOnlyList<string> canonicalTargets, Func<string, Task<ProxyFetchResult>> fetch)
+        internal LoopbackProxyListener(IReadOnlyList<string> canonicalTargets, Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch)
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
             _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));

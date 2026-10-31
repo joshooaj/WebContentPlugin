@@ -15,7 +15,7 @@ namespace WebContent
         /// <summary>Origin not in the workspace allowlist (or address-bar navigation to it) — 403.</summary>
         OriginNotAllowed,
 
-        /// <summary>Method other than GET (the ES fetcher is GET-only) — 405.</summary>
+        /// <summary>Verb outside the browser-flow method set (#55) — 405.</summary>
         MethodNotAllowed,
 
         /// <summary>CONNECT tunnel (https through a CONNECT-less forwarder) — 502.</summary>
@@ -23,13 +23,34 @@ namespace WebContent
     }
 
     /// <summary>
-    /// Pure decision layer for the loopback forwarding proxy (#54): every browser request that
-    /// reaches the listener — page document, subresources, address-bar navigation alike — goes
-    /// through the same table. Allowlisted GETs forward (via ProxyPolicy from the config ticket
+    /// Pure decision layer for the loopback forwarding proxy (#54, write verbs since #55): every
+    /// browser request that reaches the listener — page document, subresources, login-form POSTs,
+    /// background XHR, address-bar navigation alike — goes through the same table. Allowlisted
+    /// requests in the browser-flow method set forward (via ProxyPolicy from the config ticket
     /// #52); everything else is refused with an explicit status, never sent direct.
     /// </summary>
     internal static class ProxyForwardPolicy
     {
+        /// <summary>
+        /// Verbs the proxy relays (#55): the set a browser page actually generates — document GET,
+        /// vendor login POSTs, XHR PUT/DELETE/PATCH, CORS preflight OPTIONS. CONNECT is refused as
+        /// a tunnel, not treated as a verb; TRACE and other verbs are refused (405), never relayed.
+        /// </summary>
+        private static readonly HashSet<string> ForwardedMethods =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "PATCH",
+            };
+
+        /// <summary>
+        /// True for the verbs the whole proxy chain relays. The Event Server fetcher re-checks
+        /// decoded request payloads against this same set, so client and server agree on one table.
+        /// </summary>
+        internal static bool IsForwardedMethod(string method)
+        {
+            return !string.IsNullOrWhiteSpace(method) && ForwardedMethods.Contains(method);
+        }
+
         internal static ProxyForwardDisposition Decide(
             IEnumerable<string> canonicalTargets,
             string requestHead,
@@ -47,9 +68,9 @@ namespace WebContent
                 return ProxyForwardDisposition.ConnectRefused;
             }
 
-            if (request.Method != "GET")
+            if (!ForwardedMethods.Contains(request.Method))
             {
-                rejectReason = $"The proxy fetcher is GET-only; '{request.Method}' to '{request.RawTarget}' is refused.";
+                rejectReason = $"The proxy relays browser-flow verbs (GET/HEAD/POST/PUT/DELETE/OPTIONS/PATCH); '{request.Method}' to '{request.RawTarget}' is refused.";
                 return ProxyForwardDisposition.MethodNotAllowed;
             }
 

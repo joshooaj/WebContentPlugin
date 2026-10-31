@@ -80,13 +80,27 @@ namespace WebContent
 
     /// <summary>
     /// Request payload: one correlation id per request so the requester can match the response
-    /// frames that come back over the shared message channel.
+    /// frames that come back over the shared message channel. Since #55 it also carries the HTTP
+    /// method, the browser's request headers, and a base64 request body — the proxy is a pure
+    /// passthrough for authentication (Cookie/Authorization cross untouched; the plugin never
+    /// injects or stores target credentials). A null Method means GET; null Headers/BodyBase64
+    /// mean none. Still ONE JSON string on the wire via <see cref="ProxyFetchWireCodec"/>.
     /// </summary>
     [Serializable]
     public class ProxyFetchRequestPayload
     {
         public string CorrelationId;
         public string Url;
+
+        /// <summary>Uppercase HTTP method (POST/PUT/DELETE/OPTIONS/...); null or blank is GET.</summary>
+        public string Method;
+
+        /// <summary>Request headers to replay at the target, hop-by-hop headers already stripped
+        /// by the requester side; null when the request carried none worth relaying.</summary>
+        public List<ProxyFetchHeader> Headers;
+
+        /// <summary>Request body as base64 (login forms, XHR payloads); null when there is no body.</summary>
+        public string BodyBase64;
     }
 
     /// <summary>
@@ -126,6 +140,27 @@ namespace WebContent
         // Failure-frame fields.
         public string ErrorCode;
         public string ErrorMessage;
+    }
+
+    /// <summary>
+    /// One browser request the loopback forwarding proxy decided to relay, as it travels the
+    /// client-side seam: listener -> BrowserManager fetch seam -> ProxyFetchClient -> messaging.
+    /// Not a wire payload; <see cref="ProxyFetchRequestPayload"/> is its serialized form. Since
+    /// #55 the method, browser request headers, and request body ride along, so a vendor login
+    /// POST reaches the Event Server fetcher with its credentials and form body intact.
+    /// </summary>
+    internal sealed class ProxyFetchQuery
+    {
+        internal Uri Uri;
+
+        /// <summary>Uppercase HTTP method; null/blank means GET.</summary>
+        internal string Method;
+
+        /// <summary>Browser request headers to replay at the target, hop-by-hop ones stripped.</summary>
+        internal List<ProxyFetchHeader> Headers = new List<ProxyFetchHeader>();
+
+        /// <summary>Request body bytes; null when the request carried no body.</summary>
+        internal byte[] Body;
     }
 
     /// <summary>
