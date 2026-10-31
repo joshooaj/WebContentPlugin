@@ -35,6 +35,8 @@
     <Compile Include="..\WebContent\ProxyFetchWireCodec.cs" Link="ProxyFetchWireCodec.cs" />
     <Compile Include="..\WebContent\ProxyFetchCorrelation.cs" Link="ProxyFetchCorrelation.cs" />
     <Compile Include="..\WebContent\ProxyFetchTransport.cs" Link="ProxyFetchTransport.cs" />
+    <Compile Include="..\WebContent\ProxyLoopbackTls.cs" Link="ProxyLoopbackTls.cs" />
+    <Compile Include="..\WebContent\ProxyLoopbackAuthority.cs" Link="ProxyLoopbackAuthority.cs" />
     <Compile Include="..\WebContent\ProxyForwardCodec.cs" Link="ProxyForwardCodec.cs" />
     <Compile Include="..\WebContent\ProxyForwardPolicy.cs" Link="ProxyForwardPolicy.cs" />
     <Compile Include="..\WebContent\ProxyForwardConnection.cs" Link="ProxyForwardConnection.cs" />

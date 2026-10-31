@@ -21,7 +21,7 @@
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
     <OutputPath>..\..\output\WebContent\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <DefineConstants>DEBUG;TRACE;NETFRAMEWORK</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <PlatformTarget>x64</PlatformTarget>
@@ -30,7 +30,7 @@
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <OutputPath>..\..\output\WebContent\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
+    <DefineConstants>TRACE;NETFRAMEWORK</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <PlatformTarget>x64</PlatformTarget>
@@ -110,6 +110,8 @@
     <Compile Include="ProxyFetchWireCodec.cs" />
     <Compile Include="ProxyFetchCorrelation.cs" />
     <Compile Include="ProxyFetchTransport.cs" />
+    <Compile Include="ProxyLoopbackTls.cs" />
+    <Compile Include="ProxyLoopbackAuthority.cs" />
     <Compile Include="ProxyFetchBackgroundPlugin.cs" />
     <Compile Include="ProxyFetchClient.cs" />
     <Compile Include="ProxyForwardCodec.cs" />
