@@ -31,8 +31,18 @@ namespace WebContent
         private ServerId _serverId;
         private MessageCommunication _messageCommunication;
         private object _requestFilterRegistration;
+        private object _leafFilterRegistration;
         private SemaphoreSlim _fetchSlots;
         private ProxyServerAllowlist _allowlist;
+        private ProxyLeafIssuer _leafIssuer;
+
+        /// <summary>
+        /// ADR-0003: the deployment CA is loaded/created lazily on the first leaf request and
+        /// then reused - its private key lives in this machine's LocalMachine\Personal store and
+        /// outlives the service process.
+        /// </summary>
+        private readonly object _authorityGate = new object();
+        private Authority _deploymentAuthority;
 
         public override Guid Id => PluginId;
 
@@ -71,6 +81,16 @@ namespace WebContent
                     ResolveWorkspacePropertySnapshots,
                     message => EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), message));
 
+                // ADR-0003: the same plugin answers leaf-mint requests for the loopback TLS
+                // termination; the same allowlist union gates minting exactly like fetching.
+                _leafIssuer = new ProxyLeafIssuer(
+                    _allowlist,
+                    ResolveDeploymentAuthority,
+                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                _leafFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxyLeafRequest,
+                    new CommunicationIdFilter(ProxyMessageIds.LeafRequestId));
+
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(ProxyFetchBackgroundPlugin),
@@ -99,7 +119,21 @@ namespace WebContent
                 }
             }
 
+            if (_messageCommunication != null && _leafFilterRegistration != null)
+            {
+                try
+                {
+                    _messageCommunication.UnRegisterCommunicationFilter(_leafFilterRegistration);
+                }
+                catch (Exception exception)
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy leaf filter detach failed: {exception.Message}");
+                }
+            }
+
             _requestFilterRegistration = null;
+            _leafFilterRegistration = null;
+            _leafIssuer = null;
             _messageCommunication = null;
 
             // Deliberately no MessageCommunicationManager.Stop: the messaging session is
@@ -289,6 +323,95 @@ namespace WebContent
                 {
                     EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy failure frame not sent: {transmitException.Message}");
                 }
+            }
+        }
+
+        /// <summary>
+        /// ADR-0003: answer one loopback-leaf mint request. Issuance is local CPU plus a store
+        /// lookup - fast enough for the messaging receive thread, unlike the fetch path. The
+        /// response is unicasted to the requester endpoint exactly like fetch frames: a null
+        /// destination would broadcast a certificate to every subscribed host.
+        /// </summary>
+        private object OnProxyLeafRequest(Message message, FQID destination, FQID source)
+        {
+            var payload = ProxyFetchWireCodec.LeafRequestFromWire(message?.Data);
+            if (payload == null || string.IsNullOrEmpty(payload.CorrelationId))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), "Leaf request carried no usable payload; refused.");
+                return null;
+            }
+
+            var requester = source ?? message?.ExternalMessageSourceEndPoint;
+            if (requester == null)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Leaf request {payload.CorrelationId} carried no requester endpoint; its response is logged rather than broadcast.");
+                return null;
+            }
+
+            var communication = _messageCommunication;
+            if (communication == null)
+            {
+                return null;
+            }
+
+            ProxyLeafResponsePayload response;
+            try
+            {
+                response = _leafIssuer.Issue(payload);
+            }
+            catch (Exception exception)
+            {
+                // Issue is written not to throw; anything escaping still answers as a failure
+                // frame rather than leaving the requester to time out.
+                response = new ProxyLeafResponsePayload
+                {
+                    CorrelationId = payload.CorrelationId,
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Error,
+                    ErrorMessage = exception.Message,
+                };
+            }
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(ProxyMessageIds.LeafResponseId, ProxyFetchWireCodec.ToWire(response)),
+                    requester,
+                    null,
+                    null);
+            }
+            catch (Exception transmitException)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Leaf response {response.CorrelationId} not sent: {transmitException.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// ADR-0003: the long-lived deployment CA for this Event Server machine, loaded from (or
+        /// created in) LocalMachine\Personal on first use. The private key never leaves this
+        /// machine's machine-level key storage; a service that cannot write that store answers
+        /// NoAuthority and recovers once an operator provisions the CA (the creation is retried
+        /// per request until it succeeds).
+        /// </summary>
+        private Authority ResolveDeploymentAuthority()
+        {
+            lock (_authorityGate)
+            {
+                if (_deploymentAuthority == null)
+                {
+                    _deploymentAuthority = Authority.LoadOrCreateDeploymentAuthority(
+                        message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                }
+
+                return _deploymentAuthority;
             }
         }
 

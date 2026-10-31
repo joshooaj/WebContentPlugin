@@ -45,11 +45,101 @@ namespace WebContent
             return new Authority();
         }
 
-        private Authority()
+        /// <summary>Fixed CAPI machine container name for the deployment CA (ADR-0003).</summary>
+        internal const string DeploymentCaContainer = "WebContent-Proxy-CA";
+
+        /// <summary>
+        /// ADR-0003: the long-lived deployment authority of this Event Server machine. Loads the
+        /// existing CA from LocalMachine\Personal (any valid copy whose key this process can use)
+        /// and otherwise creates it: a machine-key-store CAPI container under a fixed name, signed
+        /// self, stored with its private key. Requires machine-level privileges (the Event Server
+        /// service's LocalSystem identity covers it); access failures propagate so the leaf
+        /// issuer can answer NoAuthority and retry provisioning on the next request.
+        /// </summary>
+        internal static Authority LoadOrCreateDeploymentAuthority(Action<string> log)
         {
-            _authorityKey = NewPersistedProvider("WCProxyCA-" + Guid.NewGuid().ToString("N").Substring(0, 12));
-            _authorityNameDer = Der.Name(ProxyLoopbackTls.AuthorityCommonName);
-            _authoritySpkiDer = Der.SubjectPublicKeyInfo(_authorityKey);
+            using (var store = new X509Store(StoreName.My, StoreLocation.LocalMachine))
+            {
+                store.Open(OpenFlags.ReadWrite);
+
+                var now = DateTime.Now;
+                foreach (var existing in store.Certificates.Find(
+                    X509FindType.FindBySubjectName, ProxyLoopbackTls.AuthorityCommonName, false))
+                {
+                    if (existing.NotAfter <= now)
+                    {
+                        log($"Deployment proxy CA '{existing.Subject}' has expired; a fresh authority will be minted and the machine trust roots must be updated to match.");
+                        continue;
+                    }
+
+                    if (!existing.HasPrivateKey)
+                    {
+                        continue;
+                    }
+
+                    RSACryptoServiceProvider key;
+                    try
+                    {
+                        key = (RSACryptoServiceProvider)existing.PrivateKey;
+                    }
+                    catch (Exception)
+                    {
+                        // A CNG-backed copy would return a different provider type; this minting
+                        // path signs through CAPI, so skip and let provisioning replace it.
+                        continue;
+                    }
+
+                    log($"Loaded deployment proxy CA from LocalMachine\\Personal (thumbprint {existing.Thumbprint}).");
+                    return new Authority(existing, key);
+                }
+
+                var parameters = new CspParameters
+                {
+                    KeyContainerName = DeploymentCaContainer,
+                    ProviderName = EnhancedProviderName,
+                    ProviderType = EnhancedProviderType,
+                    KeyNumber = (int)KeyNumber.Exchange,
+                    Flags = CspProviderFlags.UseMachineKeyStore,
+                };
+                var createdKey = new RSACryptoServiceProvider(KeyBits, parameters);
+
+                // The deployment CA outlives the process: the container must survive disposal, and
+                // the store keeps the certificate+key together.
+                createdKey.PersistKeyInCsp = true;
+                try
+                {
+                    var certificate = MintAuthorityCertificate(createdKey);
+                    store.Add(certificate);
+                    log($"Created deployment proxy CA in LocalMachine\\Personal (thumbprint {certificate.Thumbprint}); client machines must import this certificate into LocalMachine\\Root to trust proxied https targets.");
+                    return new Authority(certificate, createdKey);
+                }
+                catch
+                {
+                    try
+                    {
+                        createdKey.PersistKeyInCsp = false;
+                        createdKey.Dispose();
+                    }
+                    catch { }
+
+                    throw;
+                }
+            }
+        }
+
+        private Authority(X509Certificate2 certificate, RSACryptoServiceProvider key)
+        {
+            _authorityCertificate = certificate;
+            _authorityKey = key;
+            _authorityNameDer = certificate.SubjectName.RawData;
+            _authoritySpkiDer = Der.SubjectPublicKeyInfo(key);
+        }
+
+        /// <summary>Self-signed CA certificate DER signed by <paramref name="key"/>, key attached.</summary>
+        private static X509Certificate2 MintAuthorityCertificate(RSACryptoServiceProvider key)
+        {
+            var nameDer = Der.Name(ProxyLoopbackTls.AuthorityCommonName);
+            var spkiDer = Der.SubjectPublicKeyInfo(key);
 
             var notBefore = DateTime.UtcNow.AddDays(-1);
             var notAfter = notBefore.AddYears(10);
@@ -58,18 +148,26 @@ namespace WebContent
                 Der.Tagged(0xA0, Der.Integer(2)),                       // version v3
                 Der.Integer(RandomPositiveBytes(8)),                    // serial
                 Der.Sha256RsaAlgorithmIdentifier(),
-                _authorityNameDer,                                      // issuer = subject (self-signed)
+                nameDer,                                                // issuer = subject (self-signed)
                 Der.Validity(notBefore, notAfter),
-                _authorityNameDer,
-                _authoritySpkiDer,
+                nameDer,
+                spkiDer,
                 Der.Extensions(
                     Der.BasicConstraints(true),
                     Der.AuthorityKeyUsage(),
-                    Der.SubjectKeyIdentifier(_authoritySpkiDer)));      // no EKU by design
+                    Der.SubjectKeyIdentifier(spkiDer)));                // no EKU by design
 
-            var certificateDer = Sign(tbs, _authorityKey);
-            _authorityCertificate = new X509Certificate2(certificateDer);
-            _authorityCertificate.PrivateKey = _authorityKey;
+            var certificate = new X509Certificate2(Sign(tbs, key));
+            certificate.PrivateKey = key;
+            return certificate;
+        }
+
+        private Authority()
+        {
+            _authorityKey = NewPersistedProvider("WCProxyCA-" + Guid.NewGuid().ToString("N").Substring(0, 12));
+            _authorityCertificate = MintAuthorityCertificate(_authorityKey);
+            _authorityNameDer = Der.Name(ProxyLoopbackTls.AuthorityCommonName);
+            _authoritySpkiDer = Der.SubjectPublicKeyInfo(_authorityKey);
         }
 
         internal X509Certificate2 Certificate => _authorityCertificate;
@@ -410,6 +508,64 @@ namespace WebContent
         internal static Authority Create(Action<string> log)
         {
             return new Authority();
+        }
+
+        /// <summary>
+        /// ADR-0003: load (or first-run create) the deployment CA in LocalMachine\Personal, the
+        /// modern-.NET counterpart of the Framework machine-container path. Production minting
+        /// runs on the Framework Event Server; this keeps both backends contract-complete.
+        /// </summary>
+        internal static Authority LoadOrCreateDeploymentAuthority(Action<string> log)
+        {
+            using (var store = new X509Store(StoreName.My, StoreLocation.LocalMachine))
+            {
+                store.Open(OpenFlags.ReadWrite);
+
+                var now = DateTime.Now;
+                foreach (var existing in store.Certificates.Find(
+                    X509FindType.FindBySubjectName, ProxyLoopbackTls.AuthorityCommonName, false))
+                {
+                    if (existing.NotAfter > now && existing.HasPrivateKey)
+                    {
+                        log($"Loaded deployment proxy CA from LocalMachine\\Personal (thumbprint {existing.Thumbprint}).");
+                        return new Authority(existing);
+                    }
+                }
+
+                var key = RSA.Create(2048);
+                var request = new CertificateRequest(
+                    new X500DistinguishedName("CN=" + ProxyLoopbackTls.AuthorityCommonName),
+                    key,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1);
+                request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+                request.CertificateExtensions.Add(new X509KeyUsageExtension(
+                    X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
+                    true));
+
+                using (var created = request.CreateSelfSigned(
+                    DateTimeOffset.UtcNow.AddDays(-1),
+                    DateTimeOffset.UtcNow.AddDays(3650)))
+                {
+                    // Land the key in machine-level storage (the store Add persists it), matching
+                    // the Framework path's machine key container.
+                    var password = Guid.NewGuid().ToString("N");
+                    var portable = created.Export(X509ContentType.Pkcs12, password);
+                    var machineCopy = X509CertificateLoader.LoadPkcs12(
+                        portable,
+                        password,
+                        X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
+                    store.Add(machineCopy);
+                    log($"Created deployment proxy CA in LocalMachine\\Personal (thumbprint {machineCopy.Thumbprint}); client machines must import this certificate into LocalMachine\\Root to trust proxied https targets.");
+                    return new Authority(machineCopy);
+                }
+            }
+        }
+
+        private Authority(X509Certificate2 certificateWithKey)
+        {
+            _authorityCertificate = certificateWithKey;
+            _authorityKey = certificateWithKey.GetRSAPrivateKey();
         }
 
         private Authority()

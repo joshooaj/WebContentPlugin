@@ -57,6 +57,21 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void LeafMintAnswersAreUnicastToTheRequesterNeverBroadcast()
+        {
+            // ADR-0003: the minted certificate and the CA ride the same unicast discipline as
+            // fetch frames - a null-destination leaf response would deliver signing material to
+            // every host subscribed to the leaf response id.
+            var fetcher = ReadFetcher();
+            var collapsed = System.Text.RegularExpressions.Regex.Replace(fetcher, @"\s+", " ");
+
+            Assert.Contains("ProxyFetchWireCodec.LeafRequestFromWire(message?.Data)", fetcher);
+            Assert.Contains("new CommunicationIdFilter(ProxyMessageIds.LeafRequestId)", fetcher);
+            Assert.Contains("if (requester == null)", fetcher);
+            Assert.Contains("ProxyMessageIds.LeafResponseId, ProxyFetchWireCodec.ToWire(response)), requester, null, null);", collapsed);
+        }
+
+        [Fact]
         public void BothSidesCarryPayloadsAsJsonStringsNeverAsPluginTypes()
         {
             // The platform rehydrates Data via Type.GetType(DataClass) and silently delivers
