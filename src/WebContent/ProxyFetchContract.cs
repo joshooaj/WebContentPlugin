@@ -56,6 +56,12 @@ namespace WebContent
 
         /// <summary>Any other transport-level failure.</summary>
         internal const string Error = "Error";
+
+        /// <summary>
+        /// Ticket #54 server-side hardening: the fetched origin is not in the proxy allowlist of
+        /// any proxied workspace, so the Event Server refuses to reach it.
+        /// </summary>
+        internal const string NotAllowed = "NotAllowed";
     }
 
     /// <summary>

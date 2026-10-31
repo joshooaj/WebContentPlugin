@@ -86,10 +86,41 @@ namespace WebContent.Client
                 // current address equals home. Wait for the manager; the designer path is exempt.
                 if (_browser == null && (_viewItemManager != null || _designerMode))
                 {
+                    // Ticket #54: a proxied workspace resolves a proxy profile from the admin-seeded
+                    // properties; the browser manager then fronts its profile with a loopback
+                    // forwarding listener. Standalone/disabled workspaces pass no profile.
+                    var settings = ViewItemManager?.Settings;
+                    ProxyWorkspaceProfile proxyProfile;
+                    ProxyWorkspaceProfile.TryCreate(
+                        settings != null && settings.ProxyEnabled,
+                        settings?.ProxyTargetsProperty,
+                        out proxyProfile);
+
                     _browser = BrowserManager.GetBrowser(
                         Id,
                         WebContentConfiguration.CreateNavigationUri(Home, Strings.HomeAddress),
-                        ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
+                        settings?.IsolateBrowserInstances ?? false,
+                        proxyProfile);
+                }
+                else if (_browser != null && _viewItemManager != null)
+                {
+                    // The admin toggled this workspace's proxy since the browser was created
+                    // (background-retained browsers outlive view items): reconcile, and recreate
+                    // the WebView when the routing itself changed (#54, "never direct").
+                    var settings = _viewItemManager.Settings;
+                    ProxyWorkspaceProfile proxyProfile;
+                    ProxyWorkspaceProfile.TryCreate(
+                        settings.ProxyEnabled,
+                        settings.ProxyTargetsProperty,
+                        out proxyProfile);
+
+                    if (BrowserManager.ApplyProxyProfile(_browser, proxyProfile))
+                    {
+                        var address = _viewItemManager.Settings.ResolveRestoreAddress() ?? Home;
+                        _browser.RecreateWebView(
+                            WebContentConfiguration.CreateNavigationUri(address, Home),
+                            settings.IsolateBrowserInstances);
+                    }
                 }
 
                 return _browser;

@@ -110,6 +110,10 @@ namespace WebContent
 
             try
             {
+                // destinationEndPoint null: the Event Server filter-routes this to the proxy
+                // fetcher plugin. The source argument stays null because the messaging layer
+                // stamps every transmit with the sender's endpoint FQID (ExternalMessageSource-
+                // EndPoint on the receiver), which is what the fetcher answers back to.
                 communication.TransmitMessage(
                     new Message(
                         ProxyMessageIds.FetchRequestId,

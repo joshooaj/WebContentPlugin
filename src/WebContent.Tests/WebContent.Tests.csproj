@@ -34,6 +34,12 @@
     <Compile Include="..\WebContent\ProxyFetchFramer.cs" Link="ProxyFetchFramer.cs" />
     <Compile Include="..\WebContent\ProxyFetchCorrelation.cs" Link="ProxyFetchCorrelation.cs" />
     <Compile Include="..\WebContent\ProxyFetchTransport.cs" Link="ProxyFetchTransport.cs" />
+    <Compile Include="..\WebContent\ProxyForwardCodec.cs" Link="ProxyForwardCodec.cs" />
+    <Compile Include="..\WebContent\ProxyForwardPolicy.cs" Link="ProxyForwardPolicy.cs" />
+    <Compile Include="..\WebContent\ProxyForwardConnection.cs" Link="ProxyForwardConnection.cs" />
+    <Compile Include="..\WebContent\ProxyBrowserArguments.cs" Link="ProxyBrowserArguments.cs" />
+    <Compile Include="..\WebContent\ProxyWorkspaceProfile.cs" Link="ProxyWorkspaceProfile.cs" />
+    <Compile Include="..\WebContent\ProxyServerAllowlist.cs" Link="ProxyServerAllowlist.cs" />
     <Compile Include="..\WebContent\WorkspaceConfiguration.cs" Link="WorkspaceConfiguration.cs" />
   </ItemGroup>
 </Project>

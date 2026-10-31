@@ -34,6 +34,7 @@ namespace WebContent
         private int _emptyWorkspaceLoadCount;
         private bool _workspaceLoadSucceeded;
         private Timer _workspaceRetryTimer;
+        private DateTime _nextProxyChannelRetryUtc = DateTime.MinValue;
 
         public override Guid Id => PluginId;
 
@@ -135,10 +136,13 @@ namespace WebContent
                 case EnvironmentType.Administration:
                     // Management Client harness for the proxy-fetch exchange (#53): lets the admin
                     // config page fire a test fetch from the MC across to the Event Server.
-                    ProxyFetchClient.Active = new ProxyFetchClient();
-                    ProxyFetchClient.Active.Setup(EnvironmentManager.Instance.MasterSite == null ? null : EnvironmentManager.Instance.MasterSite.ServerId);
+                    ProvisionProxyFetchClient();
                     break;
                 case EnvironmentType.SmartClient:
+                    // Ticket #54: the Smart Client is the requester half of the proxy-fetch
+                    // exchange - the loopback forwarding proxy in each proxied workspace's browser
+                    // profile pushes allowlisted traffic to the Event Server fetcher through it.
+                    ProvisionProxyFetchClient();
                     ViewItemPlugins.Add(new WebContentViewItemPlugin());
                     RegisterWorkspaceRecoveryReceivers();
                     StartWorkspaceRetryTimer();
@@ -161,6 +165,7 @@ namespace WebContent
         {
             StopWorkspaceRetryTimer();
             UnregisterWorkspaceRecoveryReceivers();
+            BrowserManager.StopAllProxyListeners();
 
             var proxyHarness = ProxyFetchClient.Active;
             if (proxyHarness != null)
@@ -191,6 +196,47 @@ namespace WebContent
                     EnvironmentManager.Instance.ExceptionHandler(nameof(Close), ex);
                 }
             }
+        }
+
+        private static void ProvisionProxyFetchClient()
+        {
+            // Replace-then-close: the fetch seam never sees a null Active window, and the
+            // previous client's response filter is detached instead of leaking.
+            var previous = ProxyFetchClient.Active;
+            var client = new ProxyFetchClient();
+            ProxyFetchClient.Active = client;
+            client.Setup(EnvironmentManager.Instance.MasterSite == null ? null : EnvironmentManager.Instance.MasterSite.ServerId);
+            if (previous != null && !ReferenceEquals(previous, client))
+            {
+                previous.Close();
+            }
+        }
+
+        /// <summary>
+        /// Smart Client (#54): the proxy-fetch channel may not be establishable during Init while
+        /// the master site is still connecting. Re-provision it, throttled, once workspaces load.
+        /// </summary>
+        private void EnsureProxyFetchChannelReady()
+        {
+            if (EnvironmentManager.Instance.EnvironmentType != EnvironmentType.SmartClient)
+            {
+                return;
+            }
+
+            var active = ProxyFetchClient.Active;
+            if (active != null && active.IsReady)
+            {
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            if (now < _nextProxyChannelRetryUtc)
+            {
+                return;
+            }
+
+            _nextProxyChannelRetryUtc = now.AddSeconds(30);
+            ProvisionProxyFetchClient();
         }
 
         private void RegisterWorkspaceRecoveryReceivers()
@@ -312,6 +358,10 @@ namespace WebContent
                 _workspaceLoadSucceeded = true;
                 _nextWorkspaceRetryUtc = DateTime.MinValue;
             }
+
+            // Workspaces loaded: give the Smart Client's proxy-fetch channel (which Init may not
+            // have been able to establish before login completed) another chance (#54).
+            EnsureProxyFetchChannelReady();
         }
 
         private void LogWorkspaceLoadFailure(string reason, Exception error, TimeSpan retryDelay)

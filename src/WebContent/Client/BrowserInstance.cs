@@ -122,6 +122,22 @@ namespace WebContent.Client
             Id = id;
         }
 
+        /// <summary>
+        /// Ticket #54: loopback forwarding proxy bound to this browser profile. The arguments are
+        /// re-applied on every WebView recreation, the listener survives recreation, and it stops
+        /// when the browser instance is disposed.
+        /// </summary>
+        internal LoopbackProxyListener ProxyListener { get; set; }
+
+        internal string ProxyBrowserArguments { get; set; }
+
+        /// <summary>
+        /// Distinct WebView2 user-data folder for a proxied profile (its own browser process, so
+        /// the --proxy-server argument cannot collide with shared-folder WebViews); null when the
+        /// browser routes direct.
+        /// </summary>
+        internal string ProxyUserDataFolder { get; set; }
+
         public void Initialize()
         {
             lock (_sync)
@@ -363,6 +379,10 @@ namespace WebContent.Client
         {
             EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Disposing browser {Id}. ClearBrowsingDataOnExit={ClearBrowsingDataOnExit}.");
             Close(ClearBrowsingDataOnExit);
+
+            var proxyListener = ProxyListener;
+            ProxyListener = null;
+            proxyListener?.Stop();
         }
 
         public void RecreateWebView(Uri initialAddress, bool isolateInstances)
@@ -370,14 +390,20 @@ namespace WebContent.Client
             EnvironmentManager.Instance.Log(false, nameof(BrowserInstance), $"Recreating WebView for browser {Id}. isolateInstances={isolateInstances}, address={initialAddress}.");
             Close(clearData: false, disposeWebView: true);
 
-            var userDataFolder = BrowserProfileIdentity.GetUserDataFolder();
+            var userDataFolder = ProxyUserDataFolder ?? BrowserProfileIdentity.GetUserDataFolder();
+
+            // A proxied browser keeps isolation even if the setting says otherwise: its
+            // --proxy-server argument belongs to one profile only, and sharing the default
+            // profile would let the proxy (or its absence) leak across workspaces (#54).
+            var isolated = BrowserManager.ShouldIsolateProfile(isolateInstances, ProxyBrowserArguments != null);
 
             WebView = new WebView2
             {
                 CreationProperties = new CoreWebView2CreationProperties
                 {
                     UserDataFolder = userDataFolder,
-                    ProfileName = isolateInstances ? Id.ToString() : string.Empty,
+                    ProfileName = isolated ? Id.ToString() : string.Empty,
+                    AdditionalBrowserArguments = ProxyBrowserArguments,
                 },
                 Source = initialAddress ?? WebContentConfiguration.CreateNavigationUri(Strings.HomeAddress),
             };

@@ -86,6 +86,7 @@
     <Compile Include="Client\BrowserProfileIdentity.cs" />
     <Compile Include="Client\BrowserRegistry.cs" />
     <Compile Include="Client\CallbackOwnership.cs" />
+    <Compile Include="Client\LoopbackProxyListener.cs" />
     <Compile Include="Client\WebContentViewModel.cs" />
     <Compile Include="Strings.Designer.cs">
       <AutoGen>True</AutoGen>
@@ -110,6 +111,12 @@
     <Compile Include="ProxyFetchTransport.cs" />
     <Compile Include="ProxyFetchBackgroundPlugin.cs" />
     <Compile Include="ProxyFetchClient.cs" />
+    <Compile Include="ProxyForwardCodec.cs" />
+    <Compile Include="ProxyForwardPolicy.cs" />
+    <Compile Include="ProxyForwardConnection.cs" />
+    <Compile Include="ProxyBrowserArguments.cs" />
+    <Compile Include="ProxyWorkspaceProfile.cs" />
+    <Compile Include="ProxyServerAllowlist.cs" />
     <Compile Include="WorkspaceConfiguration.cs" />
     <Compile Include="WebContentPluginDefinition.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

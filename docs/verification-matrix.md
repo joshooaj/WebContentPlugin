@@ -34,6 +34,7 @@ is not evidence the plugin never ran.
 | SBOM integrity | #25 | `SbomGenerationGuardTests` (PostBuildEvent keeps a quoted absolute `-bc "$(MSBuildProjectDirectory)"` component path and `-D true`; the original bug let the CWD-relative `-bc .\` point at the build drop, so zero packages were detected) | `.\build.ps1` throws unless `output\WebContent\_manifest\spdx_2.2\manifest.spdx.json` lists referenced packages; CI Build job shows `SBOM OK` and no "no packages detected" annotation |
 | Proxy configuration roundtrip | #52 | `ProxyConfigurationTests` (definitions saved before the proxy existed mean proxy-off; toggle+targets survive the serialized roundtrip), `ProxyPolicyTests` (admin entries canonicalize to scheme/host/port origins; garbage rejected; exact-origin matching; duplicates/overlaps collapse), `WorkspacePropertiesTests` (JSON-blob and legacy paths emit canonical `ProxyEnabled`/`ProxyTargets`, hand-crafted target gibberish skipped) | See MC-9 below: admin toggle round-trips to the Smart Client properties page; invalid target save refused with log marker |
 | Proxy fetch messaging (Event Server fetcher) | #53 | `ProxyFetchContractGuardTests` (message ids never end in "Command" so SecurityLevel.Normal clients can send; payload types are plugin-namespace `[Serializable]` with public fields — the whitelist case that keeps `MessageCommunicationSettings.config` unnecessary; frame-kind/error-code constants stable), `ProxyFetchFramerTests` (meta frame Sequence=-1 then base64 chunk frames 0..N-1 with IsLastChunk; failure is a lone frame), `ProxyFetchCorrelationTests` (meta+chunks→complete body; out-of-order buffered; failure frame surfaces error code; foreign correlation ids ignored; timeout), `ProxyFetchTransportTests` (real HttpListener: status+headers captured, size cap aborts, connect/read budgets, refused connection maps to Unreachable), `EventServerLoadGuardTests` (plugin.def load env includes `Service`; the definition exposes `BackgroundPlugins` with a Service-targeted plugin and declares both fetch message ids in `PluginDefinedMessageIds`) | See ES-1 and MC-10 below: Event Server loads the fetcher, and the Management Client harness fetches a page through it with failures logged |
+| Loopback forwarding proxy (Smart Client view consumes the fetch seam) | #54 | `ProxyForwardCodecTests` (absolute-form proxied request parsing; origin-form/non-http refused; CONNECT recognized by authority target; forwarded-response rendering: status line, content headers relayed, hop-by-hop dropped, Content-Length restated from the reassembled body; refusal pages), `ProxyForwardPolicyTests` (decision table via `ProxyPolicy`: allowlisted GET forwards, other origins 403, non-GET 405, CONNECT 502, malformed 400 — address-bar navigation follows the same rule), `ProxyForwardConnectionTests` (full stream flow: forward+relay, 403 without touching the fetcher, Unreachable→502, Timeout→504), `ProxyBrowserArgumentsTests` (every http/https/ws scheme pinned to the listener, `<-loopback` bypass off — never direct), `ProxyWorkspaceProfileTests` (enabled+targets → listener allowlist; duplicates collapse; enabled-with-no-targets still proxies and allows nothing; disabled → no profile), `ProxyServerAllowlistTests` (ES refuses origins no proxied workspace allowlists, proxy-off workspaces don't count, closed before first resolve, stale-on-error keeps serving the last snapshot) | See SC-1 below: with the drop deployed on both the Event Server machine and the Smart Client machine, and the client's route to the target killed, the proxied page still loads — proof the traffic source is the server, not the client |
 
 ## Manual host checks
 
@@ -109,21 +110,65 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
    plugin's own namespace, which the messaging layer trusts by default. The escape hatch only
    becomes necessary if a payload ever references a foreign assembly type — then that type would
    have to be added to the config file next to the host executable.
+4. Response routing is unicast: the fetcher answers on `Message.ExternalMessageSourceEndPoint`,
+   which the messaging layer fills with the requester's endpoint FQID on every received message.
+   (The receive callback's `source` parameter is null for our requests — it only carries an
+   explicitly passed identity. Answering to a null destination instead filter-routes response
+   frames to EVERY client subscribed to `WebContent.Proxy.FetchResponse`: refusals time out
+   silently on the requester, fetched bodies leak to unrelated hosts, and processes without
+   WebContent.dll log `Unable to deserialize class:...ProxyFetchResponsePayload`. This was the
+   #54 live-host failure: both clients timed out despite a healthy fetcher.)
 
-### MC-10 Management Client proxy-fetch harness (#53)
+### MC-10 Management Client proxy-fetch harness (#53, hardened by #54)
 
 1. Restart Management Client with the new drop. Open a Web Content workspace definition — the
    proxy section now has a "Test proxy fetch" row (URL textbox + button).
-2. Enter a URL the **server** network can reach (e.g. `https://www.example.com/`) and click
-   "Fetch via Event Server". Expected: status line shows 200 with body size and duration within
-   a few seconds.
-3. Failure cases: enter `http://10.255.255.1/` (unreachable) → the result shows `Unreachable`
+2. Enter a URL whose origin is allowlisted on some proxy-enabled workspace (e.g.
+   `http://10.0.0.5:8080/`) and click "Fetch via Event Server". Expected: status line shows 200
+   with body size and duration within a few seconds.
+3. Failure cases: enter an origin no proxied workspace allowlists (e.g. `https://www.example.com/`)
+   → `NotAllowed` refusal, Event Server log `Proxy fetch request ... refused: The origin '...' is
+   not in the proxy allowlist of any proxied workspace.` (#54 server-side gate). Enter
+   `http://10.255.255.1/` on an allowlisted origin (unreachable) → the result shows `Unreachable`
    after the ~5 s connect budget, and the Event Server log gains `Proxy fetch failed
    (code=Unreachable, target=...)`. Enter `not a url` → `BadRequest` refusal logged as
    `Proxy fetch request ... refused: the url was not an absolute http(s) uri`. Successes are
    deliberately not logged (fetches become high-frequency once views use the proxy).
 4. If the Event Server has no plugin loaded, the harness shows the not-connected message without
    sending anything.
+
+### SC-1 End-to-end proxied page load (#54)
+
+Requires the drop deployed on BOTH machines (Event Server machine + Smart Client machine per
+`AGENTS.md`) and a target device that the Smart Client machine can reach (a monitored-segment
+device or any http page — https is refused by design, see below).
+
+1. In Management Client, enable the proxy on a workspace and allowlist the target origin in
+   http form (e.g. `http://10.0.0.5:8080` — https targets would need CONNECT tunnels, which this
+   forwarder deliberately refuses). Save; log in to Smart Client and open the workspace. A proxy
+   toggle made mid-session is reconciled when the workspace tab is reopened (the retained browser
+   is rewired and its WebView recreated — expected log: `rewired to loopback listener` or
+   `rewired to direct routing`).
+2. Expected Smart Client log markers (MIPLog.txt): `Proxied browser <id>: loopback listener on
+   127.0.0.1:<port>, N allowlisted target(s)`. The proxied profile gets its own WebView2
+   user-data folder (`...\proxied-<id>`) and is isolated even when the isolate checkbox is off:
+   one browser process is shared per user-data folder, and the `--proxy-server` argument must not
+   collide with other workspaces' WebViews.
+3. Expected: the home page renders, and its images/CSS load — subresources go through the same
+   listener. Then block the client machine's route to the target (`New-NetFirewallRule` block,
+   or pull the client off that segment). Reload: the page MUST still render, while a direct
+   `Invoke-WebRequest http://10.0.0.5:8080/` from the client machine now fails. That asymmetry
+   is the proof the traffic originates on the Event Server machine.
+4. Address-bar navigation to a NON-allowlisted origin in the proxied workspace shows the proxy's
+   403 page ("not in the workspace proxy allowlist"), and no request leaves for it (the fetcher
+   is never asked). Navigation to an https:// origin shows the 502 CONNECT-refusal page — https
+   is never taken direct. A POST/HTML form submit shows the 405 page.
+5. Event Server `Logs\MIP.log` during 3: successes are silent; failure cases (4) log the
+   refusal/`Proxy fetch failed` markers from ES-1/MC-10.
+6. Remove the view item from the layout, or exit the Smart Client: the listener stops with the
+   browser (`Proxy listener` log entries only on faults); `netstat -an | findstr <port>` shows
+   nothing listening afterwards. (A mere close of the view tab keeps a background-retained
+   browser — and its listener — alive for re-attach; that is existing browser lifecycle behavior.)
 
 ## Known high-risk regressions → pinned by
 
@@ -141,6 +186,8 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
 | Inconsistent proxy-target canonicalization between admin and runtime flows (#52) | `ProxyPolicyTests` + `WorkspacePropertiesTests` (shared `ProxyPolicy` canonical form in both save and Build paths) |
 | Fetch message ids renamed to something ending in "Command", or payloads moved to a non-whitelisted type, silently breaking SecurityLevel.Normal clients or deserialization (#53) | `ProxyFetchContractGuardTests` (id-suffix + serializability/whitelist pins), ES-1 |
 | Chunk framer or correlation reassembler losing frames/order so the client sees truncated bodies (#53) | `ProxyFetchFramerTests`, `ProxyFetchCorrelationTests`, `ProxyFetchTransportTests` |
+| Proxied workspace silently reaching targets direct, or driving the ES fetcher at arbitrary origins (#54) | `ProxyForwardPolicyTests` (403/405/502 table), `ProxyBrowserArgumentsTests` (no scheme falls back to direct), `ProxyWorkspaceProfileTests` (enabled always proxies), `ProxyServerAllowlistTests` (ES-side union gate, closed before first resolve), SC-1 |
+| Reassembled body framed with the target's stale Content-Length or hop-by-hop headers, corrupting the rendered page (#54) | `ProxyForwardCodecTests` (Content-Length restated, hop-by-hop dropped) |
 
 ## Scope notes (deliberate)
 
@@ -149,4 +196,4 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
   ever refactored, extract the policy into a pure class first and move MC-4's backoff
   assertions into the suite.
 - WebView2/Smart Client UI behavior (actual page render, WPF address-bar visuals) cannot be
-  unit-tested at the pure seams; MC-1–MC-10 (plus ES-1) are the release gate for those.
+  unit-tested at the pure seams; MC-1–MC-10 (plus ES-1 and SC-1) are the release gate for those.

@@ -32,6 +32,7 @@ namespace WebContent
         private MessageCommunication _messageCommunication;
         private object _requestFilterRegistration;
         private SemaphoreSlim _fetchSlots;
+        private ProxyServerAllowlist _allowlist;
 
         public override Guid Id => PluginId;
 
@@ -54,6 +55,13 @@ namespace WebContent
                 _requestFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
                     OnProxyFetchRequest,
                     new CommunicationIdFilter(ProxyMessageIds.FetchRequestId));
+
+                // Ticket #54 server-side hardening: the fetcher only reaches origins some proxied
+                // workspace actually allowlists, so the server network cannot be driven at
+                // arbitrary targets by a crafted request.
+                _allowlist = new ProxyServerAllowlist(
+                    ResolveWorkspacePropertySnapshots,
+                    message => EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), message));
 
                 EnvironmentManager.Instance.Log(
                     false,
@@ -100,9 +108,19 @@ namespace WebContent
         /// <summary>
         /// Message-receiver thread: keep it non-blocking. The fetch runs on the thread pool and
         /// the response stream is pushed back to the requester's endpoint FQID.
+        ///
+        /// The requester endpoint comes from Message.ExternalMessageSourceEndPoint, which the MIP
+        /// messaging layer fills on every received message with the sender's endpoint FQID (the
+        /// callback's source parameter only carries an explicitly passed sender identity, which
+        /// ProxyFetchClient does not pass). Replying to that endpoint unicasts the response frames
+        /// to the requesting client; replying with a null destination would filter-route them to
+        /// every client subscribed to the response message id - leaking page bodies into unrelated
+        /// hosts and letting one client's correlation ids swallow another's frames.
         /// </summary>
         private object OnProxyFetchRequest(Message message, FQID destination, FQID source)
         {
+            var requester = ResolveRequester(source, message);
+
             var payload = message?.Data as ProxyFetchRequestPayload;
             if (payload == null || string.IsNullOrEmpty(payload.CorrelationId) || string.IsNullOrEmpty(payload.Url))
             {
@@ -114,7 +132,15 @@ namespace WebContent
             if (!Uri.TryCreate(payload.Url, UriKind.Absolute, out target) || !ProxyPolicy.IsHttpUri(target))
             {
                 LogRefused(payload, "the url was not an absolute http(s) uri");
-                TransmitFailure(payload.CorrelationId, source, ProxyFetchErrorCodes.BadRequest, "The proxy-fetch url must be an absolute http(s) uri.");
+                TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.BadRequest, "The proxy-fetch url must be an absolute http(s) uri.");
+                return null;
+            }
+
+            string allowReason = null;
+            if (_allowlist == null || !_allowlist.IsAllowed(target, out allowReason))
+            {
+                LogRefused(payload, allowReason);
+                TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.NotAllowed, allowReason);
                 return null;
             }
 
@@ -122,7 +148,7 @@ namespace WebContent
             if (communication == null)
             {
                 LogRefused(payload, "the fetcher is not connected to the Event Server");
-                TransmitFailure(payload.CorrelationId, source, ProxyFetchErrorCodes.Error, "The proxy fetcher is not ready.");
+                TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.Error, "The proxy fetcher is not ready.");
                 return null;
             }
 
@@ -137,13 +163,13 @@ namespace WebContent
                 if (!await slots.WaitAsync(FetchSlotWait))
                 {
                     LogRefused(payload, "the fetcher queue was saturated");
-                    TransmitFailure(payload.CorrelationId, source, ProxyFetchErrorCodes.Error, "The proxy fetcher is saturated; try again later.");
+                    TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.Error, "The proxy fetcher is saturated; try again later.");
                     return;
                 }
 
                 try
                 {
-                    await ServeFetchAsync(communication, payload, target, source);
+                    await ServeFetchAsync(communication, payload, target, requester);
                 }
                 finally
                 {
@@ -171,6 +197,18 @@ namespace WebContent
                         $"Proxy fetch failed (code={result.ErrorCode}, target={ProxyPolicy.CanonicalOrigin(target)}): {result.ErrorMessage}");
                 }
 
+                if (requesterFqid == null)
+                {
+                    // Nowhere to answer: broadcasting fetched page bodies to every messaging
+                    // client is a leak, not a fallback. The requester's own deadline closes its
+                    // exchange.
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(ProxyFetchBackgroundPlugin),
+                        $"Proxy fetch response for {payload.CorrelationId} not sent: the request carried no requester endpoint.");
+                    return;
+                }
+
                 foreach (var frame in ProxyFetchFramer.Frame(payload.CorrelationId, result, limits.ChunkSizeBytes))
                 {
                     communication.TransmitMessage(new Message(ProxyMessageIds.FetchResponseId, frame), requesterFqid, null, null);
@@ -194,9 +232,54 @@ namespace WebContent
             }
         }
 
+        /// <summary>
+        /// The endpoint to answer a request on. The explicit source FQID (rarely sent) wins; the
+        /// platform-filled ExternalMessageSourceEndPoint is the normal answer path. When neither
+        /// exists there is no unicast route, and responses must not fall back to a broadcast.
+        /// </summary>
+        private static FQID ResolveRequester(FQID source, Message message)
+        {
+            var requester = source ?? message?.ExternalMessageSourceEndPoint;
+            if (requester == null)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    "Proxy fetch request carried no requester endpoint; any response for it will be logged rather than sent.");
+            }
+
+            return requester;
+        }
+
+        /// <summary>
+        /// Snapshot of every workspace item's property dictionary for the allowlist union. The
+        /// same Configuration lookup the Smart Client workspace provisioning uses; if it fails,
+        /// the allowlist keeps its last-known-good gate (and stays closed before its first success).
+        /// </summary>
+        private static System.Collections.Generic.IEnumerable<Dictionary<string, string>> ResolveWorkspacePropertySnapshots()
+        {
+            if (!Admin.WorkspaceItemManager.TryGetWorkspaces(out var workspaces, out var error))
+            {
+                throw error ?? new InvalidOperationException("Workspace configuration lookup failed.");
+            }
+
+            var snapshots = new List<Dictionary<string, string>>();
+            foreach (var workspace in workspaces)
+            {
+                if (workspace != null && workspace.Properties != null)
+                {
+                    snapshots.Add(workspace.Properties);
+                }
+            }
+
+            return snapshots;
+        }
+
         private void TransmitFailure(string correlationId, FQID requester, string errorCode, string message)
         {
             var communication = _messageCommunication;
+            // A null requester is never broadcast: the condition is already logged once by
+            // ResolveRequester, and the client-side deadline closes the exchange.
             if (communication == null || requester == null)
             {
                 return;

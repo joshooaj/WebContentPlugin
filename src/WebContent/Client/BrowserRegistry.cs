@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 
 namespace WebContent.Client
 {
@@ -34,6 +35,12 @@ namespace WebContent.Client
         public bool TryGet(Guid id, out T instance)
         {
             return _instances.TryGetValue(id, out instance);
+        }
+
+        /// <summary>Copy of the currently tracked instances (teardown sweeps, e.g. stopping proxy listeners).</summary>
+        public List<T> Snapshot()
+        {
+            return new List<T>(_instances.Values);
         }
 
         public T GetOrCreate(Guid id, Func<Guid, T> factory)

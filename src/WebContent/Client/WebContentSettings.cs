@@ -200,6 +200,12 @@ namespace WebContent.Client
 
         public bool ProxyEnabled => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(ProxyEnabled));
 
+        /// <summary>
+        /// Raw canonical comma-separated proxy targets property (#52 seeding). The listener
+        /// consumes this through <see cref="ProxyWorkspaceProfile.TryCreate"/>.
+        /// </summary>
+        public string ProxyTargetsProperty => WebContentConfiguration.GetString(GetProperty, string.Empty, "ProxyTargets");
+
         public string ProxyDisplay
         {
             get
