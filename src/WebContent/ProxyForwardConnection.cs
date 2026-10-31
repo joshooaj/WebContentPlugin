@@ -112,7 +112,7 @@ namespace WebContent
 
                     try
                     {
-                        await ServeTunnelRequestsAsync(tunnel, output, canonicalTargets, request.Uri, fetch, log);
+                        await ServeTunnelRequestsAsync(tunnel, canonicalTargets, request.Uri, fetch, log);
                     }
                     finally
                     {
@@ -135,11 +135,13 @@ namespace WebContent
         /// <summary>
         /// The request loop inside one terminated tunnel (#56): Chromium pipelines several inner
         /// requests over a single TLS connection, each origin-form against the tunnel origin that
-        /// the allowlist already admitted when the tunnel was accepted.
+        /// the allowlist already admitted when the tunnel was accepted. After the CONNECT 200 the
+        /// browser only reads TLS records, so every inner answer goes back through the tunnel
+        /// stream - writing plaintext to the raw socket makes the browser fail the tunnel with a
+        /// decryption error (live repro, #56).
         /// </summary>
         private static async Task ServeTunnelRequestsAsync(
             Stream tunnel,
-            Stream output,
             System.Collections.Generic.IEnumerable<string> canonicalTargets,
             Uri tunnelOrigin,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
@@ -163,12 +165,12 @@ namespace WebContent
                     case ProxyForwardDisposition.BadRequest:
                         // A head this broken leaves the stream position untrustworthy: answer and close.
                         log(rejectReason);
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", rejectReason));
+                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", rejectReason));
                         return;
 
                     case ProxyForwardDisposition.MethodNotAllowed:
                         log(rejectReason);
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(405, "Method Not Allowed", rejectReason));
+                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(405, "Method Not Allowed", rejectReason));
                         pending = head.Leftover;
                         continue;
 
@@ -176,12 +178,12 @@ namespace WebContent
                         // OriginNotAllowed inside a tunnel means the inner target drifted off the
                         // accepted origin (codec already blocks that) - refuse and keep the tunnel.
                         log(rejectReason ?? $"In-tunnel request '{request?.RawTarget}' refused.");
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", rejectReason ?? "The in-tunnel request was refused."));
+                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", rejectReason ?? "The in-tunnel request was refused."));
                         pending = head.Leftover;
                         continue;
                 }
 
-                var remainder = await ServeForwardedRequestAsync(request, head.Leftover, tunnel, output, fetch, log);
+                var remainder = await ServeForwardedRequestAsync(request, head.Leftover, tunnel, tunnel, fetch, log);
                 if (remainder == null)
                 {
                     return;

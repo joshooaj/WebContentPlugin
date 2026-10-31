@@ -386,6 +386,70 @@ namespace WebContent.Tests
             Assert.False(tunnel.CanRead);
         }
 
+        [Fact]
+        public async Task WritesInnerTunnelResponsesIntoTheTunnelNotOntoTheRawSocket()
+        {
+            // A terminated tunnel is a SEPARATE duplex stream in production (the SslStream
+            // wrapper): after the CONNECT 200 the browser only understands TLS records, so the
+            // inner responses must be written into the tunnel. Writing plaintext onto the raw
+            // socket made the live browser fail the tunnel with a TLS decryption error (#56).
+            var inner = new DuplexStream(
+                new MemoryStream(Encoding.UTF8.GetBytes("GET /live HTTP/1.1\r\nHost: cam1.test:8443\r\n\r\n")),
+                new MemoryStream());
+
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes("CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input,
+                    output,
+                    new[] { "https://cam1.test:8443" },
+                    query => Task.FromResult(new ProxyFetchResult
+                    {
+                        Success = true,
+                        StatusCode = 200,
+                        StatusText = "OK",
+                        Body = Encoding.UTF8.GetBytes("tunnel-body"),
+                    }),
+                    message => { },
+                    (stream, leftover, tunnelOrigin) => Task.FromResult<Stream>(inner));
+
+                var raw = Encoding.UTF8.GetString(output.ToArray());
+                var inside = Encoding.UTF8.GetString(inner.WrittenBuffer.ToArray());
+
+                Assert.Equal("HTTP/1.1 200 Connection established\r\n\r\n", raw);
+                Assert.Contains("HTTP/1.1 200 OK\r\n", inside);
+                Assert.Contains("tunnel-body", inside);
+            }
+        }
+
+        /// <summary>Read side and write side are different streams, like a real SslStream tunnel.</summary>
+        private sealed class DuplexStream : Stream
+        {
+            private readonly Stream _readSide;
+            private readonly MemoryStream _writeSide;
+
+            internal DuplexStream(Stream readSide, MemoryStream writeSide)
+            {
+                _readSide = readSide;
+                _writeSide = writeSide;
+            }
+
+            internal MemoryStream WrittenBuffer => _writeSide;
+
+            public override bool CanRead => _readSide.CanRead;
+            public override bool CanSeek => false;
+            public override bool CanWrite => true;
+            public override long Length => _writeSide.Length;
+            public override long Position { get => _writeSide.Position; set => throw new NotSupportedException(); }
+
+            public override void Flush() => _writeSide.Flush();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override int Read(byte[] buffer, int offset, int count) => _readSide.Read(buffer, offset, count);
+            public override void Write(byte[] buffer, int offset, int count) => _writeSide.Write(buffer, offset, count);
+        }
+
         private static async Task<string> Handle(
             string request,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
@@ -404,17 +468,18 @@ namespace WebContent.Tests
             string[] allowlist,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch)
         {
+            MemoryStream combined = null;
             using (var input = new MemoryStream(Encoding.UTF8.GetBytes(request)))
             using (var output = new MemoryStream())
             {
                 // Identity unwrap: the CONNECT head's pipelined leftover plus the rest of the
                 // stream becomes the decrypted tunnel stream - exactly the rebase the SslStream
                 // wrapper performs in production (the ClientHello can ride the CONNECT segment).
+                combined = new MemoryStream();
                 await ProxyForwardConnection.HandleAsync(
                     input, output, allowlist, fetch, message => { },
                     (stream, leftover, tunnelOrigin) =>
                     {
-                        var combined = new MemoryStream();
                         if (leftover != null && leftover.Length > 0)
                         {
                             combined.Write(leftover, 0, leftover.Length);
@@ -430,7 +495,11 @@ namespace WebContent.Tests
                         combined.Position = 0;
                         return Task.FromResult<Stream>(combined);
                     });
-                return Encoding.UTF8.GetString(output.ToArray());
+
+                // The raw socket carries the CONNECT handshake; inner responses live on the
+                // tunnel side (this identity seam folds them into the same buffer behind the
+                // echoed inner requests).
+                return Encoding.UTF8.GetString(output.ToArray()) + Encoding.UTF8.GetString(combined.ToArray());
             }
         }
 
