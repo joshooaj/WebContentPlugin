@@ -210,9 +210,19 @@ simultaneous.
    Server side (`UseCookies`/`AllowAutoRedirect` off — pinned by `ProxyFetchTransportTests`).
    A login form that submits with a chunked body (modern `fetch()` + `ReadableStream` style —
    ordinary forms and XHR always carry Content-Length) answers 411 "Length Required" by design.
-4. Automatable harness: extend `ScProxyFetchProbeTests` (probe category) — artifacts under
+4. Automatable harness: `ScProxyLoginProbeTests` (probe category) — it allowlists its own
+   login-server origin through Management Client, drives the login via CDP, and writes
+   `sc-login-probe-results.txt` (+ dashboard screenshot) under
    `%TEMP%\webcontent-sc-proxy-probe\<run>`; the probe goes red when the dashboard is not
    reached or the cookie round-trip fails.
+
+   Record (2026-10-31, drop `6C373E4D…FFE1` on both machines, target `http://172.16.128.210:18123`
+   served by the probe's vendor-style login server): pass — login form POST relayed through
+   messaging with its body (`server: POST /login body=35B`), the 302 + `Set-Cookie` round-tripped
+   (browser shows `title='ACME Portal - Dashboard'`, `SIGNED IN`, `cookieEcho='COOKIE-HEADER
+   [[SID=…]]'` — never the form again), and the page's background `fetch()` XHR reached the target
+   with the session cookie attached (`server: GET /api/status cookie='SID=…'`, rendered as
+   `XHR-OK status=online cookie='SID=…'`). Full probe run ≈1 min.
 
 ## Known high-risk regressions → pinned by
 
