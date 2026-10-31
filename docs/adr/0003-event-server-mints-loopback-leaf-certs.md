@@ -33,9 +33,12 @@ Split the CA's two halves by trust boundary:
 
 1. **One long-lived CA per deployment, created on the Event Server.** The Service-environment
    background plugin loads it from `LocalMachine\Personal` by common name on start and creates it
-   on first run (the Event Server service runs as LocalSystem, which may write the machine store;
-   the CAPI key lives in a fixed machine key container readable only machine-privileged accounts).
-   Client machines never hold the CA private key.
+   on first run when the service account can write the machine store. Live installs run the Event
+   Server service as NETWORK SERVICE, which cannot create it; an administrator then runs
+   scripts/provision-event-server-authority.ps1 once, elevated, which creates the CA, grants the
+   service account read access to its private key, and exports the certificate for client import.
+   The key lives in a fixed machine key container readable only by machine-privileged accounts
+   plus that granted service read access. Client machines never hold the CA private key.
 2. **Leaves are minted by the Event Server on request.** A new message pair
    (`WebContent.Proxy.LeafRequest` / `WebContent.Proxy.LeafResponse`, same JSON-string-on-the-wire
    rule as #54) carries the client's base64 **SubjectPublicKeyInfo**: the client generates the

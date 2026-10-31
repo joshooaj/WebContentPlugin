@@ -70,16 +70,25 @@ A workspace proxy allowlist may include `https://` targets (optionally flagged
 To make those pages render without browser certificate errors, the plugin uses one long-lived certificate
 authority per deployment (see `docs/adr/0003-event-server-mints-loopback-leaf-certs.md`):
 
-1. **The Event Server creates the CA by itself.** The plugin deployed on the Event Server creates a CA
-   certificate named `XProtect WebContent Plugin Loopback Proxy` in `LocalMachine\Personal` the first time a
-   proxied HTTPS page needs it. Its private key never leaves that machine. (If the Event Server service does
-   not run as LocalSystem, grant it write access to that store, or import a CA you provisioned yourself.)
-2. **Each Smart Client machine trusts the CA once, elevated.** Export the CA certificate from the Event
-   Server machine (`Get-ChildItem Cert:\LocalMachine\My | Where Subject -match 'Loopback Proxy' |
-   Export-Certificate -FilePath C:\webcontent-proxy-ca.cer -Type CERT`) and on every Smart Client machine run:
+1. **Create the CA once on the Event Server machine, elevated.** The Event Server service runs as a
+   restricted built-in account (`NT AUTHORITY\NETWORK SERVICE` on current Milestone installs) that cannot
+   create the CA itself. Run this once from an elevated Windows PowerShell 5.1 session on the Event Server
+   machine, after the plugin is deployed there:
 
    ```powershell
-   Import-Certificate -FilePath C:\webcontent-proxy-ca.cer -CertStoreLocation Cert:\LocalMachine\Root
+   powershell -ExecutionPolicy Bypass -File scripts/provision-event-server-authority.ps1
+   ```
+
+   It creates the CA certificate named `XProtect WebContent Plugin Loopback Proxy` in the LocalMachine
+   Personal store, grants the service account read access to the private key so leaf minting works at
+   runtime, and exports the certificate to `C:/Users/Public/WebContent-Proxy-Authority.cer`. The private
+   key never leaves that machine.
+2. **Each Smart Client machine trusts the CA once, elevated.** Copy the exported
+   `WebContent-Proxy-Authority.cer` from the Event Server machine's `C:/Users/Public` folder, then on every
+   Smart Client machine run:
+
+   ```powershell
+   Import-Certificate -FilePath C:\Users\Public\WebContent-Proxy-Authority.cer -CertStoreLocation Cert:\LocalMachine\Root
    ```
 
    Until that import is done, proxied HTTPS pages load but show a browser certificate error — the plugin
