@@ -62,6 +62,27 @@ namespace WebContent
         /// any proxied workspace, so the Event Server refuses to reach it.
         /// </summary>
         internal const string NotAllowed = "NotAllowed";
+
+        /// <summary>
+        /// Ticket #56: the https target's certificate failed chain validation and the target has
+        /// no per-target "accept untrusted certificate" override, so the fetch is refused.
+        /// </summary>
+        internal const string TlsValidation = "TlsValidation";
+    }
+
+    /// <summary>
+    /// How the Event Server fetcher treats TLS certificate validation on the https leg to the
+    /// target (#56). The caller decides per request from the target's allowlist entry —
+    /// AcceptUntrusted for exactly the origin whose entry carries the admin override,
+    /// ValidateNormally for everything else. Never a process-wide or browser-wide bypass.
+    /// </summary>
+    internal enum ProxyFetchTlsMode
+    {
+        /// <summary>Full chain validation; an untrusted certificate fails with TlsValidation.</summary>
+        ValidateNormally,
+
+        /// <summary>Validation errors accepted for this one already-allowlisted target.</summary>
+        AcceptUntrusted,
     }
 
     /// <summary>

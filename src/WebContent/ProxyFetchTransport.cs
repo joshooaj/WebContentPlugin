@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 
 namespace WebContent
@@ -23,11 +25,22 @@ namespace WebContent
     internal sealed class ProxyHttpFetcher
     {
         /// <summary>
-        /// Replay the request carried by the query under the given limits. Never throws: transport
-        /// outcomes are reported in
+        /// Replay the request carried by the query under the given limits, validating the target's
+        /// TLS certificate normally (#56 default). Never throws: transport outcomes are reported in
         /// the returned ProxyFetchResult so framing/logging can react to each failure class.
         /// </summary>
-        internal async Task<ProxyFetchResult> FetchAsync(ProxyFetchQuery query, ProxyFetchLimits limits)
+        internal Task<ProxyFetchResult> FetchAsync(ProxyFetchQuery query, ProxyFetchLimits limits)
+        {
+            return FetchAsync(query, limits, ProxyFetchTlsMode.ValidateNormally);
+        }
+
+        /// <summary>
+        /// Replay the request with the given TLS decision for the https leg to the target (#56).
+        /// AcceptUntrusted comes from the target's own allowlist entry — the caller scopes it per
+        /// origin — and is applied ONLY to this request's own callback, never to the process-wide
+        /// ServicePointManager and never to any other target.
+        /// </summary>
+        internal async Task<ProxyFetchResult> FetchAsync(ProxyFetchQuery query, ProxyFetchLimits limits, ProxyFetchTlsMode tlsMode)
         {
             var target = query == null ? null : query.Uri;
             if (!ProxyPolicy.IsHttpUri(target))
@@ -38,6 +51,16 @@ namespace WebContent
             var request = (HttpWebRequest)WebRequest.Create(target);
             request.Method = string.IsNullOrWhiteSpace(query.Method) ? "GET" : query.Method.Trim().ToUpperInvariant();
             request.UserAgent = "CascadiaWebContentPlugin/MIP-proxy-fetcher";
+
+            // #56: certificate validation on the target leg. Default is the runtime's full chain
+            // validation; a callback that always returns false when it rejects records WHY the
+            // fetch died (the exception class differs across runtimes, the callback firing does
+            // not), so the refusal can name the certificate instead of a vague transport error.
+            var tlsDecision = new TlsDecision(tlsMode);
+            if (target.Scheme == Uri.UriSchemeHttps)
+            {
+                request.ServerCertificateValidationCallback = tlsDecision.Evaluate;
+            }
 
             // #55 passthrough rules: the browser owns the session. A 3xx and its Set-Cookie values
             // relay back to the browser instead of being followed or stored here, so no target
@@ -85,7 +108,7 @@ namespace WebContent
 
             if (query.Body != null && query.Body.Length > 0)
             {
-                var writeFailure = await WriteRequestBodyAsync(request, query.Body, target, limits);
+                var writeFailure = await WriteRequestBodyAsync(request, query.Body, target, limits, tlsDecision);
                 if (writeFailure != null)
                 {
                     return writeFailure;
@@ -119,16 +142,31 @@ namespace WebContent
             }
             catch (WebException webException)
             {
+                if (tlsDecision.Rejected)
+                {
+                    return TlsValidationFailure(target);
+                }
+
                 return MapWebException(webException, target, limits);
             }
             catch (IOException ioException)
             {
+                if (tlsDecision.Rejected)
+                {
+                    return TlsValidationFailure(target);
+                }
+
                 // The compat stack surfaces a refused/reset connection as IOException where the
                 // .NET Framework host reports WebException(ConnectFailure).
                 return Failure(ProxyFetchErrorCodes.Unreachable, $"{ProxyPolicy.CanonicalOrigin(target)}: {ioException.Message}");
             }
             catch (Exception exception)
             {
+                if (tlsDecision.Rejected)
+                {
+                    return TlsValidationFailure(target);
+                }
+
                 try
                 {
                     request.Abort();
@@ -230,7 +268,7 @@ namespace WebContent
                 "Expect",
             };
 
-        private static async Task<ProxyFetchResult> WriteRequestBodyAsync(HttpWebRequest request, byte[] body, Uri target, ProxyFetchLimits limits)
+        private static async Task<ProxyFetchResult> WriteRequestBodyAsync(HttpWebRequest request, byte[] body, Uri target, ProxyFetchLimits limits, TlsDecision tlsDecision)
         {
             request.ContentLength = body.Length;
             try
@@ -259,10 +297,20 @@ namespace WebContent
             }
             catch (WebException webException)
             {
+                if (tlsDecision.Rejected)
+                {
+                    return TlsValidationFailure(target);
+                }
+
                 return MapWebException(webException, target, limits);
             }
             catch (Exception exception)
             {
+                if (tlsDecision.Rejected)
+                {
+                    return TlsValidationFailure(target);
+                }
+
                 return Failure(ProxyFetchErrorCodes.Error, $"{ProxyPolicy.CanonicalOrigin(target)}: request body not sent: {exception.Message}");
             }
         }
@@ -427,6 +475,48 @@ namespace WebContent
                 ErrorCode = errorCode,
                 ErrorMessage = message,
             };
+        }
+
+        /// <summary>
+        /// #56: the per-request certificate-validation decision. The callback is attached to THIS
+        /// HttpWebRequest only — ServicePointManager's process-wide callback is never touched, so a
+        /// plugin running inside the Event Server cannot weaken TLS for any other caller, and the
+        /// override stays scoped to the one allowlisted origin the caller checked. A rejecting
+        /// callback records that fact so the resulting transport exception maps to TlsValidation
+        /// no matter which exception shape the host runtime produces.
+        /// </summary>
+        private sealed class TlsDecision
+        {
+            private readonly ProxyFetchTlsMode _mode;
+            internal bool Rejected;
+
+            internal TlsDecision(ProxyFetchTlsMode mode)
+            {
+                _mode = mode;
+            }
+
+            internal bool Evaluate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+            {
+                if (_mode == ProxyFetchTlsMode.AcceptUntrusted)
+                {
+                    return true;
+                }
+
+                if (sslPolicyErrors != SslPolicyErrors.None)
+                {
+                    Rejected = true;
+                }
+
+                return sslPolicyErrors == SslPolicyErrors.None;
+            }
+        }
+
+        private static ProxyFetchResult TlsValidationFailure(Uri target)
+        {
+            var origin = ProxyPolicy.CanonicalOrigin(target);
+            return Failure(
+                ProxyFetchErrorCodes.TlsValidation,
+                $"{origin}: the TLS certificate failed validation (untrusted chain, expired, or hostname mismatch). The proxy validates target certificates and refuses this one; enable the per-target 'accept untrusted certificate' override for '{origin}' on the workspace page to relay this device.");
         }
     }
 }
