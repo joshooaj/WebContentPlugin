@@ -185,15 +185,15 @@ public sealed class LoginTestServer : IDisposable
             case ("GET", "/api/status"):
                 if (!HasValidSession(cookieHeader))
                 {
-                    await WriteAsync(stream, Page(403, "denied", "XHR-DENIED", null, contentType: "text/plain; charset=utf-8"));
+                    await WriteAsync(stream, Plain(403, "XHR-DENIED"));
                     return;
                 }
 
-                await WriteAsync(stream, Page(200, "ok", $"XHR-OK status=online cookie='{Truncate(cookieHeader, 60)}'", null, contentType: "text/plain; charset=utf-8"));
+                await WriteAsync(stream, Plain(200, $"XHR-OK status=online cookie='{Truncate(cookieHeader, 60)}'"));
                 return;
 
             default:
-                await WriteAsync(stream, Page(404, "not found", "not found", null, contentType: "text/plain; charset=utf-8"));
+                await WriteAsync(stream, Plain(404, "not found"));
                 return;
         }
     }
@@ -257,6 +257,21 @@ public sealed class LoginTestServer : IDisposable
             head.Append($"Location: {redirectLocation}\r\n");
         }
 
+        head.Append($"Content-Length: {body.Length}\r\n");
+        head.Append("Connection: close\r\n\r\n");
+        return Encoding.UTF8.GetBytes(head.ToString()).Concat(body).ToArray();
+    }
+
+    /// <summary>
+    /// Raw text/plain response (no HTML document shell): an XHR endpoint's body IS its payload,
+    /// so the dashboard can assert the exact text the fetcher carried back.
+    /// </summary>
+    private static byte[] Plain(int status, string text)
+    {
+        var body = Encoding.UTF8.GetBytes(text);
+        var head = new StringBuilder();
+        head.Append($"HTTP/1.1 {status} {(status == 200 ? "OK" : status == 403 ? "Forbidden" : "Not Found")}\r\n");
+        head.Append("Content-Type: text/plain; charset=utf-8\r\n");
         head.Append($"Content-Length: {body.Length}\r\n");
         head.Append("Connection: close\r\n\r\n");
         return Encoding.UTF8.GetBytes(head.ToString()).Concat(body).ToArray();
