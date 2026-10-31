@@ -849,16 +849,25 @@ public static class ManagementClientUi
             {
                 try
                 {
-                    var name = window.Name ?? string.Empty;
-                    var cls = window.ClassName ?? string.Empty;
-                    if (name.Contains("Management Client", StringComparison.OrdinalIgnoreCase)) continue;
-                    var isModal = cls.Contains("#32770")
-                                  || name.Contains("save changes", StringComparison.OrdinalIgnoreCase)
-                                  || name.Contains("confirm", StringComparison.OrdinalIgnoreCase)
-                                  || name.Contains("warning", StringComparison.OrdinalIgnoreCase);
-                    if (!isModal) continue;
+                    // The save-changes confirmation carries the SAME title as the main window
+                    // ("Milestone XProtect Management Client <version>"), so titles cannot tell
+                    // them apart; structure can: the main window has the application AutomationId,
+                    // and a confirmation is any other window pairing an affirmative button with a
+                    // negative one (Yes/No/Cancel) or wearing the dialog window class.
+                    if (string.Equals(window.AutomationId ?? string.Empty, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
 
-                    var buttons = window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button));
+                    var cls = window.ClassName ?? string.Empty;
+                    var buttons = window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).ToList();
+                    if (buttons.Count == 0) continue;
+
+                    var hasNegative = buttons.Any(b =>
+                        string.Equals((b.Name ?? string.Empty).Trim(), "No", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals((b.Name ?? string.Empty).Trim(), "Cancel", StringComparison.OrdinalIgnoreCase));
+                    if (!cls.Contains("#32770") && !hasNegative) continue;
+
                     foreach (var wanted in new[] { "Yes", "Save", "OK" })
                     {
                         var hit = buttons.FirstOrDefault(b =>
