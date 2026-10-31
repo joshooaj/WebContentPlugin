@@ -63,6 +63,31 @@ get a code signing certificate setup.
 The installer is very simple and has no options. Acknowledge the license, and then it will install the Microsoft Edge
 WebView2 Runtime if necessary, and place the plugin files in `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\`.
 
+### HTTPS targets: deployment certificate authority (one-time setup)
+
+A workspace proxy allowlist may include `https://` targets (optionally flagged
+`accept-untrusted` to tolerate a device's self-signed certificate — the flag is per target, never global).
+To make those pages render without browser certificate errors, the plugin uses one long-lived certificate
+authority per deployment (see `docs/adr/0003-event-server-mints-loopback-leaf-certs.md`):
+
+1. **The Event Server creates the CA by itself.** The plugin deployed on the Event Server creates a CA
+   certificate named `XProtect WebContent Plugin Loopback Proxy` in `LocalMachine\Personal` the first time a
+   proxied HTTPS page needs it. Its private key never leaves that machine. (If the Event Server service does
+   not run as LocalSystem, grant it write access to that store, or import a CA you provisioned yourself.)
+2. **Each Smart Client machine trusts the CA once, elevated.** Export the CA certificate from the Event
+   Server machine (`Get-ChildItem Cert:\LocalMachine\My | Where Subject -match 'Loopback Proxy' |
+   Export-Certificate -FilePath C:\webcontent-proxy-ca.cer -Type CERT`) and on every Smart Client machine run:
+
+   ```powershell
+   Import-Certificate -FilePath C:\webcontent-proxy-ca.cer -CertStoreLocation Cert:\LocalMachine\Root
+   ```
+
+   Until that import is done, proxied HTTPS pages load but show a browser certificate error — the plugin
+   never bypasses certificate validation on its own, and its log names this exact import step.
+
+To remove the plugin completely, also delete the CA: from `LocalMachine\My` on the Event Server machine
+(`Remove-Item Cert:\LocalMachine\My\<thumbprint>`) and from `LocalMachine\Root` on each Smart Client machine.
+
 ### Add Web Content to a view
 
 1. Open a new Smart Client instance (plugins are only discovered during startup) and login.

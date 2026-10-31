@@ -35,6 +35,7 @@ is not evidence the plugin never ran.
 | Proxy configuration roundtrip | #52 | `ProxyConfigurationTests` (definitions saved before the proxy existed mean proxy-off; toggle+targets survive the serialized roundtrip), `ProxyPolicyTests` (admin entries canonicalize to scheme/host/port origins; garbage rejected; exact-origin matching; duplicates/overlaps collapse), `WorkspacePropertiesTests` (JSON-blob and legacy paths emit canonical `ProxyEnabled`/`ProxyTargets`, hand-crafted target gibberish skipped) | See MC-9 below: admin toggle round-trips to the Smart Client properties page; invalid target save refused with log marker |
 | Proxy fetch messaging (Event Server fetcher) | #53 | `ProxyFetchContractGuardTests` (message ids never end in "Command" so SecurityLevel.Normal clients can send; payload types stay plugin-namespace `[Serializable]` with public fields — wire shape itself is pinned by `ProxyFetchWireCodecTests` since #54; frame-kind/error-code constants stable), `ProxyFetchFramerTests` (meta frame Sequence=-1 then base64 chunk frames 0..N-1 with IsLastChunk; failure is a lone frame), `ProxyFetchCorrelationTests` (meta+chunks→complete body; out-of-order buffered; failure frame surfaces error code; foreign correlation ids ignored; timeout), `ProxyFetchTransportTests` (real HttpListener: status+headers captured, size cap aborts, connect/read budgets, refused connection maps to Unreachable; #55: method/form body/Cookie+custom headers replayed at the target, 302+Set-Cookie relayed instead of followed, repeated Set-Cookie values captured separately), `EventServerLoadGuardTests` (plugin.def load env includes `Service`; the definition exposes `BackgroundPlugins` with a Service-targeted plugin and declares both fetch message ids in `PluginDefinedMessageIds`) | See ES-1 and MC-10 below: Event Server loads the fetcher, and the Management Client harness fetches a page through it with failures logged |
 | Loopback forwarding proxy (Smart Client view consumes the fetch seam) | #54, write verbs #55 | `ProxyForwardCodecTests` (absolute-form proxied request parsing; origin-form/non-http refused; CONNECT recognized by authority target; outbound request-header filter keeps Cookie/Authorization/custom headers and drops hop-by-hop+Host+Content-Length; forwarded-response rendering: status line, content headers relayed, hop-by-hop dropped, Content-Length restated from the reassembled body; refusal pages), `ProxyForwardPolicyTests` (decision table via `ProxyPolicy`: allowlisted GET/HEAD/POST/PUT/DELETE/OPTIONS/PATCH forward, other origins 403, TRACE/junk verbs 405, CONNECT 502, malformed 400 — address-bar navigation follows the same rule), `ProxyForwardConnectionTests` (full stream flow: forward+relay, POST method/form body/Cookie to the fetch seam, 302+Set-Cookie relayed back, repeated Set-Cookie rendered as separate lines, 403 without touching the fetcher, oversized declared body 413, chunked body 411, Unreachable→502, Timeout→504), `ProxyBrowserArgumentsTests` (every http/https/ws scheme pinned to the listener, `<-loopback` bypass off — never direct), `ProxyWorkspaceProfileTests` (enabled+targets → listener allowlist; duplicates collapse; enabled-with-no-targets still proxies and allows nothing; disabled → no profile), `ProxyServerAllowlistTests` (ES refuses origins no proxied workspace allowlists, proxy-off workspaces don't count, closed before first resolve, stale-on-error keeps serving the last snapshot) | See SC-1 below: with the drop deployed on both the Event Server machine and the Smart Client machine, and the client's route to the target killed, the proxied page still loads — proof the traffic source is the server, not the client. See SC-2: a login POST round-trips with its session cookie in a live Smart Client session |
+| HTTPS targets: target TLS verdict, per-target override, loopback leaf mint (ADR-0002/0003) | #56 | `ProxyFetchTlsDecisionTests` (https targets get full chain validation on the Event Server; an untrusted chain refuses with `TlsValidation` unless the allowlist entry carries the per-target accept-untrusted override — never a global bypass), `ProxyPolicyTests` (target-line grammar: `https://host:port accept-untrusted` in either token order; unknown tokens or a second origin reject the whole entry), `ProxyServerAllowlistTests` (the `acceptUntrusted` flag round-trips with its entry through the workspace JSON), `ProxyLeafContractTests` (LeafRequest carries ONLY the client-generated SPKI; the allowlist union is the minting gate — `NotAllowed` fail-closed like the fetcher, `BadRequest` for malformed origin/key, `NoAuthority` when the deployment CA cannot load/create; minted leaf chains to the deployment CA with host SAN + serverAuth EKU; single-frame correlation with deadline), `ProxyLoopbackTlsTests` (leaves cached per host:port, one mint exchange per origin; refused mint fails the tunnel with the server's code; seeded `AcceptTunnelAsync` + real Schannel server handshake on a channel-minted leaf), `ProxyLoopbackClientKeyTests` (exported SPKI is public-only; `AttachLeaf` yields a private key Schannel accepts; failed attach keeps the key usable), `ProxyFetchReplyGuardTests` (leaf answers unicasted to the requester endpoint, never broadcast), `EventServerLoadGuardTests` (leaf message ids declared) | See SC-3 below: both-machine drop plus the one-time elevated CA import into `LocalMachine\Root`; a self-signed https target fails closed WITHOUT the override (proxy error page names the exact per-target switch) and the full login flow completes WITH it |
 
 ## Manual host checks
 
@@ -224,6 +225,45 @@ simultaneous.
    with the session cookie attached (`server: GET /api/status cookie='SID=…'`, rendered as
    `XHR-OK status=online cookie='SID=…'`). Full probe run ≈1 min.
 
+### SC-3 Proxied HTTPS targets: target-TLS verdict and machine trust (#56, ADR-0002/ADR-0003)
+
+Requires the same both-machine drop as SC-1/SC-2 (the leaf contract is new on BOTH sides: an
+old Smart Client never asks for leaves, an old Event Server never answers LeafRequest — the
+tunnel then fails closed with a logged mint refusal), plus the one-time machine trust setup:
+
+1. **Event Server provisions its CA on demand**: on the first LeafRequest it creates (or loads)
+   `CN=XProtect WebContent Plugin Loopback Proxy` in `LocalMachine\Personal`, private key in the
+   machine key container `WebContent-Proxy-CA`. A service that cannot write that store answers
+   every LeafRequest `NoAuthority` (logged, retried per request) — tunnels stay fail-closed.
+2. **Each Smart Client machine trusts the CA once, elevated** (README "deployment certificate
+   authority"): export the CA DER from the Event Server and
+   `Import-Certificate -FilePath <ca.cer> -CertStoreLocation Cert:\LocalMachine\Root`. The plugin
+   only READS the root stores: when the CA thumbprint is absent it logs the exact import command
+   and the browser shows its own certificate error — never a silent bypass, never a store write.
+3. **Fail-closed row**: allowlist `https://host:port` (NO flag) against a self-signed target.
+   Expected: browser tunnel TLS to the loopback listener succeeds (trusted leaf), the Event
+   Server refuses the target chain, and the browser shows the `Web Content proxy:` error page
+   whose body names the per-target `accept untrusted certificate` switch. The target machine
+   journals the TLS attempt.
+4. **Override row**: same entry plus ` accept-untrusted`. Expected: full flow (form, POST,
+   302+Set-Cookie, cookie-gated dashboard, background XHR) through the terminated tunnel.
+5. Automatable: `ScProxyLoginProbeTests` probe facts `ProbeProxiedHttpsTargetFailsClosedWithout-
+   Override` and `ProbeProxiedHttpsLoginFlowWithAcceptUntrustedOverride` (self-signed HTTPS
+   `LoginTestServer` on `UX_HTTPS_LOGIN_TARGET`, default `https://172.16.128.210:18124`; each
+   row rewrites its own allowlist line — same origin with a different flag state replaces, never
+   contradicts — and writes `sc-login-probe-tls-{closed,open}-*.png/.txt` artifacts).
+6. Live net472 plumbing proof (2026-10-31, compiled plugin DLL reflected under PS 5.1):
+   unprivileged CA load throws (NoAuthority path); an elevated process creates the CA and a
+   SECOND process reloads the SAME thumbprint with a usable `PrivateKey` (the machine CAPI
+   container survives the process); product `ProxyLoopbackClientKey` SPKI → product
+   `MintLeafForPublicKey` → `AttachLeaf` → real Tls12 `AuthenticateAsServer` handshake
+   completes; chain builds leaf→CA (UntrustedRoot until the LM\Root import exists — correct
+   fail-closed); `ProxyLoopbackTrust.IsRootTrusted` reads both root stores unelevated and
+   reports False when the CA is absent.
+
+   Record (SC-3 live rows): pending — run after the #56 drop deploys to both hosts and the CA
+   import lands on the Smart Client machine.
+
 ## Known high-risk regressions → pinned by
 
 | Regression (remediation it would undo) | Pinned by |
@@ -246,6 +286,9 @@ simultaneous.
 | Repeated `Set-Cookie` values comma-joined or login 3xx followed server-side, so the session cookie never reaches the browser and vendor logins loop back to the form (#55) | `ProxyFetchTransportTests` (repeated Set-Cookie captured per value; 302+Set-Cookie relayed, never followed), `ProxyForwardConnectionTests` (separate Set-Cookie lines rendered; POST body+Cookie to the seam), SC-2 |
 | Request method tables drifting between the client forwarder and the Event Server, so a browser POST forwards locally then dies as a server-side refusal (#55) | One shared `ProxyForwardPolicy.IsForwardedMethod` table used on both sides; `ProxyForwardPolicyTests` (verb table), `ProxyFetchTransportTests` (verb replay) |
 | Cookie/Authorization headers silently stripped at the proxy, breaking exactly the login flows #55 exists for | `ProxyForwardCodecTests.ToOutboundRequestHeaders` pins (Cookie/Authorization/custom kept verbatim; only hop-by-hop+Host+Content-Length dropped), `ProxyFetchTransportTests` replay pin |
+| Global (rather than per-target) TLS bypass on the Event Server, so one admin flag makes every proxied https device unvalidated (#56) | `ProxyFetchTlsDecisionTests` (override consulted per allowlist entry; default fail-closed `TlsValidation`), `ProxyServerAllowlistTests` (flag round-trips with its entry only) |
+| Leaf private keys crossing the wire or a session CA written into the user root store (crypt32's modal consent dialog hangs unattended sessions; ADR-0002's superseded shape) (#56, ADR-0003) | `ProxyLeafContractTests` (request carries only the SPKI; response only public DERs), `ProxyFetchReplyGuardTests` (leaf replies unicasted), `ProxyLoopbackTls`/`ProxyLoopbackTrust` (no store-write path exists on the client), SC-3 |
+| Minting gate decoupled from the fetch allowlist, so a leaf could be signed for an origin the fetcher would refuse (forged-tunnel potential) (#56) | `ProxyLeafContractTests` (same union allowlist gates minting; `NotAllowed` fail-closed before first resolve), `ProxyFetchReplyGuardTests` (LeafRequestId filter + unicast) |
 
 ## Scope notes (deliberate)
 
