@@ -212,7 +212,7 @@ public class ScProxyLoginProbeTests
             {
                 form = await page.WaitForSelectorAsync("#signin", new Microsoft.Playwright.PageWaitForSelectorOptions { Timeout = 45000 });
             }
-            catch (Microsoft.Playwright.PlaywrightTimeoutException)
+            catch (TimeoutException)
             {
                 form = null;
             }

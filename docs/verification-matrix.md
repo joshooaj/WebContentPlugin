@@ -265,8 +265,32 @@ tunnel then fails closed with a logged mint refusal), plus the one-time machine 
    fail-closed); `ProxyLoopbackTrust.IsRootTrusted` reads both root stores unelevated and
    reports False when the CA is absent.
 
-   Record (SC-3 live rows): pending — run after the #56 drop deploys to both hosts and the CA
-   import lands on the Smart Client machine.
+   Record (SC-3 live rows) - PASSED live both-host (2026-10-31, drop `WebContent.dll`
+   SHA-256 `683FA932...A47A9C58` hash-verified on Smart Client + Event Server):
+
+   - Trust setup executed live: `scripts/provision-event-server-authority.ps1` (elevated, on
+     the ES) created CA thumb `E4D254D58CB1BDA6E894C0F484F3C5AA718D2377` and granted
+     `NT AUTHORITY\NETWORK SERVICE` read on the key file; the exported .cer was
+     `Import-Certificate`d into the Smart Client machine's `LocalMachine\Root`.
+   - Override row PASS (`ProbeProxiedHttpsLoginFlowWithAcceptUntrustedOverride`): ES log
+     `Loaded deployment proxy CA... (thumbprint E4D254D5...)` + `Minted loopback proxy leaf...`;
+     client log `deployment CA ... is present in this machine's trusted roots`, `tunnel TLS
+     established`; the browser completed form -> POST /login -> 302+Set-Cookie -> cookie-gated
+     dashboard -> background XHR: `signedIn='SIGNED IN' xhr='XHR-OK'`, cookie echo
+     round-tripped; the target server journaled `GET /`, `POST /login`, `GET /dashboard`,
+     `GET /api/status` carrying the session cookie.
+   - Fail-closed row PASS (`ProbeProxiedHttpsTargetFailsClosedWithoutOverride`): the same
+     allowlisted origin WITHOUT the flag - browser document `title='Web Content proxy: 502'`
+     naming the per-target accept-untrusted switch; the target server journaled
+     `TLS handshake failed` (the fetcher refused the self-signed chain mid-handshake).
+     No login form, no bypass.
+
+   Live defects these rows caught and fixed: the restricted service account's CA store open
+   (read-only load fallback, step 1) and tunnel responses rendered as plaintext onto the raw
+   socket instead of into the TLS stream (browser decryption failure; pinned by
+   `ProxyForwardConnectionTests.WritesInnerTunnelResponsesIntoTheTunnelNotOntoTheRawSocket`).
+
+   Artifacts: `%TEMP%\webcontent-sc-proxy-probe\<run>\sc-login-probe-tls-{open,closed}-*.png/.txt.
 
 ## Known high-risk regressions → pinned by
 
