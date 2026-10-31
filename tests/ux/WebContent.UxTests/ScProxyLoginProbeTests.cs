@@ -262,8 +262,14 @@ public class ScProxyLoginProbeTests
         }
         catch (Exception ex)
         {
-            failure = $"{ex.GetType().Name}: {ex.Message}";
-            log.AppendLine($"probe failed: {failure}");
+            var detail = ex.Message;
+            if (ex is AggregateException agg)
+            {
+                detail = string.Join(";", agg.Flatten().InnerExceptions.Select(i => i.GetType().Name + ": " + i.Message));
+            }
+            failure = ex.GetType().Name + ": " + detail;
+            log.AppendLine("probe failed: " + failure);
+            log.AppendLine(ex.ToString());
         }
         finally
         {

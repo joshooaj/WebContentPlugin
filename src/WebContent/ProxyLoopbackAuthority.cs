@@ -52,15 +52,28 @@ namespace WebContent
         /// ADR-0003: the long-lived deployment authority of this Event Server machine. Loads the
         /// existing CA from LocalMachine\Personal (any valid copy whose key this process can use)
         /// and otherwise creates it: a machine-key-store CAPI container under a fixed name, signed
-        /// self, stored with its private key. Requires machine-level privileges (the Event Server
-        /// service's LocalSystem identity covers it); access failures propagate so the leaf
-        /// issuer can answer NoAuthority and retry provisioning on the next request.
+        /// self, stored with its private key. The live Event Server service runs as NETWORK SERVICE,
+        /// which cannot write the machine certificate store, so the store is opened read-write
+        /// first (creating when allowed) and otherwise read-only for the admin-provisioned CA;
+        /// a missing CA in that mode names the one-time elevated provisioning script. Access
+        /// failures propagate so the leaf issuer can answer NoAuthority and retry on the next request.
         /// </summary>
         internal static Authority LoadOrCreateDeploymentAuthority(Action<string> log)
         {
             using (var store = new X509Store(StoreName.My, StoreLocation.LocalMachine))
             {
-                store.Open(OpenFlags.ReadWrite);
+                var canWrite = true;
+                try
+                {
+                    store.Open(OpenFlags.ReadWrite);
+                }
+                catch (Exception)
+                {
+                    // Restricted service accounts (NETWORK SERVICE) may read but never write the
+                    // machine store; an administrator provisions the CA once with the README script.
+                    store.Open(OpenFlags.ReadOnly);
+                    canWrite = false;
+                }
 
                 var now = DateTime.Now;
                 foreach (var existing in store.Certificates.Find(
@@ -91,6 +104,12 @@ namespace WebContent
 
                     log($"Loaded deployment proxy CA from LocalMachine\\Personal (thumbprint {existing.Thumbprint}).");
                     return new Authority(existing, key);
+                }
+
+                if (!canWrite)
+                {
+                    throw new InvalidOperationException(
+                        "No deployment proxy CA exists in LocalMachine\\Personal and this service account cannot create one; run the elevated provisioning step from the plugin README (scripts/provision-event-server-authority.ps1) on the Event Server machine.");
                 }
 
                 var parameters = new CspParameters
@@ -519,7 +538,18 @@ namespace WebContent
         {
             using (var store = new X509Store(StoreName.My, StoreLocation.LocalMachine))
             {
-                store.Open(OpenFlags.ReadWrite);
+                var canWrite = true;
+                try
+                {
+                    store.Open(OpenFlags.ReadWrite);
+                }
+                catch (Exception)
+                {
+                    // Restricted service accounts may read but never write the machine store;
+                    // an administrator provisions the CA once (README script).
+                    store.Open(OpenFlags.ReadOnly);
+                    canWrite = false;
+                }
 
                 var now = DateTime.Now;
                 foreach (var existing in store.Certificates.Find(
@@ -530,6 +560,12 @@ namespace WebContent
                         log($"Loaded deployment proxy CA from LocalMachine\\Personal (thumbprint {existing.Thumbprint}).");
                         return new Authority(existing);
                     }
+                }
+
+                if (!canWrite)
+                {
+                    throw new InvalidOperationException(
+                        "No deployment proxy CA exists in LocalMachine\\Personal and this service account cannot create one; run the elevated provisioning step from the plugin README (scripts/provision-event-server-authority.ps1) on the Event Server machine.");
                 }
 
                 var key = RSA.Create(2048);
