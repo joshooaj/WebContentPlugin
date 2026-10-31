@@ -231,10 +231,14 @@ Requires the same both-machine drop as SC-1/SC-2 (the leaf contract is new on BO
 old Smart Client never asks for leaves, an old Event Server never answers LeafRequest — the
 tunnel then fails closed with a logged mint refusal), plus the one-time machine trust setup:
 
-1. **Event Server provisions its CA on demand**: on the first LeafRequest it creates (or loads)
+1. **Event Server loads its CA; an administrator provisions it when the service cannot create
+   it**: the plugin loads (or, where the service account may write the machine store, creates)
    `CN=XProtect WebContent Plugin Loopback Proxy` in `LocalMachine\Personal`, private key in the
-   machine key container `WebContent-Proxy-CA`. A service that cannot write that store answers
-   every LeafRequest `NoAuthority` (logged, retried per request) — tunnels stay fail-closed.
+   machine key container `WebContent-Proxy-CA`. Live installs run the service as
+   `NT AUTHORITY\NETWORK SERVICE` (read-only on that store), so the README's elevated
+   `scripts/provision-event-server-authority.ps1` creates the CA once and grants the service read
+   access to the key. A missing/unloadable CA answers every LeafRequest `NoAuthority` (logged,
+   retried per request) — tunnels stay fail-closed.
 2. **Each Smart Client machine trusts the CA once, elevated** (README "deployment certificate
    authority"): export the CA DER from the Event Server and
    `Import-Certificate -FilePath <ca.cer> -CertStoreLocation Cert:\LocalMachine\Root`. The plugin

@@ -204,7 +204,18 @@ public class ScProxyLoginProbeTests
             var browser = await cdp.ConnectFirstAvailableAsync(config.WebView2DataRoot);
             var page = await CdpConnector.WaitForPageAsync(browser, targetUri.Host);
 
-            var form = await page.WaitForSelectorAsync("#signin", new Microsoft.Playwright.PageWaitForSelectorOptions { Timeout = 45000 });
+            // Playwright THROWS on a selector timeout; for the fail-closed row the missing form
+            // is the expected outcome (the proxy error page renders instead), so translate the
+            // timeout into a null form and let the branch below classify the document.
+            Microsoft.Playwright.IElementHandle form;
+            try
+            {
+                form = await page.WaitForSelectorAsync("#signin", new Microsoft.Playwright.PageWaitForSelectorOptions { Timeout = 45000 });
+            }
+            catch (Microsoft.Playwright.PlaywrightTimeoutException)
+            {
+                form = null;
+            }
 
             outcome.Title = await page.TitleAsync();
             log.AppendLine($"first document at {target}: title='{outcome.Title}' form={form != null}");
