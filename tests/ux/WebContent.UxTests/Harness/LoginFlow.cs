@@ -52,6 +52,7 @@ public static class LoginFlow
         "_btnInstall",
         "_btnOK",
         "_btnYes",
+        "_btnConnect", // the trust prompt's accept button is 'Connect' (paired with 'Close'/Cancel)
     };
 
     private static readonly string[] PreferredTrustButtonNames =
@@ -63,6 +64,7 @@ public static class LoginFlow
         "add",
         "ok",
         "yes",
+        "connect",
     };
 
     /// <summary>
@@ -123,9 +125,36 @@ public static class LoginFlow
                     return;
                 }
             }
+            else if (HasMainSessionWindow(session))
+            {
+                // Login completed with NO dialog pending (the cert is already in the local store
+                // from an earlier session): polling to the full timeout here was 30 s of dead
+                // time between login and every tree navigation.
+                return;
+            }
 
-            Thread.Sleep(250);
+            Thread.Sleep(150);
         }
+    }
+
+    /// <summary>True when the client's own main window is up (Smart Client or Management Client).</summary>
+    private static bool HasMainSessionWindow(ClientSession session)
+    {
+        foreach (var w in session.Windows().ToList())
+        {
+            try
+            {
+                if (w.AutomationId == "_mainApplicationWindow") return true;
+                var name = w.Name ?? string.Empty;
+                var cls = w.ClassName ?? string.Empty;
+                if (name.Contains("Management Client", StringComparison.OrdinalIgnoreCase)
+                    && cls.StartsWith("WindowsForms", StringComparison.Ordinal)
+                    && w.BoundingRectangle.Width > 400)
+                    return true;
+            }
+            catch { }
+        }
+        return false;
     }
 
     private static bool IsNegativeButton(string name) =>

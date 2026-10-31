@@ -180,7 +180,13 @@ public class ScProxyLoginProbeTests
         LoginFlow.AcceptCertificateTrust(mc);
         var mcMain = LoginFlow.WaitForAdminMain(mc);
         ManagementClientUi.CloseStrayLoginDialogs(mc);
+        ManagementClientUi.WaitForTreeReady(mcMain);
 
+        // Canonical starting state (fast double-click collapse, no keyboard), then walk the
+        // known chain top-down (enumerate rows + click + wheel scroll): each step realizes the
+        // rows the next one needs, so no blind walking or long sleeps are involved.
+        ManagementClientUi.CollapseTreeToRoot(mcMain, timeoutSeconds: 60, allowExpanded: new[] { config.PluginNodeName });
+        ManagementClientUi.EnsureExpanded(mcMain, config.PluginNodeName, ManagementClientUi.WorkspacesNodeName);
         ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName);
         ManagementClientUi.SelectTreeItem(mcMain, config.McWorkspaceName);
 

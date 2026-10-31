@@ -31,23 +31,6 @@ public static class ManagementClientUi
         throw new TimeoutException($"Tree item '{name}' never appeared.");
     }
 
-    /// <summary>
-    /// Finds a node under the currently selected tree node by walking DOWN with the keyboard.
-    /// The WinForms tree only realizes visible rows, so a newly expanded node's children
-    /// below the fold are invisible to UIA until the selection scrolls them into view.
-    /// </summary>
-    public static AutomationElement FindChildByWalkingDown(Window mainWindow, string name, int maxSteps = 40)
-    {
-        for (var step = 0; step < maxSteps; step++)
-        {
-            var item = FindTreeItem(mainWindow, name);
-            if (item != null) return item;
-            FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.DOWN);
-            Thread.Sleep(50);
-        }
-        return FindTreeItem(mainWindow, name);
-    }
-
     /// <summary>Finds a tree node whose name contains the fragment (the Home root carries the version suffix).</summary>
     public static AutomationElement WaitForTreeItemContaining(Window mainWindow, string fragment, int timeoutSeconds = 15)
     {
@@ -153,20 +136,20 @@ public static class ManagementClientUi
         var item = FindTreeItem(mainWindow, name)
             ?? throw new InvalidOperationException($"Tree item '{name}' not found.");
         try { if (item.Patterns.ScrollItem.IsSupported) item.Patterns.ScrollItem.Pattern.ScrollIntoView(); } catch { }
-        Thread.Sleep(300);
+        Thread.Sleep(150);
         try
         {
             if (item.Patterns.SelectionItem.IsSupported) item.Patterns.SelectionItem.Pattern.Select();
         }
         catch { }
-        Thread.Sleep(400);
+        Thread.Sleep(200);
         ClickLabel(mainWindow, item);
         // MC's tree has LabelEdit active: clicking the label of an already-selected node arms
         // the inline rename editor. ESC on the freshly focused tree cancels that arming; without
         // this, the captured node renders in edit mode and rename commits can even raise
         // "ItemName.set ...: Not valid to set dirty state at the line!!!" error dialogs.
         FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE);
-        Thread.Sleep(300);
+        Thread.Sleep(150);
     }
 
     /// <summary>Closes any leftover login/connection dialog that would steal keyboard focus from the tree.</summary>
@@ -277,65 +260,141 @@ public static class ManagementClientUi
     }
 
     /// <summary>
-    /// Ensures the named tree node is expanded. MC tree items expose NO ExpandCollapse pattern,
-    /// but LegacyIAccessible.DoDefaultAction() (and a real double-click on the label) toggle the
-    /// node, and collapsing un-realizes the subtree in UIA — so expansion state is verified by
-    /// the expected children being realized, toggling the node whenever they are missing.
+    /// Ensures the named tree node is expanded. Navigation is enumerate-and-click: the realized
+    /// rows are listed, the target's label is double-clicked, and the wheel scrolls when the node
+    /// or its children sit below the fold (MC tree rows are only realized while visible).
+    /// Expansion state is read from geometry — the MC tree exposes NO ExpandCollapse pattern, but
+    /// a node is expanded exactly when the next realized row is indented deeper, the same trick
+    /// CollapseTreeToRoot uses. The old keyboard walk (O(index) DOWN presses per attempt, re-walked
+    /// on every retry, plus fixed 800–1500 ms sleeps) was the source of the 10+ second stalls.
     /// </summary>
     public static void EnsureExpanded(Window mainWindow, string name, params string[] expectedChildNames)
     {
-        for (var attempt = 0; attempt < 6; attempt++)
+        var deadline = DateTime.UtcNow.AddSeconds(45);
+        var strategy = 0;
+        var scrollPass = 0;
+        var ancestorsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (DateTime.UtcNow < deadline)
         {
-            if (ChildrenAppeared(mainWindow, expectedChildNames)) return;
-            var items = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem)).ToList();
+            if (expectedChildNames.Length > 0 && ChildrenAppeared(mainWindow, expectedChildNames)) return;
+
+            var items = RealizedTreeItems(mainWindow);
             var node = items.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+
             if (node == null)
             {
-                // Possibly the whole tree (or Home) is collapsed: open Home once and retry.
-                var home = items.FirstOrDefault(t => (t.Name ?? string.Empty).StartsWith("Home", StringComparison.OrdinalIgnoreCase));
-                if (home != null && items.Count <= 2)
+                // Target not realized: wheel-scroll the whole list looking for it, then open
+                // collapsed level-1 ancestors one at a time until the subtree materializes.
+                if (scrollPass < MaxTreeScrollPasses)
                 {
-                    ClickLabel(mainWindow, home);
-                    Thread.Sleep(800);
-                    FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.RIGHT);
-                    Thread.Sleep(1500);
+                    WheelTree(mainWindow, +4);
+                    scrollPass++;
                     continue;
                 }
-                // The tree can still be populating right after login (server round-trips):
-                // give the search itself a grace period before declaring the node absent.
-                if (attempt < 3)
-                {
-                    Thread.Sleep(2000);
-                    continue;
-                }
-                throw new InvalidOperationException($"Tree node '{name}' not found (attempt {attempt}).");
+                WheelTree(mainWindow, -30);
+                scrollPass = 0;
+                if (!ExpandOneCollapsedLevel1(mainWindow, ancestorsTouched)) break;
+                continue;
             }
 
-            if (attempt < 3)
+            var expanded = IsExpandedIn(items, node);
+            if (expanded && expectedChildNames.Length == 0) return;
+
+            if (!expanded)
             {
-                // Keyboard route: walk DOWN to the node's visible index, press RIGHT. This is what
-                // plugin-injected nodes honour (DoDefaultAction / double-click just open a page).
-                var home = items.FirstOrDefault(t => (t.Name ?? string.Empty).StartsWith("Home", StringComparison.OrdinalIgnoreCase));
-                if (home != null)
+                if (items.IndexOf(node) + 1 >= items.Count && scrollPass < MaxTreeScrollPasses)
                 {
-                    var idx = items.IndexOf(node);
-                    KeyboardWalkTo(mainWindow, home, idx);
-                    FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.RIGHT);
-                    Thread.Sleep(1200);
+                    // Last realized row: its children may simply sit unrealized below the fold.
+                    WheelTree(mainWindow, +4);
+                    scrollPass++;
                     continue;
                 }
+                ToggleNode(node, strategy++ % 3);
+                Thread.Sleep(250);
+                continue;
             }
-            ToggleNode(node, Math.Min(attempt, 2));
-            Thread.Sleep(1200);
+
+            // Expanded but the expected children never showed up in any scan: below the fold.
+            if (scrollPass < MaxTreeScrollPasses)
+            {
+                WheelTree(mainWindow, +4);
+                scrollPass++;
+                continue;
+            }
+            ToggleNode(node, strategy++ % 3);
+            Thread.Sleep(250);
         }
-        if (expectedChildNames.Length > 0)
+
+        if (expectedChildNames.Length > 0 && !ChildrenAppeared(mainWindow, expectedChildNames))
             throw new InvalidOperationException($"Could not expand '{name}': none of [{string.Join(", ", expectedChildNames)}] appeared.");
+        if (expectedChildNames.Length == 0)
+            throw new InvalidOperationException($"Could not expand '{name}': geometry never showed a deeper-indented row under it.");
+    }
+
+    /// <summary>Tree rows the WinForms tree currently realizes, in visual (top-to-bottom) order.</summary>
+    private static List<AutomationElement> RealizedTreeItems(Window mainWindow)
+    {
+        var treeNav = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TreeNavigation"));
+        var items = (treeNav ?? (AutomationElement)mainWindow)
+            .FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem))
+            .Where(t => { try { return t.BoundingRectangle.Height > 0; } catch { return false; } })
+            .ToList();
+        items.Sort((x, y) => x.BoundingRectangle.Y.CompareTo(y.BoundingRectangle.Y));
+        return items;
+    }
+
+    /// <summary>True exactly when the next realized row is indented deeper than the node.</summary>
+    private static bool IsExpandedIn(List<AutomationElement> items, AutomationElement node)
+    {
+        var idx = items.IndexOf(node);
+        if (idx < 0 || idx + 1 >= items.Count) return false;
+        var a = items[idx].BoundingRectangle;
+        var b = items[idx + 1].BoundingRectangle;
+        if (a.Width <= 0 || b.Width <= 0) return false;
+        return b.X > a.X + 5;
+    }
+
+    private const int MaxTreeScrollPasses = 12;
+
+    /// <summary>
+    /// Double-clicks the first realized, collapsed level-1 row (Home and already-tried rows are
+    /// skipped) so the subtree that should contain the target becomes realized. One ancestor per
+    /// call keeps the search verifiable; the touched-set stops the next round re-collapsing it.
+    /// </summary>
+    private static bool ExpandOneCollapsedLevel1(Window mainWindow, HashSet<string> touched)
+    {
+        var items = RealizedTreeItems(mainWindow);
+        var home = items.FirstOrDefault(t => (t.Name ?? string.Empty).StartsWith("Home", StringComparison.OrdinalIgnoreCase));
+        if (home == null) return false;
+        if (items.Count == 1)
+        {
+            ToggleNode(home, 0); // MC persists tree state: the whole tree can start collapsed at Home.
+            Thread.Sleep(300);
+            return true;
+        }
+        var homeIdx = items.IndexOf(home);
+        if (homeIdx + 1 >= items.Count) return false;
+        var level1X = items[homeIdx + 1].BoundingRectangle.X;
+        for (var i = homeIdx + 1; i < items.Count; i++)
+        {
+            var node = items[i];
+            if (Math.Abs(node.BoundingRectangle.X - level1X) > 1) continue;
+            if (i + 1 < items.Count && items[i + 1].BoundingRectangle.X > node.BoundingRectangle.X + 5) continue;
+            if (!touched.Add(node.Name ?? string.Empty)) continue;
+            ToggleNode(node, 1);
+            Thread.Sleep(300);
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
     /// Toggles expand/collapse of a node. Strategy 0 uses LegacyIAccessible.DoDefaultAction
     /// (works for most nodes), strategy 1 does a real double-click on the label (proven for nodes
     /// where DoDefaultAction is a silent no-op), strategy 2 selects the node first, then double-clicks.
+    /// EnsureExpanded verifies the toggle by geometry and escalates strategies, so no keyboard
+    /// fallback is needed here.
     /// </summary>
     private static void ToggleNode(AutomationElement node, int strategy = 0)
     {
