@@ -1,0 +1,92 @@
+using System;
+using System.IO;
+using System.Runtime.Serialization.Json;
+using System.Text;
+
+namespace WebContent
+{
+    /// <summary>
+    /// Wire codec for proxy-fetch payloads (#54 live-host fix). The platform's
+    /// ExternalMessage.Data rehydrates the payload via
+    /// "new DataContractSerializer(Type.GetType(DataClass))"; when the plugin assembly is not
+    /// visible to the HOST process's type resolution (Smart Client loads plugins differently
+    /// from Management Client), Type.GetType returns null, the platform swallows the resulting
+    /// ArgumentNullException ("Value cannot be null"), and hands the receiver Data == null - a
+    /// silent black hole that looks exactly like a lost response. Putting a plain string on the
+    /// wire removes the type-binding requirement from every host: payloads travel as JSON
+    /// strings, encoded/decoded only inside this plugin.
+    /// </summary>
+    internal static class ProxyFetchWireCodec
+    {
+        private static readonly DataContractJsonSerializer RequestSerializer =
+            new DataContractJsonSerializer(typeof(ProxyFetchRequestPayload));
+
+        private static readonly DataContractJsonSerializer FrameSerializer =
+            new DataContractJsonSerializer(typeof(ProxyFetchResponsePayload));
+
+        /// <summary>Encode a request payload for Message.Data.</summary>
+        internal static string ToWire(ProxyFetchRequestPayload payload)
+        {
+            return Serialize(payload, RequestSerializer);
+        }
+
+        /// <summary>Encode one response frame for Message.Data.</summary>
+        internal static string ToWire(ProxyFetchResponsePayload frame)
+        {
+            return Serialize(frame, FrameSerializer);
+        }
+
+        /// <summary>
+        /// Decode a request payload from a received Message.Data. Null for anything that is not
+        /// a decodable request JSON string (foreign/host values, garbage, version skew).
+        /// </summary>
+        internal static ProxyFetchRequestPayload RequestFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyFetchRequestPayload>(json, RequestSerializer);
+        }
+
+        /// <summary>Decode one response frame from a received Message.Data; null when unusable.</summary>
+        internal static ProxyFetchResponsePayload FrameFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyFetchResponsePayload>(json, FrameSerializer);
+        }
+
+        private static string Serialize(object payload, DataContractJsonSerializer serializer)
+        {
+            using (var stream = new MemoryStream())
+            {
+                serializer.WriteObject(stream, payload);
+                return Encoding.UTF8.GetString(stream.ToArray());
+            }
+        }
+
+        private static T Deserialize<T>(string json, DataContractJsonSerializer serializer) where T : class
+        {
+            try
+            {
+                using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+                {
+                    return serializer.ReadObject(stream) as T;
+                }
+            }
+            catch (Exception)
+            {
+                // Malformed or foreign content: an unusable frame, not an exception on the
+                // message-receiver thread.
+                return null;
+            }
+        }
+    }
+}

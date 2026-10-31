@@ -202,6 +202,40 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public async Task FeedReturnsWhetherTheFrameOwnedAPendingExchange()
+        {
+            var correlation = new ProxyFetchCorrelation();
+            var completion = correlation.Begin("corr-owned", TimeSpan.FromSeconds(30));
+
+            // A frame addressed to a live exchange reports a match even when this frame itself
+            // is malformed (unknown kind) and the exchange stays open.
+            Assert.True(correlation.Feed(new ProxyFetchResponsePayload
+            {
+                CorrelationId = "corr-owned",
+                Kind = "bogus-kind",
+                Sequence = -1,
+            }));
+
+            // Frames nobody owns - wrong id, no id - report no match (the trace hook leans on
+            // exactly this signal to name silent black holes).
+            Assert.False(correlation.Feed(new ProxyFetchResponsePayload { CorrelationId = "someone-else", Kind = ProxyFetchFrameKinds.Failure }));
+            Assert.False(correlation.Feed(new ProxyFetchResponsePayload { CorrelationId = "", Kind = ProxyFetchFrameKinds.Failure }));
+            Assert.False(correlation.Feed(null));
+
+            correlation.Feed(new ProxyFetchResponsePayload
+            {
+                CorrelationId = "corr-owned",
+                Kind = ProxyFetchFrameKinds.Failure,
+                ErrorCode = ProxyFetchErrorCodes.Error,
+            });
+            var completed = await completion;
+            Assert.False(completed.Success);
+
+            // After completion the id is no longer pending: late duplicate frames report no match.
+            Assert.False(correlation.Feed(new ProxyFetchResponsePayload { CorrelationId = "corr-owned", Kind = ProxyFetchFrameKinds.Failure }));
+        }
+
+        [Fact]
         public async Task UnusableBodyDeclarationInMetaFrameCompletesWithErrorWithoutThrowing()
         {
             var correlation = new ProxyFetchCorrelation();

@@ -49,11 +49,30 @@ namespace WebContent.Tests
             // Success frames: unicast to the requester endpoint, and the frame loop is guarded so
             // a request without a requester endpoint is logged, not broadcast.
             Assert.Contains("if (requesterFqid == null)", fetcher);
-            Assert.Contains("ProxyMessageIds.FetchResponseId, frame), requesterFqid, null, null", fetcher);
+            Assert.Contains("ProxyMessageIds.FetchResponseId, ProxyFetchWireCodec.ToWire(frame)), requesterFqid, null, null", fetcher);
 
             // Failure frames: unicast to the requester as well (message, requester, null, null).
             var collapsed = System.Text.RegularExpressions.Regex.Replace(fetcher, @"\s+", " ");
-            Assert.Contains("ErrorMessage = message, }), requester, null, null);", collapsed);
+            Assert.Contains("ErrorMessage = message, })), requester, null, null);", collapsed);
+        }
+
+        [Fact]
+        public void BothSidesCarryPayloadsAsJsonStringsNeverAsPluginTypes()
+        {
+            // The platform rehydrates Data via Type.GetType(DataClass) and silently delivers
+            // null when the host cannot resolve the plugin type (Smart Client). Every transmit
+            // therefore goes through the wire codec, and every receive decodes from it.
+            var fetcher = ReadFetcher();
+            var client = File.ReadAllText(Path.Combine(
+                RepoLocator.FindRepoRoot(), "src", "WebContent", "ProxyFetchClient.cs"));
+
+            Assert.Contains("ProxyFetchWireCodec.RequestFromWire(message?.Data)", fetcher);
+            Assert.Contains("ProxyFetchWireCodec.ToWire(new ProxyFetchResponsePayload", fetcher);
+            Assert.DoesNotContain("message?.Data as ProxyFetchRequestPayload", fetcher);
+
+            Assert.Contains("ProxyFetchWireCodec.ToWire(new ProxyFetchRequestPayload", client);
+            Assert.Contains("ProxyFetchWireCodec.FrameFromWire(message?.Data)", client);
+            Assert.DoesNotContain("message?.Data as ProxyFetchResponsePayload", client);
         }
     }
 }

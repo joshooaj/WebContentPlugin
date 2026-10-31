@@ -46,6 +46,14 @@ namespace WebContent
 
             try
             {
+                // Same opt-in messaging trace as the client side: with WEBCONTENT_MIP_TRACE=1 on
+                // the Event Server machine, the platform logs every message this process's
+                // messaging client transmits and receives.
+                if (Environment.GetEnvironmentVariable("WEBCONTENT_MIP_TRACE") == "1")
+                {
+                    EnvironmentManager.Instance.TraceMessageCommunication = true;
+                }
+
                 _serverId = EnvironmentManager.Instance.MasterSite.ServerId;
 
                 // Per the MIP messaging docs the Event Server plug-in may initialize the message
@@ -121,7 +129,7 @@ namespace WebContent
         {
             var requester = ResolveRequester(source, message);
 
-            var payload = message?.Data as ProxyFetchRequestPayload;
+            var payload = ProxyFetchWireCodec.RequestFromWire(message?.Data);
             if (payload == null || string.IsNullOrEmpty(payload.CorrelationId) || string.IsNullOrEmpty(payload.Url))
             {
                 EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), "Proxy fetch request carried no usable payload; refused.");
@@ -211,7 +219,7 @@ namespace WebContent
 
                 foreach (var frame in ProxyFetchFramer.Frame(payload.CorrelationId, result, limits.ChunkSizeBytes))
                 {
-                    communication.TransmitMessage(new Message(ProxyMessageIds.FetchResponseId, frame), requesterFqid, null, null);
+                    communication.TransmitMessage(new Message(ProxyMessageIds.FetchResponseId, ProxyFetchWireCodec.ToWire(frame)), requesterFqid, null, null);
                 }
             }
             catch (Exception exception)
@@ -288,14 +296,14 @@ namespace WebContent
             communication.TransmitMessage(
                 new Message(
                     ProxyMessageIds.FetchResponseId,
-                    new ProxyFetchResponsePayload
+                    ProxyFetchWireCodec.ToWire(new ProxyFetchResponsePayload
                     {
                         CorrelationId = correlationId,
                         Kind = ProxyFetchFrameKinds.Failure,
                         Sequence = -1,
                         ErrorCode = errorCode,
                         ErrorMessage = message,
-                    }),
+                    })),
                 requester,
                 null,
                 null);

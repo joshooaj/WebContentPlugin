@@ -64,20 +64,22 @@ namespace WebContent
 
         /// <summary>
         /// Route one response frame. Frames for correlation ids no longer pending (timed out or
-        /// already completed) or with malformed content are ignored, not thrown.
+        /// already completed) or with malformed content are ignored, not thrown. Returns true when
+        /// the frame was addressed to a pending exchange (even if this frame itself was malformed
+        /// and the exchange stays open), false when no pending exchange owns the correlation id.
         /// </summary>
-        internal void Feed(ProxyFetchResponsePayload frame)
+        internal bool Feed(ProxyFetchResponsePayload frame)
         {
             if (frame == null || string.IsNullOrEmpty(frame.CorrelationId))
             {
-                return;
+                return false;
             }
 
             lock (_sync)
             {
                 if (!_pending.TryGetValue(frame.CorrelationId, out var pending) || pending.Completed)
                 {
-                    return;
+                    return false;
                 }
 
                 if (frame.Kind == ProxyFetchFrameKinds.Failure)
@@ -89,7 +91,7 @@ namespace WebContent
                         ErrorCode = string.IsNullOrEmpty(frame.ErrorCode) ? ProxyFetchErrorCodes.Error : frame.ErrorCode,
                         ErrorMessage = frame.ErrorMessage,
                     });
-                    return;
+                    return true;
                 }
 
                 if (frame.Kind == ProxyFetchFrameKinds.Response)
@@ -106,15 +108,16 @@ namespace WebContent
                     }
                     catch (FormatException)
                     {
-                        return;
+                        return true;
                     }
                 }
                 else
                 {
-                    return;
+                    return true;
                 }
 
                 TryFinishByCount(pending);
+                return true;
             }
         }
 

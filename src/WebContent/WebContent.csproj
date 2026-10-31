@@ -107,6 +107,7 @@
     <Compile Include="ProxyPolicy.cs" />
     <Compile Include="ProxyFetchContract.cs" />
     <Compile Include="ProxyFetchFramer.cs" />
+    <Compile Include="ProxyFetchWireCodec.cs" />
     <Compile Include="ProxyFetchCorrelation.cs" />
     <Compile Include="ProxyFetchTransport.cs" />
     <Compile Include="ProxyFetchBackgroundPlugin.cs" />

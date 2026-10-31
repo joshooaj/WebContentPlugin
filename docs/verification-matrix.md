@@ -105,11 +105,15 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
 2. Expected marker in the Event Server's `Logs\MIP.log` (ProgramData for the Event Server):
    `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest)`. A startup
    failure logs `Proxy fetcher failed to start: ...` instead.
-3. No `MessageCommunicationSettings.config` whitelist edit is needed: every payload type
-   (`ProxyFetchRequestPayload`, `ProxyFetchResponsePayload`, `ProxyFetchHeader`) lives in the
-   plugin's own namespace, which the messaging layer trusts by default. The escape hatch only
-   becomes necessary if a payload ever references a foreign assembly type — then that type would
-   have to be added to the config file next to the host executable.
+3. No `MessageCommunicationSettings.config` whitelist edit is needed — and since #54 no custom
+   payload type is ever bound by a host process: every wire payload is a plain JSON STRING
+   (`ProxyFetchWireCodec`). The platform rehydrates `ExternalMessage.Data` via
+   `new DataContractSerializer(Type.GetType(DataClass))`; Smart Client's plugin loading leaves
+   `WebContent.dll` invisible to that type resolution, `Type.GetType` returns null, the platform
+   logs `ExtenalMessage.Deserialize ():Unable to deserialize class:... , Exception:Value cannot
+   be null.` and hands the receiver `Data == null` — a silent black hole (MC and the Event Server
+   resolve plugin types fine, which is why only Smart Client failed). Never put plugin types on
+   the wire.
 4. Response routing is unicast: the fetcher answers on `Message.ExternalMessageSourceEndPoint`,
    which the messaging layer fills with the requester's endpoint FQID on every received message.
    (The receive callback's `source` parameter is null for our requests — it only carries an
@@ -155,10 +159,11 @@ device or any http page — https is refused by design, see below).
    one browser process is shared per user-data folder, and the `--proxy-server` argument must not
    collide with other workspaces' WebViews.
 3. Expected: the home page renders, and its images/CSS load — subresources go through the same
-   listener. Then block the client machine's route to the target (`New-NetFirewallRule` block,
-   or pull the client off that segment). Reload: the page MUST still render, while a direct
-   `Invoke-WebRequest http://10.0.0.5:8080/` from the client machine now fails. That asymmetry
-   is the proof the traffic originates on the Event Server machine.
+   listener. Then block the client machine's route to the target (`New-NetFirewallRule` block, a
+   hosts-file entry pointing the target at 127.0.0.1, or pull the client off that segment).
+   Reload: the page MUST still render, while a direct `Invoke-WebRequest http://10.0.0.5:8080/`
+   from the client machine now fails. That asymmetry is the proof the traffic originates on the
+   Event Server machine.
 4. Address-bar navigation to a NON-allowlisted origin in the proxied workspace shows the proxy's
    403 page ("not in the workspace proxy allowlist"), and no request leaves for it (the fetcher
    is never asked). Navigation to an https:// origin shows the 502 CONNECT-refusal page — https
@@ -169,6 +174,18 @@ device or any http page — https is refused by design, see below).
    browser (`Proxy listener` log entries only on faults); `netstat -an | findstr <port>` shows
    nothing listening afterwards. (A mere close of the view tab keeps a background-retained
    browser — and its listener — alive for re-attach; that is existing browser lifecycle behavior.)
+
+   Automatable harness: `tests/ux/WebContent.UxTests/ScProxyFetchProbeTests.cs` (xunit
+   `Category=probe`) launches Smart Client, logs in, selects the proxied workspace, navigates the
+   allowlisted target, and writes `sc-proxy-probe-results.txt` (+ page screenshot) under
+   `%TEMP%\webcontent-sc-proxy-probe\<run>`. For row 3's negative control, add the client-machine
+   hosts entry `127.0.0.1 <target> # webcontent-sc-1-block` and run with
+   `WEBCONTENT_SC1_BLOCKED=1`: the probe then logs a direct client-side GET that MUST fail while
+   the rendered page still comes through the proxy.
+   Record (2026-10-31, drop `AF65D193…7FF9` on both machines, target `http://httpforever.com/`):
+   page rendered (`title='HTTP Forever - A reliably insecure connection'`, 2103 body chars);
+   blocked control rendered identically while the same process's direct GET failed with
+   `actively refused it` — server-origin proof satisfied.
 
 ## Known high-risk regressions → pinned by
 
@@ -188,6 +205,7 @@ device or any http page — https is refused by design, see below).
 | Chunk framer or correlation reassembler losing frames/order so the client sees truncated bodies (#53) | `ProxyFetchFramerTests`, `ProxyFetchCorrelationTests`, `ProxyFetchTransportTests` |
 | Proxied workspace silently reaching targets direct, or driving the ES fetcher at arbitrary origins (#54) | `ProxyForwardPolicyTests` (403/405/502 table), `ProxyBrowserArgumentsTests` (no scheme falls back to direct), `ProxyWorkspaceProfileTests` (enabled always proxies), `ProxyServerAllowlistTests` (ES-side union gate, closed before first resolve), SC-1 |
 | Reassembled body framed with the target's stale Content-Length or hop-by-hop headers, corrupting the rendered page (#54) | `ProxyForwardCodecTests` (Content-Length restated, hop-by-hop dropped) |
+| Proxy-fetch payloads moved back from JSON strings to plugin-namespace types, silently null-ing `Message.Data` on hosts whose type resolution cannot see WebContent.dll (the Smart Client black hole) (#54) | `ProxyFetchWireCodecTests` (round-trip + foreign-content pins), `ProxyFetchReplyGuardTests.BothSidesCarryPayloadsAsJsonStringsNeverAsPluginTypes` (both transmit sides), ES-1 bullet 3, SC-1 |
 
 ## Scope notes (deliberate)
 

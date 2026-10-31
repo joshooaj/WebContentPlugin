@@ -27,7 +27,9 @@ namespace WebContent
         private ServerId _serverId;
         private MessageCommunication _communication;
         private object _responseFilterRegistration;
+        private object _echoFilterRegistration;
         private ProxyFetchCorrelation _correlation;
+        private bool _trace;
 
         internal bool IsReady => _communication != null;
 
@@ -45,6 +47,16 @@ namespace WebContent
 
             try
             {
+                // Messaging black holes (a request that transmits but never gets answered) are
+                // invisible otherwise: the platform's own CommunicationClient traces every
+                // transmit/receive when this flag is on. Opt in with WEBCONTENT_MIP_TRACE=1.
+                if (Environment.GetEnvironmentVariable("WEBCONTENT_MIP_TRACE") == "1")
+                {
+                    _trace = true;
+                    EnvironmentManager.Instance.TraceMessageCommunication = true;
+                    EnvironmentManager.Instance.Log(false, nameof(ProxyFetchClient), "Messaging tracing enabled (WEBCONTENT_MIP_TRACE=1).");
+                }
+
                 MessageCommunicationManager.Start(masterSite);
                 _serverId = masterSite;
                 _communication = MessageCommunicationManager.Get(masterSite);
@@ -52,6 +64,17 @@ namespace WebContent
                 _responseFilterRegistration = _communication.RegisterCommunicationFilter(
                     OnProxyFetchResponse,
                     new CommunicationIdFilter(ProxyMessageIds.FetchResponseId));
+
+                // Diagnostic (trace only): our own requests are filter-routed back to the sender's
+                // endpoint queue. Inspecting that echo tests whether THIS process deserializes our
+                // payload types at all: an intact echo isolates payload stripping to the response
+                // leg, a null-Data echo isolates it to this process's message plumbing.
+                if (_trace)
+                {
+                    _echoFilterRegistration = _communication.RegisterCommunicationFilter(
+                        OnFetchRequestEcho,
+                        new CommunicationIdFilter(ProxyMessageIds.FetchRequestId));
+                }
 
                 EnvironmentManager.Instance.Log(false, nameof(ProxyFetchClient), "Proxy fetch harness ready.");
             }
@@ -66,19 +89,28 @@ namespace WebContent
         internal void Close()
         {
             var communication = _communication;
-            if (communication != null && _responseFilterRegistration != null)
+            if (communication != null)
             {
-                try
+                foreach (var registration in new[] { _responseFilterRegistration, _echoFilterRegistration })
                 {
-                    communication.UnRegisterCommunicationFilter(_responseFilterRegistration);
-                }
-                catch (Exception exception)
-                {
-                    EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy fetch response filter detach failed: {exception.Message}");
+                    if (registration == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        communication.UnRegisterCommunicationFilter(registration);
+                    }
+                    catch (Exception exception)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy fetch filter detach failed: {exception.Message}");
+                    }
                 }
             }
 
             _responseFilterRegistration = null;
+            _echoFilterRegistration = null;
             _communication = null;
             _correlation = null;
 
@@ -114,14 +146,17 @@ namespace WebContent
                 // fetcher plugin. The source argument stays null because the messaging layer
                 // stamps every transmit with the sender's endpoint FQID (ExternalMessageSource-
                 // EndPoint on the receiver), which is what the fetcher answers back to.
+                // Data is a JSON string, never the payload class: the platform binds custom
+                // payload types via Type.GetType and silently delivers null Data on hosts whose
+                // type resolution cannot see WebContent.dll (Smart Client). See ProxyFetchWireCodec.
                 communication.TransmitMessage(
                     new Message(
                         ProxyMessageIds.FetchRequestId,
-                        new ProxyFetchRequestPayload
+                        ProxyFetchWireCodec.ToWire(new ProxyFetchRequestPayload
                         {
                             CorrelationId = correlationId,
                             Url = target.AbsoluteUri,
-                        }),
+                        })),
                     null,
                     null,
                     null);
@@ -139,10 +174,51 @@ namespace WebContent
 
         private object OnProxyFetchResponse(Message message, FQID destination, FQID source)
         {
-            var frame = message?.Data as ProxyFetchResponsePayload;
+            var frame = ProxyFetchWireCodec.FrameFromWire(message?.Data);
             if (frame != null)
             {
-                _correlation?.Feed(frame);
+                var correlation = _correlation;
+                if (correlation != null && !correlation.Feed(frame) && _trace)
+                {
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(ProxyFetchClient),
+                        $"Proxy fetch response frame unmatched: kind={frame.Kind} correlationId='{frame.CorrelationId}'.");
+                }
+
+                return null;
+            }
+
+            // A FetchResponse message we cannot decode is the classic silent black hole. With
+            // tracing on, name what actually arrived (null Data = the platform failed to bind the
+            // wire type; a non-string type = foreign or pre-codec-format sender).
+            if (_trace && message != null)
+            {
+                var actual = message.Data == null ? "null Data" : message.Data.GetType().FullName;
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(ProxyFetchClient),
+                    $"Proxy fetch response frame not recognized: {actual} destination={destination} source={source}");
+            }
+
+            return null;
+        }
+
+        private object OnFetchRequestEcho(Message message, FQID destination, FQID source)
+        {
+            if (_trace)
+            {
+                var request = ProxyFetchWireCodec.RequestFromWire(message?.Data);
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(ProxyFetchClient),
+                    "Proxy fetch request echo: " +
+                    (message?.Data == null
+                        ? "null Data"
+                        : request != null
+                            ? "payload intact, id=" + request.CorrelationId
+                            : "undecodable content of type " + message.Data.GetType().FullName) +
+                    $" destination={destination} source={source}");
             }
 
             return null;

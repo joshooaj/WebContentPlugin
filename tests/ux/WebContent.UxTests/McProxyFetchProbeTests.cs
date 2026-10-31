@@ -56,11 +56,9 @@ public class McProxyFetchProbeTests
         //    NotAllowed failure frame, not a client-side timeout).
         log.AppendLine($"non-allowlisted http://10.255.255.1/ -> {RunFetch(mcMain, urlBox, "http://10.255.255.1/")}");
 
-        // 2) The workspace's allowlisted proxy target (the stored txtProxyTargets entry): proves
-        //    the ES-side workspace config resolve succeeded and the chunked success path
-        //    round-trips. The ES fetcher reaches https fine; only the SC browser's loopback leg
-        //    is http-only.
-        log.AppendLine($"allowlisted https://joshooaj.com/ -> {RunFetch(mcMain, urlBox, "https://joshooaj.com/")}");
+        // 2) Same url the Smart Client browser just tried: discriminates an Event Server-side
+        //    problem from a Smart Client-side one when SC's fetch times out but this succeeds.
+        log.AppendLine($"allowlisted http://httpforever.com/ -> {RunFetch(mcMain, urlBox, "http://httpforever.com/")}");
 
         Artifacts.WriteText("proxy-probe-results.txt", log.ToString());
         _output.WriteLine(log.ToString());

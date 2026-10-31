@@ -10,10 +10,10 @@ namespace WebContent
     /// also registered via PluginDefinition.PluginDefinedMessageIds.
     ///
     /// Payload whitelist: the Event Server discards messages whose Data object is outside the
-    /// allowed type set, but "types from plug-in defined namespace are allowed", so every payload
-    /// below lives in this plugin namespace and only references whitelist-safe primitives,
-    /// List&lt;T&gt;, and plugin-namespace types. No MessageCommunicationSettings.config escape
-    /// hatch is needed as long as that rule holds (docs/verification-matrix.md, ES rows).
+    /// allowed type set; since #54 the wire Data is always a plain JSON STRING (see
+    /// ProxyFetchWireCodec) - custom payload classes are never bound by host processes. The
+    /// platform rehydrates Data via Type.GetType(DataClass), which silently yields null on hosts
+    /// (Smart Client) whose type resolution cannot see WebContent.dll.
     /// </summary>
     internal static class ProxyMessageIds
     {
