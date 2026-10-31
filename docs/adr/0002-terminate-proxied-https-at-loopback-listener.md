@@ -1,7 +1,9 @@
 # 0002 — Terminate proxied HTTPS at the loopback listener; validate target TLS on the Event Server
 
 Date: 2026-10-31
-Status: Accepted
+Status: Accepted; Decision §1 trust lifecycle (per-session CA in the CurrentUser root store) and
+the browser-trust consequence are superseded by ADR-0003 (fixed deployment CA in LocalMachine
+stores, leaves minted by the Event Server). Everything else stands.
 
 ## Context
 
