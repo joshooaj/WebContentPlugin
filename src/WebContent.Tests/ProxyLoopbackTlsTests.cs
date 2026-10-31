@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
@@ -15,21 +14,50 @@ using Xunit;
 namespace WebContent.Tests
 {
     /// <summary>
-    /// Ticket #56 (ADR-0002): the loopback TLS manager issues the ephemeral certificates that let
-    /// the listener terminate a browser's CONNECT tunnel. The authority is a session CA; leaves
-    /// are per-host, chain to that authority, carry the host's SAN and server-auth EKU, and hold a
-    /// private key Schannel can actually use (proved by a real handshake, not just HasPrivateKey).
+    /// Ticket #56 (ADR-0003): the loopback TLS manager no longer owns a CA - it generates a local
+    /// key per origin, asks the Event Server (through an injected mint channel) to sign it, and
+    /// attaches the private half locally. Leaves chain to the deployment authority the channel
+    /// reports, carry the host's SAN and server-auth EKU, and hold a private key Schannel can
+    /// actually use (proved by a real handshake, not just HasPrivateKey).
     /// </summary>
     public class ProxyLoopbackTlsTests : IDisposable
     {
         private static readonly Action<string> Sink = _ => { };
 
-        private readonly ProxyLoopbackTls _tls = new ProxyLoopbackTls(Sink);
+        private readonly Authority _authority = Authority.Create(Sink);
+        private readonly List<(string Host, int Port)> _mintCalls = new List<(string, int)>();
+        private Func<string, int, byte[], ProxyLeafResponsePayload> _responder;
+        private ProxyLoopbackTls _tls;
+
+        public ProxyLoopbackTlsTests()
+        {
+            _responder = Mint;
+            _tls = new ProxyLoopbackTls(
+                (host, port, spki) => Task.FromResult(_responder(host, port, spki)),
+                Sink);
+        }
+
+        private ProxyLeafResponsePayload Mint(string host, int port, byte[] spki)
+        {
+            _mintCalls.Add((host, port));
+            return new ProxyLeafResponsePayload
+            {
+                Success = true,
+                LeafDerBase64 = Convert.ToBase64String(_authority.MintLeafForPublicKey(host, spki)),
+                AuthorityDerBase64 = Convert.ToBase64String(_authority.Certificate.RawData),
+                AuthorityThumbprint = _authority.Certificate.Thumbprint,
+            };
+        }
+
+        private Task<X509Certificate2> LeafAsync(string host, int port = 8443)
+        {
+            return _tls.GetOrCreateLeafCertificateAsync(host, port);
+        }
 
         [Fact]
-        public void LeafChainsToTheSessionAuthorityWithServerAuthAndTheHostSan()
+        public async Task LeafChainsToTheDeploymentAuthorityWithServerAuthAndTheHostSan()
         {
-            var leaf = _tls.GetOrCreateLeafCertificate("cam1.test");
+            var leaf = await LeafAsync("cam1.test");
 
             Assert.Equal("CN=cam1.test", leaf.Subject);
             var eku = leaf.Extensions["2.5.29.37"] as X509EnhancedKeyUsageExtension;
@@ -44,21 +72,21 @@ namespace WebContent.Tests
             chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
             chain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.Zero;
             // ExtraStore alone never confers trust - the CA must be allowed to show as an unknown
-            // root here; the live browser path installs it into the trusted-root store instead.
+            // root here; the deployed machine trust roots carry it instead.
             chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
-            chain.ChainPolicy.ExtraStore.Add(_tls.AuthorityCertificate);
+            chain.ChainPolicy.ExtraStore.Add(_authority.Certificate);
             Assert.True(chain.Build(leaf));
 
-            // Element 0 = leaf, element 1 = the session authority at the root: exactly the two-link
-            // chain Chromium will see once the authority is in the user's trusted-root store.
+            // Element 0 = leaf, element 1 = the deployment authority at the root: exactly the
+            // two-link chain Chromium sees once LocalMachine\Root holds the CA.
             Assert.Equal(2, chain.ChainElements.Count);
-            Assert.Equal(_tls.AuthorityCertificate.Thumbprint, chain.ChainElements[1].Certificate.Thumbprint);
+            Assert.Equal(_authority.Certificate.Thumbprint, chain.ChainElements[1].Certificate.Thumbprint);
         }
 
         [Fact]
-        public void LeafForAnIpAddressHostCarriesAnIpAddressSan()
+        public async Task LeafForAnIpAddressHostCarriesAnIpAddressSan()
         {
-            var leaf = _tls.GetOrCreateLeafCertificate("10.20.30.40");
+            var leaf = await LeafAsync("10.20.30.40");
 
             var san = leaf.Extensions["2.5.29.17"];
             Assert.NotNull(san);
@@ -66,18 +94,37 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void LeavesAreCachedPerHostAndDistinctAcrossHosts()
+        public async Task LeavesAreCachedPerOriginAndDistinctAcrossOrigins()
         {
-            var first = _tls.GetOrCreateLeafCertificate("cam1.test");
-            var again = _tls.GetOrCreateLeafCertificate("CAM1.TEST");
-            var other = _tls.GetOrCreateLeafCertificate("cam2.test");
+            var first = await LeafAsync("cam1.test", 8443);
+            var again = await LeafAsync("CAM1.TEST", 8443);
+            var otherPort = await LeafAsync("cam1.test", 9443);
+            var otherHost = await LeafAsync("cam2.test", 8443);
 
             Assert.Equal(first.Thumbprint, again.Thumbprint);
-            Assert.NotEqual(first.Thumbprint, other.Thumbprint);
+            Assert.NotEqual(first.Thumbprint, otherPort.Thumbprint);
+            Assert.NotEqual(first.Thumbprint, otherHost.Thumbprint);
+
+            // One mint exchange per (host, port): a browser reconnect does not re-ask the server.
+            Assert.Equal(3, _mintCalls.Count);
         }
 
         [Fact]
-        public async Task TerminatingATunnelPresentsAChainValidatingLeafAndRelaysBytes()
+        public async Task ARefusedMintFailsTheTunnelWithTheServerErrorCode()
+        {
+            _responder = (host, port, spki) => new ProxyLeafResponsePayload
+            {
+                Success = false,
+                ErrorCode = ProxyFetchErrorCodes.NotAllowed,
+                ErrorMessage = "no workspace allowlists this origin",
+            };
+
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => LeafAsync("evil.example"));
+            Assert.Contains(ProxyFetchErrorCodes.NotAllowed, failure.Message);
+        }
+
+        [Fact]
+        public async Task TunnelTerminationPresentsTheMintedLeafAndRelaysBytes()
         {
             var serverSide = new TcpListener(IPAddress.Loopback, 0);
             serverSide.Start();
@@ -122,10 +169,10 @@ namespace WebContent.Tests
                     var verify = new X509Chain();
                     verify.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
                     verify.ChainPolicy.UrlRetrievalTimeout = TimeSpan.Zero;
-                    verify.ChainPolicy.ExtraStore.Add(_tls.AuthorityCertificate);
+                    verify.ChainPolicy.ExtraStore.Add(_authority.Certificate);
                     verify.Build(new X509Certificate2(certificate.GetRawCertData()));
-                    // The system store does not know the session CA (the store install is live-verified);
-                    // what must hold is that the chain itself is the two-link leaf->authority shape.
+                    // The system store does not know the deployment CA (the LocalMachine\Root
+                    // import is live-verified); what must hold is the two-link chain shape.
                     return chain != null;
                 }))
                 {
@@ -143,8 +190,11 @@ namespace WebContent.Tests
         public async Task LeafPrivateKeySurvivesTheSchannelServerHandshake()
         {
             // The historical failure mode: certificates created in memory hold EPHEMERAL keys that
-            // Schannel refuses for server authentication. A successful AuthenticateAsServer with
-            // the manager's leaf is the pin that the key ended up in a usable persisted form.
+            // Schannel refuses for server authentication. A successful AuthenticateAsServer with a
+            // channel-minted leaf plus the locally generated key is the pin that the attached key
+            // ended up in a usable persisted form.
+            var leaf = await LeafAsync("cam1.test");
+
             var serverSide = new TcpListener(IPAddress.Loopback, 0);
             serverSide.Start();
             var port = ((IPEndPoint)serverSide.LocalEndpoint).Port;
@@ -155,8 +205,7 @@ namespace WebContent.Tests
                 using (var socket = client.GetStream())
                 using (var tls = new SslStream(socket, false))
                 {
-                    await tls.AuthenticateAsServerAsync(
-                        _tls.GetOrCreateLeafCertificate("cam1.test"), false, SslProtocols.Tls12, false);
+                    await tls.AuthenticateAsServerAsync(leaf, false, SslProtocols.Tls12, false);
                     return true;
                 }
             });
@@ -175,28 +224,17 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void AuthorityIsASelfSignedCertificateAuthority()
+        public async Task DisposeClosesTheManagerToFurtherLeafRequests()
         {
-            var authority = _tls.AuthorityCertificate;
-            var basicConstraints = authority.Extensions["2.5.29.19"] as X509BasicConstraintsExtension;
-            Assert.NotNull(basicConstraints);
-            Assert.True(basicConstraints.CertificateAuthority);
-            Assert.True(basicConstraints.Critical);
+            _tls.Dispose();
 
-            var keyUsage = authority.Extensions["2.5.29.15"] as X509KeyUsageExtension;
-            Assert.NotNull(keyUsage);
-            Assert.True(keyUsage.KeyUsages.HasFlag(X509KeyUsageFlags.KeyCertSign));
-            Assert.True(keyUsage.KeyUsages.HasFlag(X509KeyUsageFlags.CrlSign));
-
-            // Deliberately NO EKU on the CA: a CA carrying an EKU makes chain validation of its
-            // leaves fail with NotValidForUsage on Windows.
-            Assert.Null(authority.Extensions["2.5.29.37"]);
-            Assert.Equal("CN=XProtect WebContent Plugin Loopback Proxy", authority.Subject);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => LeafAsync("cam1.test"));
         }
 
         public void Dispose()
         {
-            _tls.Dispose();
+            _tls?.Dispose();
+            _authority.Dispose();
         }
     }
 }

@@ -17,12 +17,11 @@ namespace WebContent.Client
     /// Started when a proxied browser is created and stopped when that browser is disposed;
     /// WebView2 environment recreation reuses the same listener and port.
     ///
-    /// Ticket #56 (ADR-0002): while the listener serves, it also terminates allowlisted https
-    /// CONNECT tunnels itself — a <see cref="ProxyLoopbackTls"/> session CA plus per-host leaves
-    /// wrap each tunnel in TLS at loopback, and the decrypted requests continue through the same
-    /// fetch pipeline. The session CA is trusted in the user's root store only for the listener's
-    /// lifetime (and only when https targets exist); a listener without https targets never mints
-    /// a CA at all.
+    /// Ticket #56 (ADR-0002/ADR-0003): while the listener serves, allowlisted https CONNECT
+    /// tunnels terminate at <see cref="ProxyLoopbackTls"/>, which asks the Event Server to sign
+    /// locally generated keys and wraps each tunnel in TLS at loopback; the decrypted requests
+    /// continue through the same fetch pipeline. The listener itself never touches a certificate
+    /// store - trust of the deployment CA is a machine-level deployment concern, not session state.
     /// </summary>
     internal sealed class LoopbackProxyListener
     {
@@ -31,7 +30,6 @@ namespace WebContent.Client
         private IReadOnlyList<string> _canonicalTargets;
         private TcpListener _listener;
         private volatile bool _stopping;
-        private bool _trustInstalled;
 
         internal int Port { get; private set; }
 
@@ -39,20 +37,18 @@ namespace WebContent.Client
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
             _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));
-            _tls = new ProxyLoopbackTls(message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
+            _tls = new ProxyLoopbackTls(RequestLeafAsync, message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
         }
 
         /// <summary>Swap the allowlist gate live (an admin target edit needs no browser restart).</summary>
         internal void UpdateTargets(IReadOnlyList<string> canonicalTargets)
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
-            ReconcileTrust();
         }
 
         /// <summary>Bind 127.0.0.1:0 and start accepting. The assigned port is available after.</summary>
         internal void Start()
         {
-            ReconcileTrust();
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
             Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -71,42 +67,29 @@ namespace WebContent.Client
                 EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), $"Proxy listener on port {Port} stopped with: {exception.Message}");
             }
 
-            // The session CA never outlives the listener: untrust first (browser sessions on it are
-            // over), then drop the leaves and CA keys.
-            if (_trustInstalled)
-            {
-                _trustInstalled = false;
-                ProxyLoopbackTrust.Remove(_tls.AuthorityCertificate);
-            }
-
+            // Leaf certificates and their local key containers die with the listener; the
+            // deployment CA is shared machine state and deliberately untouched here.
             _tls.Dispose();
         }
 
         /// <summary>
-        /// The user must trust the session CA exactly while https targets could be tunnelled:
-        /// install when any https target is allowlisted, remove when none is. Idempotent.
+        /// The ADR-0003 mint channel: ask the Event Server (over the same messaging client the
+        /// fetches use) to sign this locally generated public key for the given origin.
         /// </summary>
-        private void ReconcileTrust()
+        private static Task<ProxyLeafResponsePayload> RequestLeafAsync(string host, int port, byte[] subjectPublicKeyInfoDer)
         {
-            var needsTrust = false;
-            foreach (var target in _canonicalTargets)
+            var client = ProxyFetchClient.Active;
+            if (client == null)
             {
-                if (target != null && target.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(new ProxyLeafResponsePayload
                 {
-                    needsTrust = true;
-                    break;
-                }
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Error,
+                    ErrorMessage = "The proxy fetch client is not connected to the Event Server.",
+                });
             }
 
-            if (needsTrust && !_trustInstalled)
-            {
-                _trustInstalled = ProxyLoopbackTrust.Install(_tls.AuthorityCertificate);
-            }
-            else if (!needsTrust && _trustInstalled)
-            {
-                _trustInstalled = false;
-                ProxyLoopbackTrust.Remove(_tls.AuthorityCertificate);
-            }
+            return client.RequestLeafAsync(host, port, subjectPublicKeyInfoDer);
         }
 
         private async Task AcceptLoopAsync()

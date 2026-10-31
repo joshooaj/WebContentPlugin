@@ -683,15 +683,16 @@ namespace WebContent
 #endif
 
     /// <summary>
-    /// Ownership bundle for one minted leaf: the usable certificate plus the key object that must
-    /// outlive it (the Framework PrivateKey attachment references the provider handle/container).
+    /// Ownership bundle for one minted leaf: the usable certificate plus the key owner that must
+    /// outlive it (the Framework PrivateKey attachment references the provider handle/container,
+    /// and a client-generated key is wrapped in <see cref="ProxyLoopbackClientKey"/>).
     /// </summary>
     internal sealed class ProxyLoopbackLeafOwner : IDisposable
     {
         private readonly X509Certificate2 _certificate;
-        private readonly RSA _key;
+        private readonly IDisposable _key;
 
-        internal ProxyLoopbackLeafOwner(X509Certificate2 certificate, RSA key)
+        internal ProxyLoopbackLeafOwner(X509Certificate2 certificate, IDisposable key)
         {
             _certificate = certificate;
             _key = key;

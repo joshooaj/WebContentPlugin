@@ -27,8 +27,10 @@ namespace WebContent
         private ServerId _serverId;
         private MessageCommunication _communication;
         private object _responseFilterRegistration;
+        private object _leafResponseFilterRegistration;
         private object _echoFilterRegistration;
         private ProxyFetchCorrelation _correlation;
+        private ProxyLeafCorrelation _leafCorrelation;
         private bool _trace;
 
         internal bool IsReady => _communication != null;
@@ -61,9 +63,16 @@ namespace WebContent
                 _serverId = masterSite;
                 _communication = MessageCommunicationManager.Get(masterSite);
                 _correlation = new ProxyFetchCorrelation();
+                _leafCorrelation = new ProxyLeafCorrelation();
                 _responseFilterRegistration = _communication.RegisterCommunicationFilter(
                     OnProxyFetchResponse,
                     new CommunicationIdFilter(ProxyMessageIds.FetchResponseId));
+
+                // ADR-0003: the same client hosts the leaf-mint exchange the loopback listener's
+                // TLS termination needs; its single-frame responses correlate separately.
+                _leafResponseFilterRegistration = _communication.RegisterCommunicationFilter(
+                    OnProxyLeafResponse,
+                    new CommunicationIdFilter(ProxyMessageIds.LeafResponseId));
 
                 // Diagnostic (trace only): our own requests are filter-routed back to the sender's
                 // endpoint queue. Inspecting that echo tests whether THIS process deserializes our
@@ -91,7 +100,7 @@ namespace WebContent
             var communication = _communication;
             if (communication != null)
             {
-                foreach (var registration in new[] { _responseFilterRegistration, _echoFilterRegistration })
+                foreach (var registration in new[] { _responseFilterRegistration, _leafResponseFilterRegistration, _echoFilterRegistration })
                 {
                     if (registration == null)
                     {
@@ -110,9 +119,11 @@ namespace WebContent
             }
 
             _responseFilterRegistration = null;
+            _leafResponseFilterRegistration = null;
             _echoFilterRegistration = null;
             _communication = null;
             _correlation = null;
+            _leafCorrelation = null;
 
             // Deliberately no MessageCommunicationManager.Stop: the messaging session is
             // process-wide and may be shared by other plugins (no MIP sample ever stops it).
@@ -189,6 +200,83 @@ namespace WebContent
             }
 
             return completion;
+        }
+
+        /// <summary>
+        /// ADR-0003: send one loopback-leaf mint request over the shared channel and return the
+        /// task the single response frame completes. The leaf exchange is far less frequent than
+        /// fetches (one per origin per browser session), so it shares the fetcher's messaging
+        /// session and JSON-string discipline rather than owning a separate connection.
+        /// </summary>
+        internal Task<ProxyLeafResponsePayload> RequestLeafAsync(string host, int port, byte[] subjectPublicKeyInfo, TimeSpan? deadline = null)
+        {
+            var correlation = _leafCorrelation;
+            var communication = _communication;
+            if (communication == null || correlation == null)
+            {
+                return Task.FromResult(new ProxyLeafResponsePayload
+                {
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Error,
+                    ErrorMessage = "The proxy channel is not connected to the Event Server.",
+                });
+            }
+
+            var correlationId = Guid.NewGuid().ToString("N");
+            var completion = correlation.Begin(correlationId, deadline ?? DefaultDeadline);
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(
+                        ProxyMessageIds.LeafRequestId,
+                        ProxyFetchWireCodec.ToWire(new ProxyLeafRequestPayload
+                        {
+                            CorrelationId = correlationId,
+                            Host = host,
+                            Port = port,
+                            SpkiBase64 = Convert.ToBase64String(subjectPublicKeyInfo),
+                        })),
+                    null,
+                    null,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                correlation.Abandon(correlationId);
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy leaf request not sent: {exception.Message}");
+            }
+
+            return completion;
+        }
+
+        private object OnProxyLeafResponse(Message message, FQID destination, FQID source)
+        {
+            var response = ProxyFetchWireCodec.LeafResponseFromWire(message?.Data);
+            if (response != null)
+            {
+                var correlation = _leafCorrelation;
+                if (correlation != null && !correlation.Feed(response) && _trace)
+                {
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(ProxyFetchClient),
+                        $"Leaf response unmatched: correlationId='{response.CorrelationId}'.");
+                }
+
+                return null;
+            }
+
+            if (_trace && message != null)
+            {
+                var actual = message.Data == null ? "null Data" : message.Data.GetType().FullName;
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(ProxyFetchClient),
+                    $"Leaf response not recognized: {actual} destination={destination} source={source}");
+            }
+
+            return null;
         }
 
         private object OnProxyFetchResponse(Message message, FQID destination, FQID source)
