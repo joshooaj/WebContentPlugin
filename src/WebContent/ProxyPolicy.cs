@@ -97,6 +97,67 @@ namespace WebContent
         }
 
         /// <summary>
+        /// #56: the optional per-entry flag token marking "accept an untrusted TLS certificate for
+        /// this target". The flag is stored with the entry, never as a global toggle.
+        /// </summary>
+        internal const string AcceptUntrustedFlag = "accept-untrusted";
+
+        /// <summary>
+        /// Parses one admin proxy-target line (#56): an origin entry plus the optional
+        /// <see cref="AcceptUntrustedFlag"/> token, in either order. An unknown token or a second
+        /// origin on the line rejects the whole entry — a typo must not silently drop the flag or
+        /// smuggle an extra origin past the admin.
+        /// </summary>
+        internal static bool TryParseTargetEntry(string line, out string normalized, out bool acceptUntrusted)
+        {
+            normalized = null;
+            acceptUntrusted = false;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return false;
+            }
+
+            string originEntry = null;
+            foreach (var token in line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (string.Equals(token, AcceptUntrustedFlag, StringComparison.OrdinalIgnoreCase))
+                {
+                    acceptUntrusted = true;
+                    continue;
+                }
+
+                if (originEntry != null)
+                {
+                    return false;
+                }
+
+                originEntry = token;
+            }
+
+            if (originEntry == null)
+            {
+                return false;
+            }
+
+            if (!TryNormalizeTarget(originEntry, out normalized))
+            {
+                normalized = null;
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Renders a stored entry back as the admin-page line that created it (#56): the canonical
+        /// origin plus the flag token only when the entry carries the override.
+        /// </summary>
+        internal static string DescribeTargetEntry(string canonicalOrigin, bool acceptUntrusted)
+        {
+            return acceptUntrusted ? $"{canonicalOrigin} {AcceptUntrustedFlag}" : canonicalOrigin;
+        }
+
+        /// <summary>
         /// True when the request origin already appears in the allowlisted canonical origins —
         /// exact origin match, no wildcards, no path or prefix semantics.
         /// </summary>

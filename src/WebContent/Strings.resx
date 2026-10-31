@@ -238,7 +238,7 @@
     <value>Proxy targets</value>
   </data>
   <data name="ProxyTargetsHint" xml:space="preserve">
-    <value>One target per line, for example https://10.0.0.5:8443. Only allowlisted targets can be reached through the proxy.</value>
+    <value>One target per line, for example https://10.0.0.5:8443. Only allowlisted targets can be reached through the proxy. Append accept-untrusted to a target's line to accept that device's untrusted TLS certificate; without it, certificates are validated normally.</value>
   </data>
   <data name="InvalidProxyTargetMessage" xml:space="preserve">
     <value>"{0}" is not a valid proxy target. Enter a target with scheme, host and port, for example https://10.0.0.5:8443.</value>

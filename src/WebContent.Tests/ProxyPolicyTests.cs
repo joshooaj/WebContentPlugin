@@ -71,5 +71,42 @@ namespace WebContent.Tests
             Assert.False(ProxyPolicy.IsRequestAllowed(new string[0], new Uri("https://cam2.local:8443/")));
             Assert.False(ProxyPolicy.IsRequestAllowed(null, new Uri("https://cam2.local:8443/")));
         }
+
+        // #56: an admin line is one origin plus an optional accept-untrusted-certificate flag
+        // token. Everything about the entry - origin and flag - travels with the entry.
+
+        [Theory]
+        [InlineData("https://10.0.0.5:8443", "https://10.0.0.5:8443", false)]
+        [InlineData("https://10.0.0.5:8443 accept-untrusted", "https://10.0.0.5:8443", true)]
+        [InlineData("https://cam2.local/ ACCEPT-UNTRUSTED", "https://cam2.local", true)]
+        [InlineData("accept-untrusted Cam2.Local:8443", "https://cam2.local:8443", true)]
+        [InlineData("  cam2.local:8443   accept-untrusted  ", "https://cam2.local:8443", true)]
+        public void TargetLineCarriesOneOriginAndAnOptionalUntrustedCertificateFlag(
+            string line, string expectedOrigin, bool expectedFlag)
+        {
+            Assert.True(ProxyPolicy.TryParseTargetEntry(line, out var origin, out var acceptUntrusted));
+            Assert.Equal(expectedOrigin, origin);
+            Assert.Equal(expectedFlag, acceptUntrusted);
+        }
+
+        [Theory]
+        [InlineData("https://cam2.local:8443 allow-all")]
+        [InlineData("https://cam2.local:8443 accept_untrusted")]
+        [InlineData("https://a.test https://b.test")]
+        [InlineData("accept-untrusted")]
+        [InlineData("ftp://cam2 accept-untrusted")]
+        [InlineData("")]
+        [InlineData(null)]
+        public void MalformedTargetLineIsRejected(string line)
+        {
+            Assert.False(ProxyPolicy.TryParseTargetEntry(line, out _, out _));
+        }
+
+        [Fact]
+        public void StoredEntryRendersBackAsTheAdminLineThatCreatedIt()
+        {
+            Assert.Equal("https://cam2.local:8443", ProxyPolicy.DescribeTargetEntry("https://cam2.local:8443", false));
+            Assert.Equal("https://cam2.local:8443 accept-untrusted", ProxyPolicy.DescribeTargetEntry("https://cam2.local:8443", true));
+        }
     }
 }

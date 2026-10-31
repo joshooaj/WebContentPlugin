@@ -303,17 +303,21 @@ namespace WebContent.Admin
 
         /// <summary>
         /// Ticket #52: parses the admin's one-origin-per-line proxy targets into canonical
-        /// scheme/host/port records. An invalid line rejects the save whatever the proxy toggle
-        /// state (same posture as the home address), duplicates and other overlapping entries
-        /// collapse onto one record, and an enabled proxy with no targets at all is rejected so
-        /// the toggle can never mean "allow nothing" by accident. A disabled proxy keeps the
-        /// targets parsed and stored anyway - turning the proxy off must not erase the allowlist
-        /// the next admin will need (MC-9 in the verification matrix).
+        /// scheme/host/port records. Since #56 a line may carry the accept-untrusted-certificate
+        /// flag token, stored on the entry itself. An invalid line rejects the save whatever the
+        /// proxy toggle state (same posture as the home address), duplicates and other overlapping
+        /// entries collapse onto one record (any flagged duplicate flags the origin), and an
+        /// enabled proxy with no targets at all is rejected so the toggle can never mean "allow
+        /// nothing" by accident. A disabled proxy keeps the targets parsed and stored anyway -
+        /// turning the proxy off must not erase the allowlist the next admin will need (MC-9 in
+        /// the verification matrix).
         /// </summary>
         private static bool TryBuildProxyTargets(string itemName, FQID itemFqid, string targetsText, bool proxyEnabled, out List<ProxyTargetConfiguration> targets)
         {
             targets = new List<ProxyTargetConfiguration>();
+            var origins = new List<string>();
             var seenOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var untrustedOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var rawLine in (targetsText ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             {
@@ -323,24 +327,33 @@ namespace WebContent.Admin
                     continue;
                 }
 
-                if (!ProxyPolicy.TryNormalizeTarget(line, out var origin))
+                if (!ProxyPolicy.TryParseTargetEntry(line, out var origin, out var acceptUntrusted))
                 {
                     EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): invalid proxy target '{line}'.");
                     MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, line), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
 
-                if (!seenOrigins.Add(origin))
+                if (seenOrigins.Add(origin))
                 {
-                    continue;
+                    origins.Add(origin);
                 }
 
-                var originUri = new Uri(origin);
+                if (acceptUntrusted)
+                {
+                    untrustedOrigins.Add(origin);
+                }
+            }
+
+            foreach (var origin in origins)
+            {
+                var parsedOrigin = new Uri(origin);
                 targets.Add(new ProxyTargetConfiguration
                 {
-                    Scheme = originUri.Scheme,
-                    Host = originUri.Host,
-                    Port = originUri.Port
+                    Scheme = parsedOrigin.Scheme,
+                    Host = parsedOrigin.Host,
+                    Port = parsedOrigin.Port,
+                    AcceptUntrusted = untrustedOrigins.Contains(origin),
                 });
             }
 
@@ -370,7 +383,7 @@ namespace WebContent.Admin
             {
                 if (target != null && ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin))
                 {
-                    lines.Add(origin);
+                    lines.Add(ProxyPolicy.DescribeTargetEntry(origin, target.AcceptUntrusted));
                 }
             }
 
