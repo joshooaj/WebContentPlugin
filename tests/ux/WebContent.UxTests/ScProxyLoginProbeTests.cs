@@ -117,6 +117,14 @@ public class ScProxyLoginProbeTests
             signedIn = await marker.TextContentAsync();
             title = await page.TitleAsync();
             cookieEcho = await (await page.QuerySelectorAsync("#cookie-echo"))?.TextContentAsync();
+
+            // The dashboard's background fetch resolves asynchronously — reading #xhr-status the
+            // instant the dashboard renders races it and catches the XHR-PENDING placeholder.
+            // Wait for the XHR to land (either verdict), THEN read it.
+            await page.WaitForFunctionAsync(
+                "() => { var el = document.getElementById('xhr-status'); return el && el.textContent && el.textContent !== 'XHR-PENDING'; }",
+                null,
+                new Microsoft.Playwright.PageWaitForFunctionOptions { Timeout = 30000 });
             xhrStatus = await (await page.QuerySelectorAsync("#xhr-status"))?.TextContentAsync();
 
             await page.ScreenshotAsync(new Microsoft.Playwright.PageScreenshotOptions

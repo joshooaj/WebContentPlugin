@@ -301,6 +301,13 @@ public static class ManagementClientUi
                     Thread.Sleep(1500);
                     continue;
                 }
+                // The tree can still be populating right after login (server round-trips):
+                // give the search itself a grace period before declaring the node absent.
+                if (attempt < 3)
+                {
+                    Thread.Sleep(2000);
+                    continue;
+                }
                 throw new InvalidOperationException($"Tree node '{name}' not found (attempt {attempt}).");
             }
 
