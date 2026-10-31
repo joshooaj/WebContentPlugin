@@ -1,3 +1,4 @@
+using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
@@ -35,8 +36,7 @@ public static class LoginFlow
 
         var passwordBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_passwordBox"));
         if (passwordBox == null) throw new InvalidOperationException("Login dialog has no _passwordBox.");
-        passwordBox.Focus();
-        Keyboard.Type(config.VmsPassword);
+        FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
 
         var connect = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect"))
                       ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
@@ -193,5 +193,40 @@ public static class LoginFlow
             // fall through to keyboard input
         }
         Keyboard.Type(value);
+    }
+
+    /// <summary>
+    /// Keyboard.Type lands on whatever owns the FOREGROUND window, and a plain Focus() can be
+    /// silently ignored while another app (e.g. a just-retired Management Client) still owns
+    /// the foreground - the login then proceeds with an empty password and Smart Client answers
+    /// "insufficient user rights". Verify the element actually holds focus before typing,
+    /// re-activating the window between attempts.
+    /// </summary>
+    private static void FocusAndType(ClientSession session, Window window, AutomationElement element, string text)
+    {
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            try { window.Focus(); } catch { }
+            try { element.Focus(); } catch { }
+            try
+            {
+                var focused = session.Automation.FocusedElement();
+                if (focused != null
+                    && string.Equals(focused.AutomationId, element.AutomationId, StringComparison.OrdinalIgnoreCase)
+                    && focused.Properties.NativeWindowHandle.Value == window.Properties.NativeWindowHandle.Value)
+                {
+                    Keyboard.Type(text);
+                    return;
+                }
+            }
+            catch { }
+            Thread.Sleep(250);
+        }
+
+        // Focus never verified (some WPF builds report it oddly): mouse-click the box to force
+        // foreground + focus together, then type anyway.
+        element.Click();
+        Thread.Sleep(150);
+        Keyboard.Type(text);
     }
 }
