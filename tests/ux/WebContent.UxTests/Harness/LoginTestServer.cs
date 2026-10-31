@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace WebContent.UxTests.Harness;
@@ -14,6 +17,10 @@ namespace WebContent.UxTests.Harness;
 /// issued with a 302, a dashboard that only answers when the cookie comes back, and an XHR
 /// endpoint the dashboard polls in the background. Every request is journaled so probe
 /// artifacts show what actually crossed the proxy.
+///
+/// #56 adds a TLS mode: the same site behind a self-signed certificate minted in-process, so
+/// the Event Server's target TLS validation (and the per-target accept-untrusted override)
+/// has a genuinely untrusted chain to decide on.
 /// </summary>
 public sealed class LoginTestServer : IDisposable
 {
@@ -21,6 +28,7 @@ public sealed class LoginTestServer : IDisposable
     public const string Password = "camera1";
 
     private readonly TcpListener _listener;
+    private readonly X509Certificate2 _tlsCertificate;
     private readonly HashSet<string> _issuedSessions = new();
     private readonly List<string> _journal = new();
 
@@ -31,15 +39,68 @@ public sealed class LoginTestServer : IDisposable
 
     public IReadOnlyList<string> Journal { get { lock (_journal) return _journal.ToList(); } }
 
-    public LoginTestServer(int port)
+    public LoginTestServer(int port) : this(port, useTls: false)
+    {
+    }
+
+    /// <param name="useTls">Serve over HTTPS with an in-process self-signed certificate —
+    /// untrusted by design, which is exactly what the #56 fail-closed / override probes need.
+    /// The certificate carries the bind host as SAN so the failure is chain-trust, not name mismatch.</param>
+    public LoginTestServer(int port, bool useTls)
     {
         Port = port;
+        if (useTls)
+        {
+            _tlsCertificate = CreateSelfSignedCertificate();
+        }
+
         _listener = new TcpListener(IPAddress.Any, port);
         _listener.Start();
         _ = Task.Run(AcceptLoopAsync);
     }
 
-    public void Dispose() => _listener.Stop();
+    public void Dispose()
+    {
+        _listener.Stop();
+        _tlsCertificate?.Dispose();
+    }
+
+    /// <summary>
+    /// RSA self-signed certificate valid for the addresses the probe binds (the VMS-network
+    /// address the allowlist names, plus loopback for local poking). KeyUsage/EKU mirror a real
+    /// camera portal's server certificate; only the chain is untrusted.
+    /// </summary>
+    private static X509Certificate2 CreateSelfSignedCertificate()
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest(
+            "CN=ACME IPCStore (self-signed test)",
+            key,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+            false));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") },
+            false));
+
+        var san = new SubjectAlternativeNameBuilder();
+        san.AddIpAddress(IPAddress.Loopback);
+        san.AddIpAddress(IPAddress.Parse("172.16.128.210"));
+        san.AddDnsName(Environment.MachineName.ToLowerInvariant());
+        request.CertificateExtensions.Add(san.Build());
+
+        using var created = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(365));
+
+        // PFX roundtrip lands the key in a persisted form Schannel accepts server-side.
+        var password = Guid.NewGuid().ToString("N");
+        var portable = created.Export(X509ContentType.Pkcs12, password);
+        return X509CertificateLoader.LoadPkcs12(portable, password);
+    }
 
     private async Task AcceptLoopAsync()
     {
@@ -64,9 +125,31 @@ public sealed class LoginTestServer : IDisposable
         using (client)
         {
             client.NoDelay = true;
-            using var stream = client.GetStream();
+            Stream stream = client.GetStream();
             try
             {
+                if (_tlsCertificate != null)
+                {
+                    var tls = new System.Net.Security.SslStream(stream, false);
+                    stream = tls;
+                    try
+                    {
+                        await tls.AuthenticateAsServerAsync(
+                            _tlsCertificate, false, SslProtocols.Tls12, false);
+                    }
+                    catch (Exception handshake)
+                    {
+                        // A failed client handshake is itself probe data (e.g. the fetcher
+                        // refusing the chain mid-TLS is a clean close, not a request).
+                        lock (_journal)
+                        {
+                            _journal.Add($"TLS handshake failed: {handshake.GetType().Name}: {handshake.Message}");
+                        }
+
+                        return;
+                    }
+                }
+
                 await HandleAsync(stream);
             }
             catch (Exception exception)
@@ -76,10 +159,14 @@ public sealed class LoginTestServer : IDisposable
                     _journal.Add($"request aborted: {exception.GetType().Name}: {exception.Message}");
                 }
             }
+            finally
+            {
+                stream.Dispose();
+            }
         }
     }
 
-    private async Task HandleAsync(NetworkStream stream)
+    private async Task HandleAsync(Stream stream)
     {
         var head = await ReadHeadAsync(stream);
         if (head == null)
@@ -277,7 +364,7 @@ public sealed class LoginTestServer : IDisposable
         return Encoding.UTF8.GetBytes(head.ToString()).Concat(body).ToArray();
     }
 
-    private static async Task<string> ReadHeadAsync(NetworkStream stream)
+    private static async Task<string> ReadHeadAsync(Stream stream)
     {
         var received = new MemoryStream();
         var buffer = new byte[4096];
@@ -303,7 +390,7 @@ public sealed class LoginTestServer : IDisposable
         return null;
     }
 
-    private static async Task WriteAsync(NetworkStream stream, byte[] response)
+    private static async Task WriteAsync(Stream stream, byte[] response)
     {
         await stream.WriteAsync(response, 0, response.Length);
         await stream.FlushAsync();

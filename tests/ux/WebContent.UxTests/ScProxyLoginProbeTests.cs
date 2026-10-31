@@ -7,7 +7,7 @@ using Xunit.Abstractions;
 namespace WebContent.UxTests;
 
 /// <summary>
-/// Live acceptance probe for #55 (SC-2 in docs/verification-matrix.md): a vendor-style login
+/// Live acceptance probes for #55 (SC-2 in docs/verification-matrix.md): a vendor-style login
 /// flow through the proxied workspace browser. A POST login form, a 302 + Set-Cookie session
 /// round-trip, a cookie-gated dashboard, and a background XHR all cross the
 /// browser -> loopback listener -> MIP messaging -> Event Server fetcher chain with their
@@ -16,6 +16,15 @@ namespace WebContent.UxTests;
 /// site from this machine via <see cref="LoginTestServer"/> (the Event Server fetches it from
 /// the server network), then drives the login in Smart Client over CDP.
 /// Artifacts land in webcontent-sc-proxy-probe\&lt;run&gt; (sc-login-probe-*.png / .txt).
+///
+/// #56 adds the two HTTPS rows: the same site behind a self-signed certificate, allowlisted
+/// WITHOUT the per-target override (the Event Server must refuse the target chain and the
+/// browser must show the proxy error page — fail-closed), and allowlisted WITH
+/// "accept-untrusted" (the whole login flow must complete over the loopback-terminated tunnel).
+/// Both rows presuppose the ADR-0003 deployment: the Event Server holds the deployment CA in
+/// LocalMachine\Personal and this machine trusts it in LocalMachine\Root, so the browser's
+/// tunnel TLS to the loopback listener validates cleanly and any visible failure is the
+/// TARGET's certificate decision, not the loopback leaf's.
 /// </summary>
 public class ScProxyLoginProbeTests
 {
@@ -26,6 +35,12 @@ public class ScProxyLoginProbeTests
     /// </summary>
     private const string DefaultLoginTarget = "http://172.16.128.210:18123";
 
+    /// <summary>
+    /// #56: the self-signed HTTPS origin for the two TLS rows (its own port, so its allowlist
+    /// entry never collides with the plain-HTTP login origin).
+    /// </summary>
+    private const string DefaultHttpsLoginTarget = "https://172.16.128.210:18124";
+
     private readonly ITestOutputHelper _output;
 
     public ScProxyLoginProbeTests(ITestOutputHelper output) => _output = output;
@@ -34,18 +49,114 @@ public class ScProxyLoginProbeTests
     [Trait("Category", "probe")]
     public async Task ProbeProxiedVendorLoginFlow()
     {
+        var target = Environment.GetEnvironmentVariable("UX_LOGIN_TARGET") ?? DefaultLoginTarget;
+
+        var outcome = await RunLoginProbeAsync(
+            allowlistEntry: target,
+            target: target,
+            useTls: false,
+            artifactPrefix: "sc-login-probe");
+
+        // The probe goes RED like SC-1: a login that loops back to the form, a proxy error page,
+        // or a background XHR that comes back denied all fail the run, not merely record it.
+        Assert.True(outcome.Failure == null, $"probe run failed: {outcome.Failure}{Environment.NewLine}{outcome.Log}");
+        Assert.NotNull(outcome.Title);
+        Assert.False(titleIsProxyError(outcome.Title), $"browser showed the proxy error page instead of the vendor site: '{outcome.Title}'");
+        Assert.Equal("SIGNED IN", outcome.SignedIn);
+        Assert.NotNull(outcome.XhrStatus);
+        Assert.StartsWith("XHR-OK", outcome.XhrStatus);
+        Assert.Contains("POST /login", outcome.Log);
+    }
+
+    [Fact]
+    [Trait("Category", "probe")]
+    public async Task ProbeProxiedHttpsTargetFailsClosedWithoutOverride()
+    {
+        var target = Environment.GetEnvironmentVariable("UX_HTTPS_LOGIN_TARGET") ?? DefaultHttpsLoginTarget;
+
+        // Allowlisted WITHOUT the accept-untrusted flag: the Event Server fetcher must refuse
+        // the self-signed target chain (TlsValidation), and the browser must see the proxy
+        // error page - never the login form, never a silent pass-through.
+        var outcome = await RunLoginProbeAsync(
+            allowlistEntry: target,
+            target: target,
+            useTls: true,
+            artifactPrefix: "sc-login-probe-tls-closed");
+
+        Assert.True(outcome.Failure == null, $"probe run failed: {outcome.Failure}{Environment.NewLine}{outcome.Log}");
+        Assert.True(
+            titleIsProxyError(outcome.Title),
+            $"fail-closed expected the proxy error page for the untrusted target, got title '{outcome.Title}'{Environment.NewLine}{outcome.Log}");
+        Assert.Contains("accept untrusted", outcome.PageBody ?? string.Empty);
+        Assert.True(
+            outcome.ServerJournal.Any(entry => entry.Contains("TLS", StringComparison.OrdinalIgnoreCase)),
+            $"the login server never recorded the refused TLS attempt{Environment.NewLine}{outcome.Log}");
+    }
+
+    [Fact]
+    [Trait("Category", "probe")]
+    public async Task ProbeProxiedHttpsLoginFlowWithAcceptUntrustedOverride()
+    {
+        var target = Environment.GetEnvironmentVariable("UX_HTTPS_LOGIN_TARGET") ?? DefaultHttpsLoginTarget;
+
+        // The same target WITH the per-entry override: the fetcher accepts the untrusted chain
+        // for exactly this origin, and the full login/session/XHR flow completes through the
+        // loopback-terminated tunnel.
+        var entry = $"{target} {AcceptUntrustedToken}";
+        var outcome = await RunLoginProbeAsync(
+            allowlistEntry: entry,
+            target: target,
+            useTls: true,
+            artifactPrefix: "sc-login-probe-tls-open");
+
+        Assert.True(outcome.Failure == null, $"probe run failed: {outcome.Failure}{Environment.NewLine}{outcome.Log}");
+        Assert.NotNull(outcome.Title);
+        Assert.False(titleIsProxyError(outcome.Title), $"override did not open the tunnel for the untrusted target: '{outcome.Title}'");
+        Assert.Equal("SIGNED IN", outcome.SignedIn);
+        Assert.NotNull(outcome.XhrStatus);
+        Assert.StartsWith("XHR-OK", outcome.XhrStatus);
+        Assert.Contains("POST /login", outcome.Log);
+    }
+
+    /// <summary>ProxyPolicy.AcceptUntrustedFlag, inlined (the harness cannot see internals).</summary>
+    private const string AcceptUntrustedToken = "accept-untrusted";
+
+    private static bool titleIsProxyError(string title) =>
+        title != null && title.StartsWith("Web Content proxy:", StringComparison.OrdinalIgnoreCase);
+
+    private sealed class ProbeOutcome
+    {
+        public string Failure;
+        public string Title;
+        public string PageBody;
+        public string SignedIn;
+        public string XhrStatus;
+        public string CookieEcho;
+        public IReadOnlyList<string> ServerJournal = new string[0];
+        public string Log = string.Empty;
+    }
+
+    /// <summary>
+    /// Shared probe run: MC allowlist phase (the entry replaces any older line for the same
+    /// origin, so the fail-closed and override rows cannot leave contradictory entries), then
+    /// Smart Client + CDP drive. Rows that expect the proxy error page pass no login
+    /// interaction beyond navigation: the form never appears there, so the run captures the
+    /// error document and returns.
+    /// </summary>
+    private async Task<ProbeOutcome> RunLoginProbeAsync(
+        string allowlistEntry,
+        string target,
+        bool useTls,
+        string artifactPrefix)
+    {
         var config = UxConfig.Load();
         Artifacts.Init(Path.Combine(Path.GetTempPath(), "webcontent-sc-proxy-probe"));
         _output.WriteLine($"Artifacts: {Artifacts.RunDirectory}");
 
-        var target = Environment.GetEnvironmentVariable("UX_LOGIN_TARGET") ?? DefaultLoginTarget;
         var targetUri = new Uri(target);
         var log = new System.Text.StringBuilder();
+        var outcome = new ProbeOutcome();
         string failure = null;
-        string title = null;
-        string signedIn = null;
-        string xhrStatus = null;
-        string cookieEcho = null;
         LoginTestServer server = null;
 
         try
@@ -53,12 +164,12 @@ public class ScProxyLoginProbeTests
             // Phase 1: the workspace proxy allowlist must carry the login origin before the
             // Smart Client logs in — a target the fetcher refuses is a NotAllowed frame, not a
             // login page.
-            EnsureAllowlistedTarget(config, target, log);
+            EnsureAllowlistedTarget(config, allowlistEntry, log);
 
             // Phase 2: serve the vendor site on THIS machine; the Event Server proves server-side
             // reachability by fetching it from the VMS network while the browser never goes direct.
-            server = new LoginTestServer(targetUri.Port);
-            log.AppendLine($"login server bound to port {targetUri.Port}, origin {target}");
+            server = new LoginTestServer(targetUri.Port, useTls);
+            log.AppendLine($"{(useTls ? "https" : "http")} login server bound to port {targetUri.Port}, origin {target}, allowlist entry '{allowlistEntry}'");
 
             // Phase 3: drive the real login flow in the proxied Smart Client browser.
             CdpConnector.CleanStalePortFiles(config.WebView2DataRoot);
@@ -94,13 +205,28 @@ public class ScProxyLoginProbeTests
             var page = await CdpConnector.WaitForPageAsync(browser, targetUri.Host);
 
             var form = await page.WaitForSelectorAsync("#signin", new Microsoft.Playwright.PageWaitForSelectorOptions { Timeout = 45000 });
+
+            outcome.Title = await page.TitleAsync();
+            log.AppendLine($"first document at {target}: title='{outcome.Title}' form={form != null}");
             if (form == null)
             {
-                throw new InvalidOperationException($"login form not rendered at {targetUri} — page shows something else");
-            }
+                // No login form: either a genuine failure or the expected fail-closed error page.
+                outcome.PageBody = await page.ContentAsync();
+                await page.ScreenshotAsync(new Microsoft.Playwright.PageScreenshotOptions
+                {
+                    Path = Artifacts.PathOf($"{artifactPrefix}-document.png"),
+                });
 
-            title = await page.TitleAsync();
-            log.AppendLine($"login page title='{title}'");
+                if (!titleIsProxyError(outcome.Title))
+                {
+                    throw new InvalidOperationException($"login form not rendered at {target} — page shows something else");
+                }
+
+                // Expected fail-closed document: capture and return without login interaction.
+                outcome.ServerJournal = Snapshot(server);
+                outcome.Log = log.ToString();
+                return outcome;
+            }
 
             await page.FillAsync("#username", LoginTestServer.Username);
             await page.FillAsync("#password", LoginTestServer.Password);
@@ -114,9 +240,9 @@ public class ScProxyLoginProbeTests
                 throw new InvalidOperationException("#signed-in never appeared — cookie/session round-trip failed");
             }
 
-            signedIn = await marker.TextContentAsync();
-            title = await page.TitleAsync();
-            cookieEcho = await (await page.QuerySelectorAsync("#cookie-echo"))?.TextContentAsync();
+            outcome.SignedIn = await marker.TextContentAsync();
+            outcome.Title = await page.TitleAsync();
+            outcome.CookieEcho = await (await page.QuerySelectorAsync("#cookie-echo"))?.TextContentAsync();
 
             // The dashboard's background fetch resolves asynchronously — reading #xhr-status the
             // instant the dashboard renders races it and catches the XHR-PENDING placeholder.
@@ -125,21 +251,14 @@ public class ScProxyLoginProbeTests
                 "() => { var el = document.getElementById('xhr-status'); return el && el.textContent && el.textContent !== 'XHR-PENDING'; }",
                 null,
                 new Microsoft.Playwright.PageWaitForFunctionOptions { Timeout = 30000 });
-            xhrStatus = await (await page.QuerySelectorAsync("#xhr-status"))?.TextContentAsync();
+            outcome.XhrStatus = await (await page.QuerySelectorAsync("#xhr-status"))?.TextContentAsync();
 
             await page.ScreenshotAsync(new Microsoft.Playwright.PageScreenshotOptions
             {
-                Path = Artifacts.PathOf("sc-login-probe-dashboard.png"),
+                Path = Artifacts.PathOf($"{artifactPrefix}-dashboard.png"),
             });
 
-            log.AppendLine($"after login: title='{title}' signedIn='{signedIn}' xhr='{xhrStatus}' cookieEcho='{cookieEcho}'");
-            lock (server)
-            {
-                foreach (var entry in server.Journal)
-                {
-                    log.AppendLine($"server: {entry}");
-                }
-            }
+            log.AppendLine($"after login: title='{outcome.Title}' signedIn='{outcome.SignedIn}' xhr='{outcome.XhrStatus}' cookieEcho='{outcome.CookieEcho}'");
         }
         catch (Exception ex)
         {
@@ -148,30 +267,45 @@ public class ScProxyLoginProbeTests
         }
         finally
         {
+            outcome.Failure = failure;
+            outcome.ServerJournal = Snapshot(server);
+            foreach (var entry in outcome.ServerJournal)
+            {
+                log.AppendLine($"server: {entry}");
+            }
+
             server?.Dispose();
-            Artifacts.WriteText("sc-login-probe-results.txt", log.ToString());
-            _output.WriteLine(log.ToString());
+            outcome.Log = log.ToString();
+            Artifacts.WriteText($"{artifactPrefix}-results.txt", outcome.Log);
+            _output.WriteLine(outcome.Log);
             ProcessKiller.KillClients("Client");
             ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
         }
 
-        // The probe goes RED like SC-1: a login that loops back to the form, a proxy error page,
-        // or a background XHR that comes back denied all fail the run, not merely record it.
-        Assert.True(failure == null, $"probe run failed: {failure}{Environment.NewLine}{log}");
-        Assert.NotNull(title);
-        Assert.False(title.StartsWith("Web Content proxy:"), $"browser showed the proxy error page instead of the vendor site: '{title}'");
-        Assert.Equal("SIGNED IN", signedIn);
-        Assert.NotNull(xhrStatus);
-        Assert.StartsWith("XHR-OK", xhrStatus);
-        Assert.Contains("POST /login", string.Join("\n", log));
+        return outcome;
+    }
+
+    private static IReadOnlyList<string> Snapshot(LoginTestServer server)
+    {
+        if (server == null)
+        {
+            return new string[0];
+        }
+
+        lock (server)
+        {
+            return server.Journal;
+        }
     }
 
     /// <summary>
-    /// Management Client phase: make sure the login origin is in the McWorkspace proxy target
-    /// list (proxy enabled), saving only when the list actually changed. Runs before the Smart
-    /// Client so the fetched configuration carries the new allowlist.
+    /// Management Client phase: make sure the workspace proxy target list carries exactly one
+    /// line for the probe origin — the entry as given, replacing any older line for the same
+    /// origin so a previous run's flag state never leaks into this row's verdict. Saving only
+    /// when the list actually changed. Runs before the Smart Client so the fetched
+    /// configuration carries the new allowlist.
     /// </summary>
-    private void EnsureAllowlistedTarget(UxConfig config, string target, System.Text.StringBuilder log)
+    private void EnsureAllowlistedTarget(UxConfig config, string entry, System.Text.StringBuilder log)
     {
         ProcessKiller.KillClients("VideoOS.Administration");
         using var mc = ClientSession.Launch(config.AdminClientExe);
@@ -200,22 +334,27 @@ public class ScProxyLoginProbeTests
             .Where(line => line.Length > 0)
             .ToList();
 
-        if (lines.Any(line => string.Equals(line, target, StringComparison.OrdinalIgnoreCase)))
+        if (lines.Any(line => string.Equals(line, entry, StringComparison.OrdinalIgnoreCase)))
         {
-            log.AppendLine($"target '{target}' already allowlisted; no Management Client edit needed");
+            log.AppendLine($"entry '{entry}' already allowlisted; no Management Client edit needed");
             return;
         }
 
+        // Same origin with a different flag state is a contradictory entry: exactly one line
+        // decides the origin's TLS posture.
+        var originToken = entry.Split(' ')[0];
+        lines.RemoveAll(line => line.Split(' ')[0].Equals(originToken, StringComparison.OrdinalIgnoreCase));
+
         ManagementClientUi.EnsureCheckBox(mcMain, "chkProxyEnabled", true);
-        lines.Add(target);
+        lines.Add(entry);
         ManagementClientUi.SetValue(mcMain, "txtProxyTargets", string.Join("\n", lines));
 
         if (!ManagementClientUi.Save(mcMain, 20))
         {
-            throw new InvalidOperationException($"Save never became enabled after adding '{target}' to the proxy targets.");
+            throw new InvalidOperationException($"Save never became enabled after adding '{entry}' to the proxy targets.");
         }
 
-        log.AppendLine($"allowlisted '{target}' and saved");
+        log.AppendLine($"allowlisted '{entry}' and saved");
     }
 
     private static string ReadValue(AutomationElement element)
