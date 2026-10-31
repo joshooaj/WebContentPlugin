@@ -273,5 +273,13 @@ namespace WebContent
 
         [DataMember(Name = "port")]
         public int Port { get; set; }
+
+        /// <summary>
+        /// Ticket #56: the admin's per-target "accept untrusted certificate" opt-in. Absent from
+        /// definitions saved before #56, which deserializes to false - the Event Server fetcher
+        /// validates that target's TLS chain normally.
+        /// </summary>
+        [DataMember(Name = "acceptUntrusted")]
+        public bool AcceptUntrusted { get; set; }
     }
 }

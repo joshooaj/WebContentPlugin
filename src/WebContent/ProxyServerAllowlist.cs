@@ -18,8 +18,22 @@ namespace WebContent
         private readonly Func<IEnumerable<Dictionary<string, string>>> _snapshotResolver;
         private readonly Action<string> _log;
         private readonly object _sync = new object();
-        private HashSet<string> _origins; // null until the first successful resolve
+        private Snapshot _snapshot; // null until the first successful resolve
         private DateTime _nextRefreshUtc = DateTime.MinValue;
+
+        /// <summary>One refresh's union: allowlisted origins, and the flagged subset whose
+        /// entries carry the #56 per-target accept-untrusted-certificate override.</summary>
+        private sealed class Snapshot
+        {
+            internal readonly HashSet<string> Origins;
+            internal readonly HashSet<string> UntrustedOrigins;
+
+            internal Snapshot(HashSet<string> origins, HashSet<string> untrustedOrigins)
+            {
+                Origins = origins;
+                UntrustedOrigins = untrustedOrigins;
+            }
+        }
 
         internal ProxyServerAllowlist(Func<IEnumerable<Dictionary<string, string>>> snapshotResolver, Action<string> log)
         {
@@ -37,14 +51,14 @@ namespace WebContent
 
             lock (_sync)
             {
-                if (_origins == null)
+                if (_snapshot == null)
                 {
                     refuseReason = "The proxy fetcher has not been able to read the Configuration of proxied workspaces, so its allowlist gate is closed.";
                     return false;
                 }
 
                 var origin = ProxyPolicy.CanonicalOrigin(target);
-                if (_origins.Contains(origin))
+                if (_snapshot.Origins.Contains(origin))
                 {
                     refuseReason = null;
                     return true;
@@ -52,6 +66,23 @@ namespace WebContent
 
                 refuseReason = $"The origin '{origin}' is not in the proxy allowlist of any proxied workspace.";
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Ticket #56: True only when the allowlist entry for THIS origin carries the admin's
+        /// accept-untrusted-certificate flag in at least one proxied workspace. An override for
+        /// one target never reaches a neighbouring origin, and while the gate is closed (never
+        /// resolved) no override exists — validation is the fail-closed default.
+        /// </summary>
+        internal bool AcceptsUntrustedCertificate(Uri target)
+        {
+            EnsureCurrent();
+
+            lock (_sync)
+            {
+                return _snapshot != null &&
+                       _snapshot.UntrustedOrigins.Contains(ProxyPolicy.CanonicalOrigin(target));
             }
         }
 
@@ -68,7 +99,7 @@ namespace WebContent
                 _nextRefreshUtc = now.Add(DefaultRefreshInterval);
             }
 
-            HashSet<string> resolved;
+            Snapshot resolved;
             try
             {
                 resolved = BuildUnion(_snapshotResolver());
@@ -83,16 +114,17 @@ namespace WebContent
 
             lock (_sync)
             {
-                _origins = resolved;
+                _snapshot = resolved;
             }
         }
 
-        private static HashSet<string> BuildUnion(IEnumerable<Dictionary<string, string>> workspaceProperties)
+        private static Snapshot BuildUnion(IEnumerable<Dictionary<string, string>> workspaceProperties)
         {
             var origins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var untrustedOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (workspaceProperties == null)
             {
-                return origins;
+                return new Snapshot(origins, untrustedOrigins);
             }
 
             foreach (var properties in workspaceProperties)
@@ -110,11 +142,15 @@ namespace WebContent
                         ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin))
                     {
                         origins.Add(origin);
+                        if (target.AcceptUntrusted)
+                        {
+                            untrustedOrigins.Add(origin);
+                        }
                     }
                 }
             }
 
-            return origins;
+            return new Snapshot(origins, untrustedOrigins);
         }
     }
 }

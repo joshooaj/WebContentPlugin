@@ -29,6 +29,9 @@ namespace WebContent.Tests
         private static string Target(string scheme, string host, int port) =>
             $"{{\"scheme\":\"{scheme}\",\"host\":\"{host}\",\"port\":{port}}}";
 
+        private static string Target(string scheme, string host, int port, bool acceptUntrusted) =>
+            $"{{\"scheme\":\"{scheme}\",\"host\":\"{host}\",\"port\":{port},\"acceptUntrusted\":{(acceptUntrusted ? "true" : "false")}}}";
+
         [Fact]
         public void ForwardsOriginsAllowlistedByAnyProxiedWorkspace()
         {
@@ -80,6 +83,63 @@ namespace WebContent.Tests
 
             Assert.False(allowlist.IsAllowed(new Uri("http://10.0.0.5:8080/"), out var reason));
             Assert.Contains("Configuration", reason);
+        }
+
+        [Fact]
+        public void UntrustedCertificateOverrideIsFalseForEveryTargetWithoutTheFlag()
+        {
+            var allowlist = new ProxyServerAllowlist(
+                () => new List<Dictionary<string, string>>
+                {
+                    WorkspaceProperties(true,
+                        Target("https", "cam1.test", 8443),
+                        Target("https", "cam2.test", 8443, false)),
+                },
+                Sink);
+
+            Assert.False(allowlist.AcceptsUntrustedCertificate(new Uri("https://cam1.test:8443/live")));
+            Assert.False(allowlist.AcceptsUntrustedCertificate(new Uri("https://cam2.test:8443/live")));
+        }
+
+        [Fact]
+        public void UntrustedCertificateOverrideIsTrueOnlyForTheOriginWhoseEntryCarriesIt()
+        {
+            // The AC3 shape: one flagged entry, one unflagged sibling on the SAME host pair —
+            // the override must never leak from a target to its neighbours.
+            var allowlist = new ProxyServerAllowlist(
+                () => new List<Dictionary<string, string>>
+                {
+                    WorkspaceProperties(true,
+                        Target("https", "cam1.test", 8443, true),
+                        Target("https", "cam1.test", 9443, false)),
+                    WorkspaceProperties(true, Target("https", "portal.test", 443)),
+                },
+                Sink);
+
+            Assert.True(allowlist.AcceptsUntrustedCertificate(new Uri("https://cam1.test:8443/live/index.html")));
+            Assert.False(allowlist.AcceptsUntrustedCertificate(new Uri("https://cam1.test:9443/live/index.html")));
+            Assert.False(allowlist.AcceptsUntrustedCertificate(new Uri("https://portal.test/dashboard")));
+        }
+
+        [Fact]
+        public void UntrustedCertificateOverrideFollowsTheAllowlistGate()
+        {
+            // Proxy off: the entry counts for neither the allowlist nor the override. Config
+            // never resolved: the gate is closed and the override set stays empty (fail closed).
+            var allowlist = new ProxyServerAllowlist(
+                () => new List<Dictionary<string, string>>
+                {
+                    WorkspaceProperties(false, Target("https", "cam1.test", 8443, true)),
+                },
+                Sink);
+
+            Assert.False(allowlist.AcceptsUntrustedCertificate(new Uri("https://cam1.test:8443/")));
+
+            var closed = new ProxyServerAllowlist(
+                () => throw new InvalidOperationException("Configuration service is not available."),
+                Sink);
+
+            Assert.False(closed.AcceptsUntrustedCertificate(new Uri("https://cam1.test:8443/")));
         }
 
         [Fact]

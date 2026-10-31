@@ -204,6 +204,13 @@ namespace WebContent
                 return null;
             }
 
+            // #56: the certificate mode comes from this target's own allowlist entry — the union
+            // snapshot resolved it to exactly this canonical origin. Every other target, proxied
+            // or not, keeps full TLS chain validation.
+            var tlsMode = target.Scheme == Uri.UriSchemeHttps && _allowlist.AcceptsUntrustedCertificate(target)
+                ? ProxyFetchTlsMode.AcceptUntrusted
+                : ProxyFetchTlsMode.ValidateNormally;
+
             var slots = _fetchSlots;
             if (slots == null)
             {
@@ -221,7 +228,7 @@ namespace WebContent
 
                 try
                 {
-                    await ServeFetchAsync(communication, payload, query, requester);
+                    await ServeFetchAsync(communication, payload, query, requester, tlsMode);
                 }
                 finally
                 {
@@ -232,13 +239,13 @@ namespace WebContent
             return null;
         }
 
-        private async Task ServeFetchAsync(MessageCommunication communication, ProxyFetchRequestPayload payload, ProxyFetchQuery query, FQID requesterFqid)
+        private async Task ServeFetchAsync(MessageCommunication communication, ProxyFetchRequestPayload payload, ProxyFetchQuery query, FQID requesterFqid, ProxyFetchTlsMode tlsMode)
         {
             var target = query.Uri;
             try
             {
                 var limits = ProxyFetchLimits.Default();
-                var result = await new ProxyHttpFetcher().FetchAsync(query, limits);
+                var result = await new ProxyHttpFetcher().FetchAsync(query, limits, tlsMode);
 
                 if (!result.Success)
                 {
