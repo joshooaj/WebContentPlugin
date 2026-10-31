@@ -27,12 +27,31 @@ namespace WebContent
         /// </summary>
         internal const int MaxRequestBodyBytes = 1024 * 1024;
 
-        internal static async Task HandleAsync(
+        internal static Task HandleAsync(
             Stream input,
             Stream output,
             System.Collections.Generic.IEnumerable<string> canonicalTargets,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
             Action<string> log)
+        {
+            return HandleAsync(input, output, canonicalTargets, fetch, log, null);
+        }
+
+        /// <summary>
+        /// Optional tunnel-termination seam (#56): given the raw socket stream, any bytes the
+        /// head reader already pulled past the CONNECT head (a TLS ClientHello can pipeline into
+        /// the same segment), and the allowlisted https origin, wrap the stream in TLS with an
+        /// ephemeral local certificate and return the decrypted stream (null when termination is
+        /// impossible). The pure flow stays testable with an identity seam; production passes
+        /// <c>ProxyLoopbackTls</c>.
+        /// </summary>
+        internal static async Task HandleAsync(
+            Stream input,
+            Stream output,
+            System.Collections.Generic.IEnumerable<string> canonicalTargets,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
+            Action<string> log,
+            Func<Stream, byte[], Uri, Task<Stream>> unwrapTunnelTls)
         {
             var head = await ReadRequestHeadAsync(input);
             if (head == null)
@@ -60,18 +79,127 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(405, "Method Not Allowed", rejectReason));
                     return;
 
+                case ProxyForwardDisposition.ConnectTerminate:
+                    if (unwrapTunnelTls == null)
+                    {
+                        // Defensive wiring: no ephemeral-certificate plumbing on this listener. The
+                        // tunnel is refused outright - never blind-tunnelled, never taken direct.
+                        var reason = $"The CONNECT to '{request.RawTarget}' cannot be terminated by this proxy; https targets are fetched by the VMS server over tunnels this listener terminates.";
+                        log(reason);
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", reason));
+                        return;
+                    }
+
+                    log($"Proxy tunnel to '{request.RawTarget}' allowlisted; terminating TLS at the loopback listener.");
+                    await WriteAsync(output, Encoding.ASCII.GetBytes("HTTP/1.1 200 Connection established\r\n\r\n"));
+
+                    Stream tunnel;
+                    try
+                    {
+                        tunnel = await unwrapTunnelTls(input, head.Leftover, request.Uri);
+                    }
+                    catch (Exception exception)
+                    {
+                        log($"Proxy TLS termination for '{request.RawTarget}' failed: {exception.Message}");
+                        return;
+                    }
+
+                    if (tunnel == null)
+                    {
+                        log($"Proxy TLS termination for '{request.RawTarget}' produced no tunnel; the connection is closed.");
+                        return;
+                    }
+
+                    await ServeTunnelRequestsAsync(tunnel, output, canonicalTargets, request.Uri, fetch, log);
+                    return;
+
                 case ProxyForwardDisposition.ConnectRefused:
                     log(rejectReason);
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", rejectReason + " The workspace proxy supports http(s) allowlisted targets fetched by the VMS server; https pages need a CONNECT tunnel this proxy does not provide."));
                     return;
             }
 
+            await ServeForwardedRequestAsync(request, head.Leftover, input, output, fetch, log);
+        }
+
+        /// <summary>
+        /// The request loop inside one terminated tunnel (#56): Chromium pipelines several inner
+        /// requests over a single TLS connection, each origin-form against the tunnel origin that
+        /// the allowlist already admitted when the tunnel was accepted.
+        /// </summary>
+        private static async Task ServeTunnelRequestsAsync(
+            Stream tunnel,
+            Stream output,
+            System.Collections.Generic.IEnumerable<string> canonicalTargets,
+            Uri tunnelOrigin,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
+            Action<string> log)
+        {
+            var pending = new byte[0];
+            while (true)
+            {
+                var head = await ReadRequestHeadAsync(tunnel, pending);
+                if (head == null)
+                {
+                    return;
+                }
+
+                var disposition = ProxyForwardPolicy.Decide(canonicalTargets, head.Text, tunnelOrigin, out var request, out var rejectReason);
+                switch (disposition)
+                {
+                    case ProxyForwardDisposition.Forward:
+                        break;
+
+                    case ProxyForwardDisposition.BadRequest:
+                        // A head this broken leaves the stream position untrustworthy: answer and close.
+                        log(rejectReason);
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", rejectReason));
+                        return;
+
+                    case ProxyForwardDisposition.MethodNotAllowed:
+                        log(rejectReason);
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(405, "Method Not Allowed", rejectReason));
+                        pending = head.Leftover;
+                        continue;
+
+                    default:
+                        // OriginNotAllowed inside a tunnel means the inner target drifted off the
+                        // accepted origin (codec already blocks that) - refuse and keep the tunnel.
+                        log(rejectReason ?? $"In-tunnel request '{request?.RawTarget}' refused.");
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", rejectReason ?? "The in-tunnel request was refused."));
+                        pending = head.Leftover;
+                        continue;
+                }
+
+                var remainder = await ServeForwardedRequestAsync(request, head.Leftover, tunnel, output, fetch, log);
+                if (remainder == null)
+                {
+                    return;
+                }
+
+                pending = remainder;
+            }
+        }
+
+        /// <summary>
+        /// Body-resolve, fetch, and render one decided-Forward request. Returns the pipelined
+        /// remainder bytes past this request's body for the caller's next request (#56 tunnels),
+        /// or null when the connection must close.
+        /// </summary>
+        private static async Task<byte[]> ServeForwardedRequestAsync(
+            ProxyForwardedRequest request,
+            byte[] leftover,
+            Stream input,
+            Stream output,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
+            Action<string> log)
+        {
             // #55: the request body must reach the fetcher for login POSTs and XHR writes to work.
-            var bodyOutcome = await TryResolveRequestBodyAsync(request, head.Leftover, input, log);
+            var bodyOutcome = await TryResolveRequestBodyAsync(request, leftover, input, log);
             if (bodyOutcome.RefusalPage != null)
             {
                 await WriteAsync(output, bodyOutcome.RefusalPage);
-                return;
+                return null;
             }
 
             var query = new ProxyFetchQuery
@@ -91,13 +219,13 @@ namespace WebContent
             {
                 log($"Proxy fetch for {request.Uri} threw: {exception.Message}");
                 await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy fetcher failed: {exception.Message}"));
-                return;
+                return null;
             }
 
             if (result != null && result.Success)
             {
                 await WriteAsync(output, ProxyForwardCodec.RenderForwardedResponse(result));
-                return;
+                return bodyOutcome.Remainder;
             }
 
             var message = result == null ? "The VMS proxy fetcher returned no outcome." : result.ErrorMessage;
@@ -105,11 +233,12 @@ namespace WebContent
             {
                 log($"Proxy fetch for {request.Uri} timed out: {message}");
                 await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(504, "Gateway Timeout", message));
-                return;
+                return bodyOutcome.Remainder;
             }
 
             log($"Proxy fetch for {request.Uri} failed (code={result?.ErrorCode}): {message}");
             await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", message));
+            return bodyOutcome.Remainder;
         }
 
         /// <summary>
@@ -138,7 +267,8 @@ namespace WebContent
             request.Headers.TryGetValue("Content-Length", out contentLengthText);
             if (string.IsNullOrEmpty(contentLengthText))
             {
-                return RequestBodyOutcome.Accept(null);
+                // No body to resolve; any bytes already in hand belong to a pipelined next request.
+                return RequestBodyOutcome.Accept(null, leftover);
             }
 
             int declared;
@@ -158,24 +288,27 @@ namespace WebContent
 
             if (declared == 0)
             {
-                return RequestBodyOutcome.Accept(null);
-            }
-
-            if (leftover.Length > declared)
-            {
-                var reason = $"The request body for '{request.RawTarget}' carries more bytes than its declared Content-Length.";
-                log(reason);
-                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", reason));
+                return RequestBodyOutcome.Accept(null, leftover);
             }
 
             var buffer = new byte[declared];
-            var taken = 0;
-            if (leftover.Length > 0)
+            var fromLeftover = Math.Min(leftover.Length, declared);
+            var remainder = leftover.Length > declared
+                ? new byte[leftover.Length - declared]
+                : new byte[0];
+            if (fromLeftover > 0)
             {
-                Buffer.BlockCopy(leftover, 0, buffer, 0, leftover.Length);
-                taken = leftover.Length;
+                Buffer.BlockCopy(leftover, 0, buffer, 0, fromLeftover);
             }
 
+            if (remainder.Length > 0)
+            {
+                // The client pipelined its next request into the same segment (#56 tunnels):
+                // take exactly the declared body, hand the rest to the next request's head read.
+                Buffer.BlockCopy(leftover, declared, remainder, 0, remainder.Length);
+            }
+
+            var taken = fromLeftover;
             while (taken < declared)
             {
                 var read = await input.ReadAsync(buffer, taken, declared - taken);
@@ -194,29 +327,34 @@ namespace WebContent
                 return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", reason));
             }
 
-            return RequestBodyOutcome.Accept(buffer);
+            return RequestBodyOutcome.Accept(buffer, remainder);
         }
 
-        /// <summary>Outcome of request-body resolution: either the bytes or a rendered refusal page.</summary>
+        /// <summary>
+        /// Outcome of request-body resolution: either the bytes plus any pipelined remainder
+        /// (#56), or a rendered refusal page.
+        /// </summary>
         private sealed class RequestBodyOutcome
         {
             internal readonly byte[] Body;
+            internal readonly byte[] Remainder;
             internal readonly byte[] RefusalPage;
 
-            private RequestBodyOutcome(byte[] body, byte[] refusalPage)
+            private RequestBodyOutcome(byte[] body, byte[] remainder, byte[] refusalPage)
             {
                 Body = body;
+                Remainder = remainder ?? new byte[0];
                 RefusalPage = refusalPage;
             }
 
-            internal static RequestBodyOutcome Accept(byte[] body)
+            internal static RequestBodyOutcome Accept(byte[] body, byte[] remainder = null)
             {
-                return new RequestBodyOutcome(body, null);
+                return new RequestBodyOutcome(body, remainder, null);
             }
 
             internal static RequestBodyOutcome Refuse(byte[] page)
             {
-                return new RequestBodyOutcome(null, page);
+                return new RequestBodyOutcome(null, null, page);
             }
         }
 
@@ -229,12 +367,27 @@ namespace WebContent
             internal byte[] Leftover = new byte[0];
         }
 
-        private static async Task<RequestHead> ReadRequestHeadAsync(Stream input)
+        private static Task<RequestHead> ReadRequestHeadAsync(Stream input)
+        {
+            return ReadRequestHeadAsync(input, null);
+        }
+
+        /// <summary>
+        /// Read one request head, optionally seeded with bytes the previous request's reader
+        /// already pulled past its own boundary (#56: the next pipelined head of a tunnel, or a
+        /// ClientHello before TLS termination).
+        /// </summary>
+        private static async Task<RequestHead> ReadRequestHeadAsync(Stream input, byte[] seed)
         {
             var head = new RequestHead();
             var buffer = new byte[8 * 1024];
             var received = new MemoryStream();
-            while (true)
+            if (seed != null && seed.Length > 0)
+            {
+                received.Write(seed, 0, seed.Length);
+            }
+
+            while (!ContainsHeadTerminator(received.GetBuffer(), 0, (int)received.Length))
             {
                 var read = await input.ReadAsync(buffer, 0, buffer.Length);
                 if (read <= 0)
@@ -243,11 +396,6 @@ namespace WebContent
                 }
 
                 received.Write(buffer, 0, read);
-                if (ContainsHeadTerminator(received.GetBuffer(), 0, (int)received.Length))
-                {
-                    break;
-                }
-
                 if (received.Length > MaxHeadBytes)
                 {
                     return null;

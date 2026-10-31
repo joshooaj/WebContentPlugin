@@ -244,12 +244,154 @@ namespace WebContent.Tests
             Assert.StartsWith("HTTP/1.1 504 Gateway Timeout\r\n", response);
         }
 
-        private static async Task<string> Handle(string request, Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch)
+        // #56: allowlisted CONNECT tunnels are terminated at the listener; the decrypted inner
+        // requests ride the same decision/fetch/render flow. The fake unwrap seam stands in for
+        // the ephemeral-certificate SslStream, which its own tests and the live harness cover.
+
+        [Fact]
+        public async Task TerminatesAllowlistedConnectAndServesTheInnerRequestAgainstTheTunnelOrigin()
+        {
+            var seen = new List<ProxyFetchQuery>();
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query =>
+            {
+                seen.Add(query);
+                return Task.FromResult(new ProxyFetchResult
+                {
+                    Success = true,
+                    StatusCode = 200,
+                    StatusText = "OK",
+                    Headers = new List<ProxyFetchHeader> { new ProxyFetchHeader { Name = "Content-Type", Value = "text/html" } },
+                    BodyLength = 6,
+                    Body = Encoding.UTF8.GetBytes("secure"),
+                });
+            };
+
+            var request =
+                "CONNECT cam1.test:8443 HTTP/1.1\r\n" +
+                "Proxy-Connection: keep-alive\r\n" +
+                "\r\n" +
+                "GET /live/index.html HTTP/1.1\r\n" +
+                "Host: cam1.test:8443\r\n" +
+                "\r\n";
+
+            var response = await HandleTunnel(request, new[] { "https://cam1.test:8443" }, fetch);
+
+            Assert.StartsWith("HTTP/1.1 200 Connection established\r\n\r\n", response);
+            Assert.Equal(1, seen.Count);
+            Assert.Equal("https://cam1.test:8443/live/index.html", seen[0].Uri.AbsoluteUri);
+            Assert.Contains("HTTP/1.1 200 OK\r\n", response);
+            Assert.Contains("\r\n\r\nsecure", response);
+        }
+
+        [Fact]
+        public async Task ServesSeveralInnerRequestsOverOneTerminatedTunnel()
+        {
+            var seen = new List<string>();
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query =>
+            {
+                seen.Add(query.Uri.AbsoluteUri);
+                return Task.FromResult(new ProxyFetchResult
+                {
+                    Success = true,
+                    StatusCode = 200,
+                    StatusText = "OK",
+                    BodyLength = 0,
+                    Body = new byte[0],
+                });
+            };
+
+            var request =
+                "CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n" +
+                "GET /one HTTP/1.1\r\nHost: cam1.test:8443\r\n\r\n" +
+                "POST /two HTTP/1.1\r\nHost: cam1.test:8443\r\nContent-Length: 4\r\n\r\nbody";
+
+            var response = await HandleTunnel(request, new[] { "https://cam1.test:8443" }, fetch);
+
+            Assert.Equal(
+                new[] { "https://cam1.test:8443/one", "https://cam1.test:8443/two" },
+                seen);
+            Assert.Equal(2, CountLines(response, "HTTP/1.1 200 OK\r\n"));
+        }
+
+        [Fact]
+        public async Task RefusesVerbsInsideTheTunnelAfterTheHandshakeWithoutTouchingTheFetcher()
+        {
+            var fetchCalled = false;
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query =>
+            {
+                fetchCalled = true;
+                return Task.FromResult(new ProxyFetchResult { Success = false });
+            };
+
+            var request =
+                "CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n" +
+                "TRACE /debug HTTP/1.1\r\nHost: cam1.test:8443\r\n\r\n";
+
+            var response = await HandleTunnel(request, new[] { "https://cam1.test:8443" }, fetch);
+
+            Assert.False(fetchCalled);
+            Assert.StartsWith("HTTP/1.1 200 Connection established\r\n\r\n", response);
+            Assert.Contains("HTTP/1.1 405", response);
+        }
+
+        [Fact]
+        public async Task RefusesConnectWith502WhenNoTlsTerminationIsAvailable()
+        {
+            // Defensive wiring path: an allowlisted CONNECT the listener cannot terminate (no
+            // ephemeral-certificate plumbing) is refused outright - never tunnelled, never direct.
+            var response = await Handle(
+                "CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n",
+                query => Task.FromResult(new ProxyFetchResult { Success = false }),
+                new[] { "https://cam1.test:8443" });
+
+            Assert.StartsWith("HTTP/1.1 502 Bad Gateway\r\n", response);
+            Assert.Contains("cam1.test", response);
+        }
+
+        private static async Task<string> Handle(
+            string request,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
+            string[] allowlist = null)
         {
             using (var input = new MemoryStream(Encoding.UTF8.GetBytes(request)))
             using (var output = new MemoryStream())
             {
-                await ProxyForwardConnection.HandleAsync(input, output, Allowlist, fetch, message => { });
+                await ProxyForwardConnection.HandleAsync(input, output, allowlist ?? Allowlist, fetch, message => { });
+                return Encoding.UTF8.GetString(output.ToArray());
+            }
+        }
+
+        private static async Task<string> HandleTunnel(
+            string request,
+            string[] allowlist,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch)
+        {
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes(request)))
+            using (var output = new MemoryStream())
+            {
+                // Identity unwrap: the CONNECT head's pipelined leftover plus the rest of the
+                // stream becomes the decrypted tunnel stream - exactly the rebase the SslStream
+                // wrapper performs in production (the ClientHello can ride the CONNECT segment).
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, allowlist, fetch, message => { },
+                    (stream, leftover, tunnelOrigin) =>
+                    {
+                        var combined = new MemoryStream();
+                        if (leftover != null && leftover.Length > 0)
+                        {
+                            combined.Write(leftover, 0, leftover.Length);
+                        }
+
+                        var buffer = new byte[4096];
+                        int read;
+                        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            combined.Write(buffer, 0, read);
+                        }
+
+                        combined.Position = 0;
+                        return Task.FromResult<Stream>(combined);
+                    });
                 return Encoding.UTF8.GetString(output.ToArray());
             }
         }
