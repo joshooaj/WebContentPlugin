@@ -83,16 +83,65 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void RefusesConnectTunnelsWithAnExplanation()
+        public void TerminatesConnectTunnelsToAllowlistedHttpsOrigins()
         {
-            // https would reach the listener as CONNECT; a CONNECT-less forwarder cannot relay it,
-            // and the browser must never be allowed to go direct instead.
-            var head = "CONNECT portal.example.com:443 HTTP/1.1\r\nProxy-Connection: keep-alive\r\n\r\n";
+            // #56: an allowlisted https origin gets its CONNECT accepted and terminated at the
+            // loopback listener (ADR-0002) - the decrypted requests then ride the fetch pipeline.
+            var head = "CONNECT cam1.test:8443 HTTP/1.1\r\nProxy-Connection: keep-alive\r\n\r\n";
 
-            var decision = ProxyForwardPolicy.Decide(new[] { "https://portal.example.com" }, head, out var request, out var rejectReason);
+            var decision = ProxyForwardPolicy.Decide(new[] { "https://cam1.test:8443" }, head, out var request, out var rejectReason);
 
-            Assert.Equal(ProxyForwardDisposition.ConnectRefused, decision);
-            Assert.Contains("portal.example.com:443", rejectReason);
+            Assert.Equal(ProxyForwardDisposition.ConnectTerminate, decision);
+            Assert.Equal("https://cam1.test:8443", ProxyPolicy.CanonicalOrigin(request.Uri));
+            Assert.Null(rejectReason);
+        }
+
+        [Fact]
+        public void TerminatesConnectToTheSchemeDefaultPortOfAnAllowlistedOrigin()
+        {
+            // The canonical allowlist drops the default port; the browser CONNECTs to :443 -
+            // the same origin must match either spelling.
+            var head = "CONNECT portal.example.com:443 HTTP/1.1\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(new[] { "https://portal.example.com" }, head, out var request, out _);
+
+            Assert.Equal(ProxyForwardDisposition.ConnectTerminate, decision);
+            Assert.Equal("https://portal.example.com", ProxyPolicy.CanonicalOrigin(request.Uri));
+        }
+
+        [Fact]
+        public void RefusesConnectTunnelsToOriginsNoWorkspaceAllowlists()
+        {
+            // A CONNECT to an origin no proxied workspace allowlists is refused with the same
+            // 403 posture as any other request, and the browser is never let go direct.
+            var head = "CONNECT somewhere.else.test:443 HTTP/1.1\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out var request, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.OriginNotAllowed, decision);
+            Assert.Contains("somewhere.else.test", rejectReason);
+        }
+
+        [Fact]
+        public void RefusesConnectTunnelsToHttpOrigins()
+        {
+            // CONNECT speaks a TLS tunnel; an http allowlist entry must not open one for it.
+            var head = "CONNECT 10.0.0.5:8080 HTTP/1.1\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out _, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.OriginNotAllowed, decision);
+            Assert.Contains("10.0.0.5", rejectReason);
+        }
+
+        [Theory]
+        [InlineData("CONNECT not-a-host:port HTTP/1.1\r\n\r\n")]
+        [InlineData("CONNECT HTTP/1.1\r\n\r\n")]
+        public void RejectsMalformedConnectTargets(string head)
+        {
+            var decision = ProxyForwardPolicy.Decide(new[] { "https://cam1.test:8443" }, head, out var request, out _);
+
+            Assert.Equal(ProxyForwardDisposition.BadRequest, decision);
         }
 
         [Fact]

@@ -56,8 +56,9 @@ namespace WebContent.Tests
         [Fact]
         public void RecognizesConnectRequestsByTheirAuthorityTarget()
         {
-            // Chromium opens https routes with CONNECT host:port. The codec parses it out of the
-            // head so the decision layer can refuse it as a refused tunnel (502), not a 400.
+            // Chromium opens https routes with CONNECT host:port. The codec resolves the authority
+            // to the https origin (#56) so the decision layer can allowlist-gate tunnel
+            // termination instead of answering a flat 400.
             var head = "CONNECT portal.example.com:443 HTTP/1.1\r\nProxy-Connection: keep-alive\r\n\r\n";
 
             var parsed = ProxyForwardCodec.TryParseRequestHead(head, out var request, out var rejectReason);
@@ -65,7 +66,7 @@ namespace WebContent.Tests
             Assert.True(parsed, rejectReason);
             Assert.Equal("CONNECT", request.Method);
             Assert.Equal("portal.example.com:443", request.RawTarget);
-            Assert.Null(request.Uri);
+            Assert.Equal("https://portal.example.com", ProxyPolicy.CanonicalOrigin(request.Uri));
         }
 
         [Fact]

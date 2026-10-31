@@ -18,7 +18,11 @@ namespace WebContent
         /// <summary>The request-target exactly as it arrived; CONNECT tunnels carry an authority here.</summary>
         internal string RawTarget;
 
-        /// <summary>Absolute http(s) uri for forwarded requests; null for CONNECT tunnels.</summary>
+        /// <summary>
+        /// Absolute uri for forwarded requests; for CONNECT (#56) the https origin the tunnel
+        /// targets, resolved from the authority — the inner TLS-terminated requests extend it
+        /// with paths.
+        /// </summary>
         internal Uri Uri;
 
         /// <summary>Request headers, first value per name, original casing preserved.</summary>
@@ -35,6 +39,18 @@ namespace WebContent
     internal static class ProxyForwardCodec
     {
         internal static bool TryParseRequestHead(string head, out ProxyForwardedRequest request, out string rejectReason)
+        {
+            return TryParseRequestHead(head, null, out request, out rejectReason);
+        }
+
+        /// <summary>
+        /// Parse a request head, optionally inside a TLS tunnel whose origin the caller
+        /// terminated (#56). With a tunnel origin the request-target is origin-form
+        /// ("GET /path HTTP/1.1") and combines with the tunnel origin — the tunnel IS the origin
+        /// the browser believes it is talking to, so the Host header is never believed. Without a
+        /// tunnel origin an absolute-form target stays required, exactly as an HTTP proxy request.
+        /// </summary>
+        internal static bool TryParseRequestHead(string head, Uri tunnelOrigin, out ProxyForwardedRequest request, out string rejectReason)
         {
             request = null;
             rejectReason = null;
@@ -59,10 +75,23 @@ namespace WebContent
                 RawTarget = requestLine[1],
             };
 
-            // CONNECT carries an authority ("host:port"), not a uri. Parse it through so the
-            // decision layer can answer a refused tunnel (502) instead of a malformed-request 400.
+            // CONNECT carries an authority ("host:port"), not a uri. #56 resolves it to the https
+            // origin the tunnel would open so the decision layer can allowlist-gate the tunnel
+            // termination; a malformed authority is a malformed request.
             Uri uri = null;
-            if (parsed.Method != "CONNECT" && !Uri.TryCreate(requestLine[1], UriKind.Absolute, out uri))
+            if (parsed.Method == "CONNECT")
+            {
+                // A CONNECT request-target is strictly an authority - a path or query in it is
+                // not something a browser sends and is rejected rather than guessed at.
+                if (requestLine[1].IndexOf('/') >= 0 ||
+                    !Uri.TryCreate($"https://{requestLine[1]}", UriKind.Absolute, out uri) ||
+                    !ProxyPolicy.IsHttpUri(uri))
+                {
+                    rejectReason = $"The CONNECT target '{requestLine[1]}' was not a host:port authority.";
+                    return false;
+                }
+            }
+            else if (!Uri.TryCreate(requestLine[1], UriKind.Absolute, out uri))
             {
                 rejectReason = $"The proxy request target '{requestLine[1]}' was not an absolute uri.";
                 return false;

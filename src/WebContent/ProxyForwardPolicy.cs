@@ -18,7 +18,13 @@ namespace WebContent
         /// <summary>Verb outside the browser-flow method set (#55) — 405.</summary>
         MethodNotAllowed,
 
-        /// <summary>CONNECT tunnel (https through a CONNECT-less forwarder) — 502.</summary>
+        /// <summary>
+        /// CONNECT to an allowlisted https origin (#56): the loopback listener accepts the tunnel
+        /// and terminates TLS with an ephemeral local certificate (ADR-0002).
+        /// </summary>
+        ConnectTerminate,
+
+        /// <summary>CONNECT that cannot be terminated here — 502, never taken direct.</summary>
         ConnectRefused,
     }
 
@@ -64,8 +70,16 @@ namespace WebContent
 
             if (request.Method == "CONNECT")
             {
-                rejectReason = $"The proxy does not open CONNECT tunnels; https routes like '{request.RawTarget}' cannot be relayed and are never taken direct.";
-                return ProxyForwardDisposition.ConnectRefused;
+                // #56: an allowlisted https origin gets the tunnel TERMINATED at this listener
+                // (ephemeral local certificate, ADR-0002); anything else is refused with the same
+                // origin posture as a plain request, and the browser is never let go direct.
+                if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri))
+                {
+                    rejectReason = $"The CONNECT target '{ProxyPolicy.CanonicalOrigin(request.Uri)}' is not an allowlisted https proxy origin; the tunnel is refused and the browser is never taken direct.";
+                    return ProxyForwardDisposition.OriginNotAllowed;
+                }
+
+                return ProxyForwardDisposition.ConnectTerminate;
             }
 
             if (!ForwardedMethods.Contains(request.Method))
