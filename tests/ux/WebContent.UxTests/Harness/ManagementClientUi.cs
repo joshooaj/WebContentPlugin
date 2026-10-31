@@ -771,6 +771,86 @@ public static class ManagementClientUi
         return false;
     }
 
+    /// <summary>
+    /// Session-aware Save: clicking Save on the proxy-target page raises a shell confirmation
+    /// modal ("Save changes?"). UIA Invoke BLOCKS for the whole modal lifetime — a harness
+    /// thread inside Invoke cannot clear the modal it is waiting on, which is exactly how the
+    /// #56 row hung until a human clicked Yes. So the click runs on a side thread while this
+    /// thread sweeps modals; a modal that is already up before the click is swept first.
+    /// </summary>
+    public static bool Save(ClientSession session, Window mainWindow, int timeoutSeconds = 20)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            AcceptPendingModal(session, 1);
+            var button = mainWindow.FindAllDescendants(cf => cf.ByName("Save"))
+                .FirstOrDefault(b => b.ControlType == ControlType.Button && b.IsEnabled);
+            if (button != null)
+            {
+                var invoke = System.Threading.Tasks.Task.Run(() => button.Patterns.Invoke.Pattern.Invoke());
+                if (!invoke.Wait(3000))
+                {
+                    // Still blocked: a modal owns the click. Accept it, then the click returns.
+                    AcceptPendingModal(session, 10);
+                    invoke.Wait(TimeSpan.FromSeconds(20));
+                }
+                else
+                {
+                    AcceptPendingModal(session, 4);
+                }
+
+                Thread.Sleep(2500);
+                AcceptPendingModal(session, 2);
+                return true;
+            }
+            Thread.Sleep(500);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Clicks the affirmative button of any pending MC modal dialog (the "Save changes?"
+    /// shell confirmation, a #32770 MessageBox, or a similar notice) that is not the main
+    /// window. Returns true when a modal was accepted. Button preference: Yes, Save, OK.
+    /// </summary>
+    public static bool AcceptPendingModal(ClientSession session, int timeoutSeconds = 5)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (var window in session.Windows())
+            {
+                try
+                {
+                    var name = window.Name ?? string.Empty;
+                    var cls = window.ClassName ?? string.Empty;
+                    if (name.Contains("Management Client", StringComparison.OrdinalIgnoreCase)) continue;
+                    var isModal = cls.Contains("#32770")
+                                  || name.Contains("save changes", StringComparison.OrdinalIgnoreCase)
+                                  || name.Contains("confirm", StringComparison.OrdinalIgnoreCase)
+                                  || name.Contains("warning", StringComparison.OrdinalIgnoreCase);
+                    if (!isModal) continue;
+
+                    var buttons = window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button));
+                    foreach (var wanted in new[] { "Yes", "Save", "OK" })
+                    {
+                        var hit = buttons.FirstOrDefault(b =>
+                            string.Equals((b.Name ?? string.Empty).Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+                        if (hit != null)
+                        {
+                            hit.Patterns.Invoke.Pattern.Invoke();
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+            }
+            Thread.Sleep(400);
+        }
+        return false;
+    }
+
     /// <summary>Handles the yes/no confirmation MessageBox WinForms pops for deletes.</summary>
     public static void AcceptConfirmation(ClientSession session, string buttonName = "Yes", int timeoutSeconds = 10)
     {

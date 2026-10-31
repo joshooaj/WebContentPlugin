@@ -337,6 +337,7 @@ public class ScProxyLoginProbeTests
         if (lines.Any(line => string.Equals(line, entry, StringComparison.OrdinalIgnoreCase)))
         {
             log.AppendLine($"entry '{entry}' already allowlisted; no Management Client edit needed");
+            RetireManagementClient(mc, mcMain);
             return;
         }
 
@@ -349,12 +350,36 @@ public class ScProxyLoginProbeTests
         lines.Add(entry);
         ManagementClientUi.SetValue(mcMain, "txtProxyTargets", string.Join("\n", lines));
 
-        if (!ManagementClientUi.Save(mcMain, 20))
+        if (!ManagementClientUi.Save(mc, mcMain, 20))
         {
             throw new InvalidOperationException($"Save never became enabled after adding '{entry}' to the proxy targets.");
         }
 
-        log.AppendLine($"allowlisted '{entry}' and saved");
+        // Read the pane back: a save the shell silently discarded (or a confirmation whose
+        // No/Cancel path was taken) must fail here, not strand the Smart Client phase with a
+        // stale allowlist.
+        Thread.Sleep(1500);
+        var after = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 15));
+        if (after == null || !after.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(line => line.Trim().Equals(entry, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"After Save, the proxy targets read back '{after}' — '{entry}' did not stick.");
+        }
+
+        log.AppendLine($"allowlisted '{entry}' and saved (verified readback)");
+        RetireManagementClient(mc, mcMain);
+    }
+
+    /// <summary>
+    /// Closes Management Client after its phase: an MC left open can hold a pending
+    /// "Save changes?" modal that steals focus and blocks UIA for the Smart Client phase
+    /// (the #56 hang). Close politely, sweep any confirmation it raises, then guarantee exit.
+    /// </summary>
+    private static void RetireManagementClient(ClientSession mc, FlaUI.Core.AutomationElements.Window mcMain)
+    {
+        try { mcMain.Close(); } catch { }
+        ManagementClientUi.AcceptPendingModal(mc, 5);
+        ProcessKiller.KillClients("VideoOS.Administration");
     }
 
     private static string ReadValue(AutomationElement element)

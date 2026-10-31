@@ -154,7 +154,7 @@ public sealed class ClientSession : IDisposable
 
     public void Dispose()
     {
-        Automation.Dispose();
-        Application.Dispose();
+        try { Automation.Dispose(); } catch { }
+        try { Application.Dispose(); } catch { }
     }
 }
