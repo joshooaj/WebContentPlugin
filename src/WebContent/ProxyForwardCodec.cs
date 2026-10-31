@@ -145,8 +145,9 @@ namespace WebContent
             };
 
         /// <summary>
-        /// The request headers to carry on the wire to the Event Server fetcher: the browser's
-        /// headers minus the outbound-blocked set, original casing and values intact.
+        /// The request headers to carry on the wire to the Event Server fetcher: the parsed
+        /// headers (first value per name) minus the outbound-blocked set, original casing and
+        /// values intact.
         /// </summary>
         internal static List<ProxyFetchHeader> ToOutboundRequestHeaders(ProxyForwardedRequest request)
         {

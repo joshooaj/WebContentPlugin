@@ -283,7 +283,9 @@ namespace WebContent
 
         private static int IndexOfHeadTerminator(byte[] bytes, int offset, int length)
         {
-            // CRLFCRLF, tolerating bare-LF clients, searched only against the newly appended range.
+            // CRLFCRLF, tolerating bare-LF clients. Rescanned from 0 each round: the leftover
+            // split for the request-body reader (#55) needs the terminator's absolute position,
+            // and a partially-arrived terminator in one read is only re-found once its tail lands.
             for (var i = offset; i + 1 < length; i++)
             {
                 if (bytes[i] == '\n' && bytes[i + 1] == '\n')

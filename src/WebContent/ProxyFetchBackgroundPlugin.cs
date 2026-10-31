@@ -168,6 +168,16 @@ namespace WebContent
                     TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.BadRequest, "The proxy-fetch request body was not valid base64.");
                     return null;
                 }
+
+                // The client forwarder caps bodies before relaying; the fetcher re-caps what the
+                // wire actually carried, so no sender — old build or crafted payload — can make
+                // the VMS server replay an unbounded body at a target.
+                if (body.Length > ProxyForwardConnection.MaxRequestBodyBytes)
+                {
+                    LogRefused(payload, $"the request body ({body.Length} bytes) is past the {ProxyForwardConnection.MaxRequestBodyBytes} byte request cap");
+                    TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.BadRequest, "The proxy-fetch request body exceeds the proxy's request cap.");
+                    return null;
+                }
             }
 
             var query = new ProxyFetchQuery

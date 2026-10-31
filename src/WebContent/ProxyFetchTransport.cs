@@ -167,34 +167,43 @@ namespace WebContent
                     continue;
                 }
 
-                switch (header.Name.ToUpperInvariant())
+                // A wire-supplied value with line breaks could inject headers into the ES's own
+                // request to the target; property setters do not reject these the way
+                // WebHeaderCollection does, so the gate lives here.
+                if (header.Value.IndexOf('\r') >= 0 || header.Value.IndexOf('\n') >= 0 ||
+                    header.Name.IndexOf(':') >= 0)
                 {
-                    case "USER-AGENT":
-                        request.UserAgent = header.Value;
-                        break;
-                    case "REFERER":
-                        request.Referer = header.Value;
-                        break;
-                    case "CONTENT-TYPE":
-                        request.ContentType = header.Value;
-                        break;
-                    default:
-                        if (TransportBlockedRequestHeaders.Contains(header.Name))
-                        {
+                    continue;
+                }
+
+                try
+                {
+                    switch (header.Name.ToUpperInvariant())
+                    {
+                        case "USER-AGENT":
+                            request.UserAgent = header.Value;
                             break;
-                        }
+                        case "REFERER":
+                            request.Referer = header.Value;
+                            break;
+                        case "CONTENT-TYPE":
+                            request.ContentType = header.Value;
+                            break;
+                        default:
+                            if (TransportBlockedRequestHeaders.Contains(header.Name))
+                            {
+                                break;
+                            }
 
-                        try
-                        {
                             request.Headers[header.Name] = header.Value;
-                        }
-                        catch (Exception)
-                        {
-                            // Restricted or malformed header names on the host stack: skipping the
-                            // single header beats failing the whole fetch.
-                        }
-
-                        break;
+                            break;
+                    }
+                }
+                catch (Exception)
+                {
+                    // Restricted names or host-stack value validation (e.g. ContentType rejects
+                    // non-printables on .NET Framework): skip the single header, never fail the
+                    // fetch - FetchAsync's never-throws contract covers every wire-supplied value.
                 }
             }
         }

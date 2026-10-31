@@ -74,5 +74,33 @@ namespace WebContent.Tests
             Assert.Contains("ProxyFetchWireCodec.FrameFromWire(message?.Data)", client);
             Assert.DoesNotContain("message?.Data as ProxyFetchResponsePayload", client);
         }
+
+        [Fact]
+        public void RequestSideAssemblesMethodHeadersAndBodyOntoTheWirePayload()
+        {
+            // The codec round-trip starts AFTER this assembly step, so nothing else pins that the
+            // browser's verb, headers, and body actually ride the transmitted payload (#55).
+            // Lose one assignment and the POST silently degrades to a body-less GET on the wire.
+            var client = File.ReadAllText(Path.Combine(
+                RepoLocator.FindRepoRoot(), "src", "WebContent", "ProxyFetchClient.cs"));
+
+            var collapsed = System.Text.RegularExpressions.Regex.Replace(client, @"\s+", " ");
+            Assert.Contains("Method = string.IsNullOrWhiteSpace(query.Method) ? null : query.Method.Trim().ToUpperInvariant(),", collapsed);
+            Assert.Contains("Headers = query.Headers != null && query.Headers.Count > 0 ? query.Headers : null,", collapsed);
+            Assert.Contains("BodyBase64 = query.Body != null && query.Body.Length > 0 ? Convert.ToBase64String(query.Body) : null,", collapsed);
+        }
+
+        [Fact]
+        public void FetcherReChecksMethodBase64AndBodyCapOnDecodedPayloads()
+        {
+            // Defense-in-depth on the Event Server: the method table, the base64 shape, and the
+            // request-body cap are re-checked against what the wire actually carried, never
+            // trusted from the requester (#55).
+            var fetcher = ReadFetcher();
+
+            Assert.Contains("ProxyForwardPolicy.IsForwardedMethod(method)", fetcher);
+            Assert.Contains("Convert.FromBase64String(payload.BodyBase64)", fetcher);
+            Assert.Contains("body.Length > ProxyForwardConnection.MaxRequestBodyBytes", fetcher);
+        }
     }
 }

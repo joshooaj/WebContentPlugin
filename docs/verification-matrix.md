@@ -193,9 +193,11 @@ device or any http page — https is refused by design, see below).
 
 ### SC-2 Vendor login flow through the proxy (#55)
 
-Requires the same both-machine drop as SC-1 (the #55 wire contract carries method/headers/body,
-so client and Event Server MUST run the same build — deploys are simultaneous or every payload
-decodes as an unusable frame).
+Requires the same both-machine drop as SC-1. The #55 wire contract carries method/headers/body,
+so client and Event Server MUST run the same build — DataContractJsonSerializer ignores unknown
+members, so a skewed pair does NOT fail loudly: a new client against an old Event Server silently
+degrades every POST to a body-less GET (the login loops back to the form). Deploys are
+simultaneous.
 
 1. Allowlist an http target that serves a login form: a real camera page, or the probe login
    server (`tests/ux/WebContent.UxTests`, `Category=probe` serves `/login` → POST → 302 +
@@ -206,6 +208,8 @@ decodes as an unusable frame).
    signed-in state, not the form again.
 3. The session cookie lives ONLY in the WebView2 profile: no cookie store exists on the Event
    Server side (`UseCookies`/`AllowAutoRedirect` off — pinned by `ProxyFetchTransportTests`).
+   A login form that submits with a chunked body (modern `fetch()` + `ReadableStream` style —
+   ordinary forms and XHR always carry Content-Length) answers 411 "Length Required" by design.
 4. Automatable harness: extend `ScProxyFetchProbeTests` (probe category) — artifacts under
    `%TEMP%\webcontent-sc-proxy-probe\<run>`; the probe goes red when the dashboard is not
    reached or the cookie round-trip fails.
