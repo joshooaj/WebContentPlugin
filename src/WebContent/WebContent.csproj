@@ -113,6 +113,8 @@
     <Compile Include="ProxyFetchTransport.cs" />
     <Compile Include="ProxyLoopbackTls.cs" />
     <Compile Include="ProxyLoopbackAuthority.cs" />
+    <Compile Include="ProxyLeafIssuer.cs" />
+    <Compile Include="ProxyLeafCorrelation.cs" />
     <Compile Include="ProxyFetchBackgroundPlugin.cs" />
     <Compile Include="ProxyFetchClient.cs" />
     <Compile Include="ProxyForwardCodec.cs" />

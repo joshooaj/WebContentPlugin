@@ -77,6 +77,8 @@ namespace WebContent
         {
             ProxyMessageIds.FetchRequestId,
             ProxyMessageIds.FetchResponseId,
+            ProxyMessageIds.LeafRequestId,
+            ProxyMessageIds.LeafResponseId,
         };
 
         public override List<WorkSpacePlugin> WorkSpacePlugins

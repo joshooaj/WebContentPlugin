@@ -80,9 +80,37 @@ namespace WebContent
             // authentication, and the container goes away when the owner is disposed.
             var key = NewPersistedProvider(
                 "WCProxyLeaf-" + ShortHash(host) + "-" + Guid.NewGuid().ToString("N").Substring(0, 8));
-            var subjectDer = Der.Name(host);
-            var spkiDer = Der.SubjectPublicKeyInfo(key);
+            try
+            {
+                var certificateDer = MintLeafForPublicKey(host, Der.SubjectPublicKeyInfo(key));
+                var certificate = new X509Certificate2(certificateDer);
+                certificate.PrivateKey = key;
+                return new ProxyLoopbackLeafOwner(certificate, key);
+            }
+            catch
+            {
+                key.Dispose();
+                throw;
+            }
+        }
 
+        /// <summary>
+        /// ADR-0003: signs a leaf for this host around a caller-supplied SubjectPublicKeyInfo —
+        /// the Event Server mint path, where the private half lives on the requesting client.
+        /// Validation here is structural (the Framework has no SPKI parser); an unusable public
+        /// key surfaces as ArgumentException, which the issuer maps to a BadRequest refusal.
+        /// </summary>
+        internal byte[] MintLeafForPublicKey(string host, byte[] subjectPublicKeyInfoDer)
+        {
+            if (subjectPublicKeyInfoDer == null ||
+                subjectPublicKeyInfoDer.Length < 50 ||
+                subjectPublicKeyInfoDer.Length > 4096 ||
+                subjectPublicKeyInfoDer[0] != 0x30)
+            {
+                throw new ArgumentException("The client public key is not a usable SubjectPublicKeyInfo.", nameof(subjectPublicKeyInfoDer));
+            }
+
+            var subjectDer = Der.Name(host);
             var notBefore = DateTime.UtcNow.AddDays(-1);
             var notAfter = notBefore.AddYears(2);
 
@@ -90,21 +118,18 @@ namespace WebContent
                 Der.Tagged(0xA0, Der.Integer(2)),
                 Der.Integer(RandomPositiveBytes(8)),
                 Der.Sha256RsaAlgorithmIdentifier(),
-                _authorityNameDer,                                      // issuer = the session CA
+                _authorityNameDer,                                      // issuer = the deployment CA
                 Der.Validity(notBefore, notAfter),
                 subjectDer,
-                spkiDer,
+                subjectPublicKeyInfoDer,
                 Der.Extensions(
                     Der.BasicConstraints(false),
                     Der.LeafKeyUsage(),
                     Der.ServerAuthEku(),
-                    Der.SubjectKeyIdentifier(spkiDer),
+                    Der.SubjectKeyIdentifier(subjectPublicKeyInfoDer),
                     Der.SubjectAlternativeName(host)));
 
-            var certificateDer = Sign(tbs, _authorityKey);
-            var certificate = new X509Certificate2(certificateDer);
-            certificate.PrivateKey = key;
-            return new ProxyLoopbackLeafOwner(certificate, key);
+            return Sign(tbs, _authorityKey);
         }
 
         public void Dispose()
@@ -411,55 +436,85 @@ namespace WebContent
         internal ProxyLoopbackLeafOwner CreateLeaf(string host)
         {
             var key = RSA.Create(2048);
-            var request = new CertificateRequest(
-                new X500DistinguishedName("CN=" + host),
-                key,
-                HashAlgorithmName.SHA256,
-                RSASignaturePadding.Pkcs1);
-            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
-            request.CertificateExtensions.Add(new X509KeyUsageExtension(
-                X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
-                false));
-            request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-                new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") },
-                true));
+            var certificateDer = MintLeafForPublicKey(host, key.ExportSubjectPublicKeyInfo());
+            var certificate = X509CertificateLoader.LoadCertificate(certificateDer);
 
-            var builder = new SubjectAlternativeNameBuilder();
-            IPAddress address;
-            if (IPAddress.TryParse(host, out address))
+            // The request key is not attached automatically when the issuer's own key is not
+            // copyable, so attach it here; either way the result must hold a private key.
+            var withKey = certificate.HasPrivateKey ? certificate : certificate.CopyWithPrivateKey(key);
+
+            // Schannel refuses ephemeral CNG keys for server authentication; the PFX roundtrip
+            // lands the key in a persisted form it accepts (same recipe as production).
+            var password = Guid.NewGuid().ToString("N");
+            var portable = withKey.Export(X509ContentType.Pkcs12, password);
+            var usable = X509CertificateLoader.LoadPkcs12(portable, password);
+            if (!ReferenceEquals(withKey, certificate))
             {
-                builder.AddIpAddress(address);
-            }
-            else
-            {
-                builder.AddDnsName(host);
+                withKey.Dispose();
             }
 
-            request.CertificateExtensions.Add(builder.Build(false));
+            return new ProxyLoopbackLeafOwner(usable, key);
+        }
 
-            using (var certificate = request.Create(
-                _authorityCertificate,
-                DateTimeOffset.UtcNow.AddDays(-1),
-                DateTimeOffset.UtcNow.AddDays(730),
-                RandomNumberGenerator.GetBytes(8)))
+        /// <summary>
+        /// ADR-0003: signs a leaf for this host around a caller-supplied SubjectPublicKeyInfo —
+        /// the Event Server mint path, where the private half lives on the requesting client. An
+        /// unusable public key surfaces as ArgumentException, which the issuer maps to a
+        /// BadRequest refusal.
+        /// </summary>
+        internal byte[] MintLeafForPublicKey(string host, byte[] subjectPublicKeyInfoDer)
+        {
+            var publicKey = RSA.Create();
+            try
             {
-                // The request key is not attached automatically when the issuer's own key is not
-                // copyable, so attach it here; either way the result must hold a private key.
-                var withKey = certificate.HasPrivateKey
-                    ? certificate
-                    : certificate.CopyWithPrivateKey(key);
+                publicKey.ImportSubjectPublicKeyInfo(subjectPublicKeyInfoDer ?? Array.Empty<byte>(), out _);
+            }
+            catch (Exception exception)
+            {
+                publicKey.Dispose();
+                throw new ArgumentException("The client public key is not a usable RSA SubjectPublicKeyInfo.", nameof(subjectPublicKeyInfoDer), exception);
+            }
 
-                // Schannel refuses ephemeral CNG keys for server authentication; the PFX roundtrip
-                // lands the key in a persisted form it accepts (same recipe as production).
-                var password = Guid.NewGuid().ToString("N");
-                var portable = withKey.Export(X509ContentType.Pkcs12, password);
-                var usable = X509CertificateLoader.LoadPkcs12(portable, password);
-                if (!ReferenceEquals(withKey, certificate))
+            try
+            {
+                var request = new CertificateRequest(
+                    new X500DistinguishedName("CN=" + host),
+                    publicKey,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1);
+                request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+                request.CertificateExtensions.Add(new X509KeyUsageExtension(
+                    X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+                    false));
+                request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+                    new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") },
+                    true));
+
+                var builder = new SubjectAlternativeNameBuilder();
+                IPAddress address;
+                if (IPAddress.TryParse(host, out address))
                 {
-                    withKey.Dispose();
+                    builder.AddIpAddress(address);
+                }
+                else
+                {
+                    builder.AddDnsName(host);
                 }
 
-                return new ProxyLoopbackLeafOwner(usable, key);
+                request.CertificateExtensions.Add(builder.Build(false));
+
+                using (var certificate = request.Create(
+                    _authorityCertificate,
+                    DateTimeOffset.UtcNow.AddDays(-1),
+                    DateTimeOffset.UtcNow.AddDays(730),
+                    RandomNumberGenerator.GetBytes(8)))
+                {
+                    return certificate.RawData;
+                }
+            }
+            finally
+            {
+                publicKey.Dispose();
             }
         }
 

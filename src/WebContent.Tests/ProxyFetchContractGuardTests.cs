@@ -27,6 +27,8 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyFetchRequestPayload))]
         [InlineData(typeof(ProxyFetchResponsePayload))]
         [InlineData(typeof(ProxyFetchHeader))]
+        [InlineData(typeof(ProxyLeafRequestPayload))]
+        [InlineData(typeof(ProxyLeafResponsePayload))]
         public void EveryPayloadFieldStaysInsideTheMessageWhitelist(Type payloadType)
         {
             foreach (var field in payloadType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -40,6 +42,8 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyFetchRequestPayload))]
         [InlineData(typeof(ProxyFetchResponsePayload))]
         [InlineData(typeof(ProxyFetchHeader))]
+        [InlineData(typeof(ProxyLeafRequestPayload))]
+        [InlineData(typeof(ProxyLeafResponsePayload))]
         public void PayloadsLiveInThePluginNamespaceTheWhitelistGrants(Type payloadType)
         {
             // The whitelist escape for plug-in types is namespace-based; a payload living under a
@@ -54,6 +58,8 @@ namespace WebContent.Tests
             // ids must be receivable at Normal.
             Assert.EndsWith("Request", ProxyMessageIds.FetchRequestId, StringComparison.Ordinal);
             Assert.EndsWith("Response", ProxyMessageIds.FetchResponseId, StringComparison.Ordinal);
+            Assert.EndsWith("Request", ProxyMessageIds.LeafRequestId, StringComparison.Ordinal);
+            Assert.EndsWith("Response", ProxyMessageIds.LeafResponseId, StringComparison.Ordinal);
         }
 
         private static bool IsWhitelistSafe(Type type, Assembly pluginAssembly)

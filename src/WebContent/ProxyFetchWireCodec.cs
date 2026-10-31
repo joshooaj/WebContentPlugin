@@ -28,6 +28,12 @@ namespace WebContent
         private static readonly DataContractJsonSerializer FrameSerializer =
             new DataContractJsonSerializer(typeof(ProxyFetchResponsePayload));
 
+        private static readonly DataContractJsonSerializer LeafRequestSerializer =
+            new DataContractJsonSerializer(typeof(ProxyLeafRequestPayload));
+
+        private static readonly DataContractJsonSerializer LeafResponseSerializer =
+            new DataContractJsonSerializer(typeof(ProxyLeafResponsePayload));
+
         /// <summary>Encode a request payload for Message.Data.</summary>
         internal static string ToWire(ProxyFetchRequestPayload payload)
         {
@@ -65,6 +71,40 @@ namespace WebContent
             }
 
             return Deserialize<ProxyFetchResponsePayload>(json, FrameSerializer);
+        }
+
+        /// <summary>Encode a leaf-mint request for Message.Data (ADR-0003).</summary>
+        internal static string ToWire(ProxyLeafRequestPayload request)
+        {
+            return Serialize(request, LeafRequestSerializer);
+        }
+
+        /// <summary>Encode a leaf-mint response for Message.Data (ADR-0003).</summary>
+        internal static string ToWire(ProxyLeafResponsePayload response)
+        {
+            return Serialize(response, LeafResponseSerializer);
+        }
+
+        internal static ProxyLeafRequestPayload LeafRequestFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyLeafRequestPayload>(json, LeafRequestSerializer);
+        }
+
+        internal static ProxyLeafResponsePayload LeafResponseFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyLeafResponsePayload>(json, LeafResponseSerializer);
         }
 
         private static string Serialize(object payload, DataContractJsonSerializer serializer)

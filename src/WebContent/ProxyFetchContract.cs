@@ -19,6 +19,11 @@ namespace WebContent
     {
         internal const string FetchRequestId = "WebContent.Proxy.FetchRequest";
         internal const string FetchResponseId = "WebContent.Proxy.FetchResponse";
+
+        /// <summary>ADR-0003: client asks the Event Server to mint a loopback leaf for one
+        /// allowlisted origin, carrying the client-generated SubjectPublicKeyInfo.</summary>
+        internal const string LeafRequestId = "WebContent.Proxy.LeafRequest";
+        internal const string LeafResponseId = "WebContent.Proxy.LeafResponse";
     }
 
     /// <summary>
@@ -68,6 +73,12 @@ namespace WebContent
         /// no per-target "accept untrusted certificate" override, so the fetch is refused.
         /// </summary>
         internal const string TlsValidation = "TlsValidation";
+
+        /// <summary>
+        /// Ticket #56 (ADR-0003): the Event Server could not load or create the deployment CA,
+        /// so no loopback leaf certificate can be minted.
+        /// </summary>
+        internal const string NoAuthority = "NoAuthority";
     }
 
     /// <summary>
@@ -207,6 +218,48 @@ namespace WebContent
         // Failure fields.
         internal string ErrorCode;
         internal string ErrorMessage;
+    }
+
+    /// <summary>
+    /// Ticket #56 (ADR-0003): one loopback-leaf mint request. The client generates the leaf key
+    /// pair and sends only the public half (DER SubjectPublicKeyInfo, base64) — no private key
+    /// ever crosses the wire. Host/Port identify the CONNECT origin; the Event Server mints only
+    /// for origins some proxied workspace allowlists (the allowlist IS the minting policy).
+    /// One JSON string on the wire like every other proxy payload (#54).
+    /// </summary>
+    [Serializable]
+    public class ProxyLeafRequestPayload
+    {
+        public string CorrelationId;
+
+        /// <summary>CONNECT target host as the browser resolved it (IdnHost form).</summary>
+        public string Host;
+
+        /// <summary>CONNECT target port; the allowlist gate matches scheme+host+port exactly.</summary>
+        public int Port;
+
+        public string SpkiBase64;
+    }
+
+    /// <summary>
+    /// Ticket #56 (ADR-0003): the leaf exchange's single response frame. Success carries the minted
+    /// leaf DER (no private key — the client attaches its own) plus the deployment CA certificate
+    /// and its thumbprint, so the client can verify its machine trust roots hold the CA and show
+    /// actionable guidance when it does not.
+    /// </summary>
+    [Serializable]
+    public class ProxyLeafResponsePayload
+    {
+        public string CorrelationId;
+        public bool Success;
+
+        public string LeafDerBase64;
+        public string AuthorityDerBase64;
+        public string AuthorityThumbprint;
+
+        // Failure fields.
+        public string ErrorCode;
+        public string ErrorMessage;
     }
 
     /// <summary>
