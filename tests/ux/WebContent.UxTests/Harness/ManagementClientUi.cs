@@ -788,16 +788,26 @@ public static class ManagementClientUi
                 .FirstOrDefault(b => b.ControlType == ControlType.Button && b.IsEnabled);
             if (button != null)
             {
-                var invoke = System.Threading.Tasks.Task.Run(() => button.Patterns.Invoke.Pattern.Invoke());
-                if (!invoke.Wait(3000))
+                try
                 {
-                    // Still blocked: a modal owns the click. Accept it, then the click returns.
-                    AcceptPendingModal(session, 10);
-                    invoke.Wait(TimeSpan.FromSeconds(20));
+                    var invoke = System.Threading.Tasks.Task.Run(() => button.Patterns.Invoke.Pattern.Invoke());
+                    if (!invoke.Wait(3000))
+                    {
+                        // Still blocked: a modal owns the click. Accept it, then the click returns.
+                        AcceptPendingModal(session, 10);
+                        invoke.Wait(TimeSpan.FromSeconds(20));
+                    }
+                    else
+                    {
+                        AcceptPendingModal(session, 4);
+                    }
                 }
-                else
+                catch (AggregateException agg) when (IsStaleButton(agg))
                 {
-                    AcceptPendingModal(session, 4);
+                    // MC re-renders the pane after an edit and disables Save for a moment;
+                    // IsEnabled raced the Invoke. Re-find the button and retry inside the deadline.
+                    Thread.Sleep(500);
+                    continue;
                 }
 
                 Thread.Sleep(2500);
@@ -807,6 +817,22 @@ public static class ManagementClientUi
             Thread.Sleep(500);
         }
         return false;
+    }
+
+    /// <summary>True when the aggregate carries only "element not enabled" UIA failures (0x80040200).</summary>
+    private static bool IsStaleButton(AggregateException aggregate)
+    {
+        foreach (var inner in aggregate.Flatten().InnerExceptions)
+        {
+            var code = (inner as System.Runtime.InteropServices.COMException)?.ErrorCode;
+            var stale = inner.GetType().Name == "ElementNotEnabledException" || code == unchecked((int)0x80040200);
+            if (!stale)
+            {
+                return false;
+            }
+        }
+
+        return aggregate.InnerExceptions.Count > 0;
     }
 
     /// <summary>
