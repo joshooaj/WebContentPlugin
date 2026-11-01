@@ -155,7 +155,10 @@ public class ScProxyErrorProbeTests
         string outageTitle = null;
         string outageBody = null;
         int outageStatus = -1;
+        string recoveredTitle = null;
+        string recoveredBody = null;
         ClientSession sc = null;
+        ClientSession fresh = null;
         var serviceStopped = false;
         try
         {
@@ -237,6 +240,51 @@ public class ScProxyErrorProbeTests
             log.AppendLine(MipLogContains("ServerUnavailable")
                 ? "MIPLog.txt marker found: Proxy fetch ... failed on the Smart Client side ... (code=ServerUnavailable)"
                 : "NOTE: no 'ServerUnavailable' marker found in the Smart Client MIPLog.txt snapshot (logging may be disabled or rotated)");
+
+            // Recovery half of the demo: the restart disposes every connected client's messaging
+            // channel (AGENTS.md), so recovery is a FRESH Smart Client session, not a reload of
+            // this one. The new session must get the real page back - no error page, no spinner.
+            EventServerControl.Start(config, log);
+            serviceStopped = false;
+            Thread.Sleep(10000);   // the fetcher's plugin load happens during service start
+
+            ProcessKiller.KillClients("Client");
+            ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+            sc.Dispose();
+            sc = null;
+            CdpConnector.CleanStalePortFiles(config.WebView2DataRoot);
+
+            fresh = ClientSession.Launch(config.SmartClientExe);
+            var freshLogin = LoginFlow.WaitForLoginWindow(fresh);
+            LoginFlow.Login(fresh, freshLogin, config);
+            LoginFlow.AcceptCertificateTrust(fresh);
+            var freshMain = LoginFlow.WaitForSmartClientMain(fresh);
+            SmartClientUi.Maximize(freshMain);
+            Thread.Sleep(1500);
+            freshMain = fresh.Windows().First(w => w.AutomationId == "_mainApplicationWindow");
+            freshMain = SmartClientUi.SelectWorkspace(freshMain, fresh, config.WorkspaceName);
+            var freshItem = SmartClientUi.WaitForMipViewItem(freshMain);
+            Assert.NotNull(freshItem);
+            var freshAddressBar = freshItem.FindFirstDescendant(cf => cf.ByAutomationId("addressBar"));
+            if (freshAddressBar == null)
+            {
+                throw new InvalidOperationException("No addressBar in the recovered session's view; cannot prove recovery.");
+            }
+
+            Thread.Sleep(6000);
+            SmartClientUi.NavigateAddress(freshAddressBar, FetchUrl);
+            await using (var recovered = new CdpConnector())
+            {
+                var recoveredBrowser = await recovered.ConnectFirstAvailableAsync(config.WebView2DataRoot);
+                var recoveredPage = await CdpConnector.WaitForPageAsync(recoveredBrowser, "httpforever.com");
+                await recoveredPage.WaitForSelectorAsync("body", new PageWaitForSelectorOptions { Timeout = 45000 });
+                recoveredTitle = await recoveredPage.TitleAsync();
+                var recoveredBodyElement = await recoveredPage.QuerySelectorAsync("body");
+                recoveredBody = recoveredBodyElement == null ? null : await recoveredBodyElement.TextContentAsync();
+                log.AppendLine($"fresh session after the restart -> title='{recoveredTitle}'");
+                log.AppendLine($"body: {Summarize(recoveredBody)}");
+                await recoveredPage.ScreenshotAsync(new PageScreenshotOptions { Path = Artifacts.PathOf("sc-error-probe-recovered.png") });
+            }
         }
         catch (Exception ex)
         {
@@ -245,23 +293,24 @@ public class ScProxyErrorProbeTests
         }
         finally
         {
-            try
+            if (serviceStopped)
             {
-                EventServerControl.Start(config, log);
-                if (serviceStopped)
+                try
                 {
+                    EventServerControl.Start(config, log);
                     // The fetcher needs its service-start plugin load; give it the documented head start.
                     Thread.Sleep(10000);
                 }
-            }
-            catch (Exception ex)
-            {
-                log.AppendLine($"!!! Event Server START FAILED - manual recovery required on {config.VmsAddress}: {ex.Message}");
+                catch (Exception ex)
+                {
+                    log.AppendLine($"!!! Event Server START FAILED - manual recovery required on {config.VmsAddress}: {ex.Message}");
+                }
             }
             ProcessKiller.KillClients("Client");
             ProcessKiller.KillClients("VideoOS.Administration");
             ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
             sc?.Dispose();
+            fresh?.Dispose();
             Artifacts.WriteText("sc-error-probe-es-outage-results.txt", log.ToString());
             _output.WriteLine(log.ToString());
         }
@@ -271,6 +320,12 @@ public class ScProxyErrorProbeTests
         Assert.Equal("Web Content proxy: 503", outageTitle);
         Assert.NotNull(outageBody);
         Assert.Contains("VMS server proxy component is not available", outageBody);
+        // Recovery: a session started after the service is back gets the real document again.
+        Assert.NotNull(recoveredTitle);
+        Assert.False(recoveredTitle.StartsWith("Web Content proxy:"),
+            $"a fresh session after the restart still shows a proxy error page: '{recoveredTitle}'");
+        Assert.Equal(healthyTitle, recoveredTitle);
+        Assert.DoesNotContain("Web Content proxy:", recoveredBody);
     }
 
     private static string Summarize(string text)
