@@ -54,7 +54,23 @@ public static class LoginFlow
         // SUCCESS outcome, not a broken login - recognize it instead of faulting the probe.
         try
         {
-            var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
+        // A pre-filled dialog with a DEAD Connect button is the client mid-auto-login: the
+        // fields hold the remembered credentials and Connect is disabled for the whole attempt.
+        // Typing into that dialog (select-all, paste) has raced and cancelled the attempt -
+        // leave it untouched and let the session window arrive.
+        var earlyConnect = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect"))
+                           ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
+        if (earlyConnect != null && !TryIsEnabled(earlyConnect) && RememberedUserPresent(loginWindow, config))
+        {
+            LogEntry("dialog pre-filled with remembered user, Connect disabled - auto-login in progress; hands off 30 s");
+            if (WaitForConnected(session, 30))
+            {
+                LogEntry("auto-login completed while hands-off waiting; nothing to enter");
+                return;
+            }
+        }
+
+        var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
         if (serverBox != null && !string.IsNullOrWhiteSpace(config.VmsAddress))
         {
             serverBox.Focus();
@@ -83,7 +99,7 @@ public static class LoginFlow
         // Never fight that dialog - give the auto-login room, then fall back to entering.
         if (!WaitUntilEnabled(connect, 3))
         {
-            if (WaitForConnected(session, 10))
+            if (WaitForConnected(session, 20))
             {
                 LogEntry("auto-login completed while waiting; leaving the dialog alone");
                 return;
@@ -92,7 +108,7 @@ public static class LoginFlow
             Artifacts.Window(loginWindow, "login-filled-disabled");
             DumpLoginTree(loginWindow, "login-tree-disabled.txt");
             FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
-            if (!WaitUntilEnabled(connect, 3) && !WaitForConnected(session, 5))
+            if (!WaitUntilEnabled(connect, 3) && !WaitForConnected(session, 10))
             {
                 DumpLoginTree(loginWindow, "login-tree-disabled2.txt");
                 throw new InvalidOperationException(
@@ -125,6 +141,41 @@ public static class LoginFlow
             Thread.Sleep(400);
         }
         return false;
+    }
+
+    private static bool TryIsEnabled(AutomationElement element)
+    {
+        try { return element.IsEnabled; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// True when the login dialog's user combo already carries the configured username -
+    /// the signature of the client's remembered-credentials auto-login attempt.
+    /// </summary>
+    private static bool RememberedUserPresent(Window loginWindow, UxConfig config)
+    {
+        try
+        {
+            var userCombo = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_userNameComboBox"));
+            var userBox = userCombo?.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
+            var shown = userBox == null
+                ? (userCombo?.Name ?? string.Empty)
+                : (ReadBoxValue(userBox) ?? userBox.Name ?? string.Empty);
+            return !string.IsNullOrWhiteSpace(config.VmsUsername)
+                   && shown.Contains(config.VmsUsername, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    private static string ReadBoxValue(AutomationElement box)
+    {
+        try
+        {
+            if (box.Patterns.Value.IsSupported) return box.Patterns.Value.Pattern.Value;
+        }
+        catch { }
+        return null;
     }
 
     private static readonly string[] PreferredTrustButtonIds =

@@ -1,3 +1,4 @@
+using System.Text;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 
@@ -784,8 +785,7 @@ public static class ManagementClientUi
         while (DateTime.UtcNow < deadline)
         {
             AcceptPendingModal(session, 1);
-            var button = mainWindow.FindAllDescendants(cf => cf.ByName("Save"))
-                .FirstOrDefault(b => b.ControlType == ControlType.Button && b.IsEnabled);
+            var button = FindSaveButton(mainWindow);
             if (button != null)
             {
                 try
@@ -816,7 +816,56 @@ public static class ManagementClientUi
             }
             Thread.Sleep(500);
         }
+        DumpSaveCandidates(mainWindow);
         return false;
+    }
+
+    /// <summary>
+    /// The shell's enabled "Save" affordance. Name match is any control type: the MC toolbar
+    /// renders Save as a button, but a toolbar element surfacing through the WinForms/WPF
+    /// bridge can report as Text or Custom, and insisting on ControlType.Button hid a live,
+    /// enabled Save from the harness.
+    /// </summary>
+    private static AutomationElement FindSaveButton(Window mainWindow)
+    {
+        return mainWindow.FindAllDescendants(cf => cf.ByName("Save"))
+            .FirstOrDefault(b => b.IsEnabled && b.Patterns.Invoke.IsSupported);
+    }
+
+    /// <summary>
+    /// Failure evidence for "Save never became enabled": every element in the shell whose name
+    /// mentions save/discard/revert, with control type and enabled state - so the next run
+    /// says WHAT the toolbar actually exposes instead of guessing.
+    /// </summary>
+    private static void DumpSaveCandidates(Window mainWindow)
+    {
+        try
+        {
+            var all = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Custom)
+                .Or(cf.ByControlType(ControlType.Button))
+                .Or(cf.ByControlType(ControlType.Text))
+                .Or(cf.ByControlType(ControlType.MenuItem))
+                .Or(cf.ByControlType(ControlType.Hyperlink)));
+            var hits = all.Where(e =>
+            {
+                var n = e.Name ?? string.Empty;
+                return n.IndexOf("save", StringComparison.OrdinalIgnoreCase) >= 0
+                    || n.IndexOf("discard", StringComparison.OrdinalIgnoreCase) >= 0
+                    || n.IndexOf("revert", StringComparison.OrdinalIgnoreCase) >= 0;
+            });
+            var sb = new StringBuilder();
+            sb.AppendLine($"save-census {DateTime.Now:HH:mm:ss} candidates={hits.Count()}");
+            foreach (var e in hits)
+            {
+                try
+                {
+                    sb.AppendLine($"  ct={e.ControlType} aid='{e.AutomationId}' name='{e.Name}' enabled={e.IsEnabled} invoke={e.Patterns.Invoke.IsSupported}");
+                }
+                catch (Exception ex) { sb.AppendLine("  element threw " + ex.GetType().Name); }
+            }
+            File.AppendAllText(Artifacts.PathOf("mc-save-census.txt"), sb + Environment.NewLine);
+        }
+        catch { }
     }
 
     /// <summary>True when the aggregate carries only "element not enabled" UIA failures (0x80040200).</summary>

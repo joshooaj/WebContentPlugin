@@ -366,6 +366,8 @@ public class ScProxyLoginProbeTests
         ManagementClientUi.EnsureCheckBox(mcMain, "chkProxyEnabled", true);
         lines.Add(entry);
         ManagementClientUi.SetValue(mcMain, "txtProxyTargets", string.Join("\n", lines));
+        var edited = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 5));
+        log.AppendLine($"proxy targets right after SetValue: '{edited}'");
 
         if (!ManagementClientUi.Save(mc, mcMain, 20))
         {
