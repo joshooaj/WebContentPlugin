@@ -505,6 +505,38 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public async Task NamesTheOpenExceptionOnTheInTunnelFailurePageWhenTheOpenThrows()
+        {
+            // #60, same explicit page as the top-level ws posture (#57): an open that THROWS
+            // names the exception on the 502 page written into the tunnel - the message is
+            // never collapsed into the generic no-outcome wording.
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                throw new IOException("the dialer exploded");
+
+            var inner = new DuplexStream(
+                new MemoryStream(Encoding.UTF8.GetBytes(
+                    "GET /ws/live HTTP/1.1\r\nHost: cam1.test:8443\r\n" +
+                    "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+                    "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n")),
+                new MemoryStream());
+
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes("CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, new[] { "https://cam1.test:8443" },
+                    query => Task.FromResult(new ProxyFetchResult { Success = false }),
+                    message => { },
+                    (stream, leftover, tunnelOrigin) => Task.FromResult<Stream>(inner),
+                    openTunnel);
+
+                var inside = Encoding.UTF8.GetString(inner.WrittenBuffer.ToArray());
+                Assert.Contains("HTTP/1.1 502", inside);
+                Assert.Contains("the dialer exploded", inside);
+            }
+        }
+
+        [Fact]
         public async Task PumpsInTunnelTargetBytesBackIntoTheTunnelUntilTheHandleCloses()
         {
             // Both directions ride the tunnel stream after the 101: target bytes land decrypted

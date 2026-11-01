@@ -310,8 +310,13 @@ namespace WebContent
                         }
                         catch (Exception exception)
                         {
+                            // Same explicit page as the top-level ws posture (#57): the open
+                            // exception is named on the page, not swallowed into the generic
+                            // no-outcome wording.
                             log($"Proxy in-tunnel websocket open for '{request.RawTarget}' threw: {exception.Message}");
-                            upgradeOutcome = null;
+                            await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy tunnel failed to open: {exception.Message}"));
+                            pending = head.Leftover;
+                            continue;
                         }
 
                         if (upgradeOutcome == null || !upgradeOutcome.Success)

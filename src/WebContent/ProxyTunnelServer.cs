@@ -264,6 +264,17 @@ namespace WebContent
                 CloseSocket(socket);
                 for (var inner = exception; inner != null; inner = inner.InnerException)
                 {
+                    if (inner is AuthenticationException)
+                    {
+                        // Schannel has been seen surfacing a chain refusal as an IOException
+                        // wrapping the authentication failure rather than the raw
+                        // AuthenticationException: same explicit TlsValidation posture, never
+                        // mislabeled as an unreachable target.
+                        return OpenFailure(
+                            ProxyFetchErrorCodes.TlsValidation,
+                            $"{OriginOf(target)}: the Event Server refused the target's TLS certificate on the websocket tunnel leg: {exception.Message}");
+                    }
+
                     if (inner is SocketException)
                     {
                         return OpenFailure(ProxyFetchErrorCodes.Unreachable, $"{OriginOf(target)}: {exception.Message}");
