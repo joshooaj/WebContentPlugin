@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Authentication;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace WebContent.UxTests.Harness;
@@ -14,6 +17,12 @@ namespace WebContent.UxTests.Harness;
 /// round trip, and the journal records the handshake and every echoed frame for server-side
 /// evidence. No external websocket library: the harness speaks the raw RFC 6455 frames itself,
 /// exactly like the tunnel it is testing.
+///
+/// #60 adds a TLS mode: every accepted connection first runs a server-side SslStream under an
+/// in-process self-signed certificate (journal: TLS-CONNECT/TLS-HANDSHAKE/TLS-FAULT), so the
+/// same echo target can sit behind an https origin and exercise the Event Server's wss
+/// handshake leg. probePageHtml replaces the served page (the wss probe dials a different
+/// origin from the page it loads on).
 /// </summary>
 public sealed class WebSocketEchoServer : IDisposable
 {
@@ -21,10 +30,33 @@ public sealed class WebSocketEchoServer : IDisposable
 
     private readonly TcpListener _listener;
     private readonly List<string> _journal = new();
+    private readonly X509Certificate2 _tlsCertificate;
+    private readonly string _probePageHtml;
     private volatile bool _stopping;
 
-    public WebSocketEchoServer(int port)
+    /// <summary>The in-process TLS certificate when useTls was requested (null otherwise). The
+    /// wss probe exports this and has the Event Server trust it for the validated-target row.</summary>
+    public X509Certificate2 TlsCertificate => _tlsCertificate;
+
+    public WebSocketEchoServer(int port) : this(port, useTls: false, tlsHost: null, probePageHtml: null)
     {
+    }
+
+    /// <param name="useTls">Accept connections under an in-process self-signed certificate
+    /// (server-auth EKU, SAN for tlsHost + loopback), which is exactly what the #60 wss rows
+    /// need: untrusted for the fail-closed row, imported into the Event Server's trust store
+    /// for the validated row.</param>
+    /// <param name="tlsHost">Host the https origin names; becomes a certificate SAN so the
+    /// failure on the fail-closed row is chain trust, never name mismatch.</param>
+    /// <param name="probePageHtml">Replaces the default ws page for GETs (the wss probe's page
+    /// lives on a plain http origin and dials the https origin by absolute url).</param>
+    public WebSocketEchoServer(int port, bool useTls, string tlsHost = null, string probePageHtml = null)
+    {
+        if (useTls)
+        {
+            _tlsCertificate = CreateSelfSignedCertificate(tlsHost);
+        }
+        _probePageHtml = probePageHtml;
         _listener = new TcpListener(IPAddress.Any, port);
         _listener.Start();
         _ = Task.Run(AcceptLoopAsync);
@@ -74,7 +106,28 @@ public sealed class WebSocketEchoServer : IDisposable
             var stream = client.GetStream();
             try
             {
-                var head = await ReadHeadAsync(stream);
+                Stream requestStream = stream;
+                if (_tlsCertificate != null)
+                {
+                    Note("TLS-CONNECT peer");
+                    var tls = new SslStream(stream, false);
+                    try
+                    {
+                        await tls.AuthenticateAsServerAsync(_tlsCertificate, false, SslProtocols.Tls12, false);
+                        Note("TLS-HANDSHAKE ok");
+                    }
+                    catch (Exception tlsFault)
+                    {
+                        // A client that refuses the chain mid-TLS is a clean close, not a
+                        // request: the journal entry is the evidence the leg was dialed.
+                        Note($"TLS-FAULT {tlsFault.GetType().Name}: {tlsFault.Message}");
+                        tls.Dispose();
+                        return;
+                    }
+                    requestStream = tls;
+                }
+
+                var head = await ReadHeadAsync(requestStream);
                 if (head == null)
                 {
                     return;
@@ -89,7 +142,7 @@ public sealed class WebSocketEchoServer : IDisposable
 
                 if (upgraded && path.StartsWith("/echo", StringComparison.Ordinal))
                 {
-                    await EchoWebSocketAsync(stream, head, path);
+                    await EchoWebSocketAsync(requestStream, head, path);
                     return;
                 }
 
@@ -102,8 +155,8 @@ public sealed class WebSocketEchoServer : IDisposable
                     $"Content-Length: {bytes.Length}\r\n" +
                     "Connection: close\r\n" +
                     "\r\n";
-                await stream.WriteAsync(Encoding.UTF8.GetBytes(response));
-                await stream.WriteAsync(bytes);
+                await requestStream.WriteAsync(Encoding.UTF8.GetBytes(response));
+                await requestStream.WriteAsync(bytes);
             }
             catch (Exception exception)
             {
@@ -112,7 +165,7 @@ public sealed class WebSocketEchoServer : IDisposable
         }
     }
 
-    private async Task EchoWebSocketAsync(NetworkStream stream, string head, string path)
+    private async Task EchoWebSocketAsync(Stream stream, string head, string path)
     {
         string key = null;
         foreach (var line in head.Split(new[] { "\r\n" }, StringSplitOptions.None))
@@ -163,7 +216,7 @@ public sealed class WebSocketEchoServer : IDisposable
         }
     }
 
-    private static async Task<(byte opcode, byte[] payload)?> ReadFrameAsync(NetworkStream stream)
+    private static async Task<(byte opcode, byte[] payload)?> ReadFrameAsync(Stream stream)
     {
         var first = await ReadExactlyAsync(stream, 2);
         if (first == null)
@@ -226,7 +279,7 @@ public sealed class WebSocketEchoServer : IDisposable
         return (opcode, payload);
     }
 
-    private static async Task WriteFrameAsync(NetworkStream stream, byte opcode, byte[] payload)
+    private static async Task WriteFrameAsync(Stream stream, byte opcode, byte[] payload)
     {
         var head = new List<byte> { (byte)(0x80 | opcode) };
         if (payload.Length < 126)
@@ -252,7 +305,7 @@ public sealed class WebSocketEchoServer : IDisposable
         await stream.WriteAsync(payload);
     }
 
-    private static async Task<byte[]> ReadExactlyAsync(NetworkStream stream, int count)
+    private static async Task<byte[]> ReadExactlyAsync(Stream stream, int count)
     {
         var buffer = new byte[count];
         var offset = 0;
@@ -270,7 +323,7 @@ public sealed class WebSocketEchoServer : IDisposable
         return buffer;
     }
 
-    private static async Task<string> ReadHeadAsync(NetworkStream stream)
+    private static async Task<string> ReadHeadAsync(Stream stream)
     {
         var buffer = new byte[8192];
         var received = 0;
@@ -294,7 +347,9 @@ public sealed class WebSocketEchoServer : IDisposable
         return null;
     }
 
-    private static string BuildProbePage() =>
+    private string BuildProbePage() => _probePageHtml ?? DefaultWsProbePage;
+
+    private static string DefaultWsProbePage =>
         "<!DOCTYPE html><html><head><title>ws-echo-probe</title></head><body>" +
         "<h1>websocket probe</h1>" +
         "<div id=\"ws-status\">WS-PENDING</div>" +
@@ -314,6 +369,53 @@ public sealed class WebSocketEchoServer : IDisposable
         "  };" +
         "} catch (e) { document.getElementById('ws-status').textContent = 'WS-FAIL:' + e.message; }" +
         "</script></body></html>";
+
+    /// <summary>
+    /// RSA self-signed certificate valid for the https origin the probe names (SAN: tlsHost,
+    /// loopback, machine name). KeyUsage/EKU mirror a real camera portal's server certificate,
+    /// so the #60 fail-closed row fails on chain trust, never on name mismatch. The PFX
+    /// roundtrip lands the key in a persisted form Schannel accepts server-side.
+    /// </summary>
+    private static X509Certificate2 CreateSelfSignedCertificate(string tlsHost)
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest(
+            $"CN={WssTargetTrust.ProbeCertificateCommonName}",
+            key,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+            false));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") },
+            false));
+
+        var san = new SubjectAlternativeNameBuilder();
+        san.AddIpAddress(IPAddress.Loopback);
+        if (!string.IsNullOrWhiteSpace(tlsHost))
+        {
+            if (IPAddress.TryParse(tlsHost, out var address))
+            {
+                san.AddIpAddress(address);
+            }
+            else
+            {
+                san.AddDnsName(tlsHost);
+            }
+        }
+        san.AddDnsName(Environment.MachineName.ToLowerInvariant());
+        request.CertificateExtensions.Add(san.Build());
+
+        using var created = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(30));
+
+        var password = Guid.NewGuid().ToString("N");
+        var portable = created.Export(X509ContentType.Pkcs12, password);
+        return X509CertificateLoader.LoadPkcs12(portable, password);
+    }
 
     public void Dispose()
     {
