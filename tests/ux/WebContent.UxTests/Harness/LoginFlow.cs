@@ -52,11 +52,15 @@ public static class LoginFlow
         {
             LogEntry($"connect disabled; re-entering password (loginWindow aid='{loginWindow.AutomationId}')");
             Artifacts.Window(loginWindow, "login-filled-disabled");
+            DumpLoginTree(loginWindow, "login-tree-disabled.txt");
             FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
             if (!WaitUntilEnabled(connect, 3))
+            {
+                DumpLoginTree(loginWindow, "login-tree-disabled2.txt");
                 throw new InvalidOperationException(
                     "Connect stayed disabled after two password entries - the text never reached _passwordBox " +
-                    "(see login-entry-log.txt artifact).");
+                    "(see login-entry-log.txt + login-tree-disabled*.txt artifacts).");
+            }
         }
         connect.Patterns.Invoke.Pattern.Invoke();
     }
@@ -228,19 +232,26 @@ public static class LoginFlow
             Thread.Sleep(150);
             try
             {
-                var hwnd = window.Properties.NativeWindowHandle.Value;
-                var foreground = GetForegroundWindow().ToInt64();
+                // NativeWindowHandle is unsupported on these dialog windows; route checks by
+                // process instead: keystrokes go to the foreground window's process, and UIA
+                // focus + AutomationId must name _passwordBox within the SAME process (MC and
+                // SC show identically-id'd login dialogs simultaneously).
+                var pid = session.Process.Id;
+                var fgHwnd = GetForegroundWindow();
+                GetWindowThreadProcessId(fgHwnd, out var fgPid);
                 var focused = session.Automation.FocusedElement();
+                int focusedPid = -1;
+                try { focusedPid = focused == null ? -1 : focused.Properties.ProcessId.Value; } catch { }
                 var focusOk = focused != null
                               && string.Equals(focused.AutomationId, element.AutomationId, StringComparison.OrdinalIgnoreCase)
-                              && focused.Properties.NativeWindowHandle.Value == hwnd;
-                var fgOk = foreground == (hwnd & 0xFFFFFFFFL);
+                              && focusedPid == pid;
+                var fgOk = fgPid == pid;
                 if (focusOk && fgOk)
                 {
                     EnterText(text);
                     return;
                 }
-                LogEntry($"focus attempt {attempt}: focusOk={focusOk} fgOk={fgOk} fg=0x{foreground:X} hwnd=0x{hwnd & 0xFFFFFFFFL:X}");
+                LogEntry($"focus attempt {attempt}: focusOk={focusOk} (focusedAid='{focused?.AutomationId}' focusedPid={focusedPid}) fgOk={fgOk} (fgPid={fgPid} want={pid})");
             }
             catch (Exception ex)
             {
@@ -268,6 +279,36 @@ public static class LoginFlow
         try { return element.IsEnabled; } catch { return false; }
     }
 
+    /// <summary>Flat UIA census of the login dialog: what the client itself thinks each control
+    /// (especially Connect) looks like after entry - the arbiter when Connect stays disabled.</summary>
+    private static void DumpLoginTree(Window window, string fileName)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            foreach (var el in window.FindAllDescendants())
+            {
+                try
+                {
+                    var val = string.Empty;
+                    try
+                    {
+                        if (el.Patterns.Value.IsSupported)
+                            val = $" value='{el.Patterns.Value.Pattern.Value}'";
+                    }
+                    catch { }
+                    sb.AppendLine($"{el.ControlType} aid='{el.AutomationId}' name='{el.Name}' enabled={el.IsEnabled}{val}");
+                }
+                catch { }
+            }
+            Artifacts.WriteText(fileName, sb.ToString());
+        }
+        catch (Exception ex)
+        {
+            LogEntry($"login tree dump threw {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     private static void LogEntry(string line)
     {
         try
@@ -279,6 +320,7 @@ public static class LoginFlow
     }
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     /// <summary>
     /// Enter text as clipboard paste (Ctrl+V) when possible: the VMS password carries characters
