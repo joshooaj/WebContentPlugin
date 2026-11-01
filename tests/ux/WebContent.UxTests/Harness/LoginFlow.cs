@@ -25,11 +25,19 @@ public static class LoginFlow
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
         while (DateTime.UtcNow < deadline)
         {
+            // "Login is over" must be proven positively (session window WITHOUT login controls),
+            // not inferred from "no _btnConnect/_connectButton found": the Management Client
+            // login window carries the MAIN window's title ("Milestone XProtect Management
+            // Client <ver>"), so a title-based session match can be the login dialog itself.
+            if (HasMainSessionWindow(session))
+            {
+                LogEntry("connected without a login dialog (auto-login); no entry needed");
+                return null;
+            }
             var window = session.FindWindow(
                 w => w.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect")) != null ||
                      w.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton")) != null);
             if (window != null) return window;
-            if (HasMainSessionWindow(session)) return null;
             Thread.Sleep(300);
         }
         throw new TimeoutException($"Timed out waiting for login dialog (process {session.Process.ProcessName}, pid {session.Process.Id}).");
@@ -214,24 +222,28 @@ public static class LoginFlow
         }
     }
 
-    /// <summary>True when the client's own main window is up (Smart Client or Management Client).</summary>
-    private static bool HasMainSessionWindow(ClientSession session)
+    /// <summary>
+    /// True when the client's own SESSION window is up (Smart Client or Management Client) -
+    /// positively required to be free of login controls, because the Management Client login
+    /// window shares the main window's title and would otherwise masquerade as a session.
+    /// </summary>
+    private static bool HasMainSessionWindow(ClientSession session) =>
+        session.Windows().ToList().Any(IsSessionWindowWithoutLogin);
+
+    private static bool IsSessionWindowWithoutLogin(Window w)
     {
-        foreach (var w in session.Windows().ToList())
+        try
         {
-            try
-            {
-                if (w.AutomationId == "_mainApplicationWindow") return true;
-                var name = w.Name ?? string.Empty;
-                var cls = w.ClassName ?? string.Empty;
-                if (name.Contains("Management Client", StringComparison.OrdinalIgnoreCase)
-                    && cls.StartsWith("WindowsForms", StringComparison.Ordinal)
-                    && w.BoundingRectangle.Width > 400)
-                    return true;
-            }
-            catch { }
+            if (w.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect")) != null) return false;
+            if (w.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton")) != null) return false;
+            if (string.Equals(w.AutomationId, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase)) return true;
+            var name = w.Name ?? string.Empty;
+            var cls = w.ClassName ?? string.Empty;
+            return name.Contains("Management Client", StringComparison.OrdinalIgnoreCase)
+                   && cls.StartsWith("WindowsForms", StringComparison.Ordinal)
+                   && w.BoundingRectangle.Width > 800;
         }
-        return false;
+        catch { return false; }
     }
 
     private static bool IsNegativeButton(string name) =>
