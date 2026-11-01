@@ -79,6 +79,12 @@ namespace WebContent
             ProxyMessageIds.FetchResponseId,
             ProxyMessageIds.LeafRequestId,
             ProxyMessageIds.LeafResponseId,
+            ProxyMessageIds.TunnelOpenRequestId,
+            ProxyMessageIds.TunnelOpenResponseId,
+            ProxyMessageIds.TunnelDataToTargetId,
+            ProxyMessageIds.TunnelDataFromTargetId,
+            ProxyMessageIds.TunnelCloseToTargetId,
+            ProxyMessageIds.TunnelCloseFromTargetId,
         };
 
         public override List<WorkSpacePlugin> WorkSpacePlugins

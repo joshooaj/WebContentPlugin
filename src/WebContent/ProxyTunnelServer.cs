@@ -49,7 +49,8 @@ namespace WebContent
         {
             _limits = limits ?? ProxyTunnelLimits.Default();
             _log = log ?? (message => { });
-            _reaper = new Timer(_ => ReclaimIdle(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            var period = TimeSpan.FromMilliseconds(Math.Max(1000, Math.Min(30_000, _limits.IdleTimeoutMs / 2)));
+            _reaper = new Timer(_ => ReapSafely(), null, period, period);
         }
 
         internal int ActiveTunnels
@@ -268,6 +269,22 @@ namespace WebContent
             if (session != null)
             {
                 CloseSession(session, frame.ErrorMessage ?? "the browser side closed the websocket", notifyClient: false);
+            }
+        }
+
+        private void ReapSafely()
+        {
+            // An escaping exception on a Timer thread is an unhandled exception in the
+            // Event Server process - the sweep must swallow whatever a dying tunnel throws.
+            try
+            {
+                ReclaimIdle();
+            }
+            catch (SocketException) { }
+            catch (ObjectDisposedException) { }
+            catch (Exception ex)
+            {
+                _log("ProxyTunnelServer: idle sweep faulted: " + ex.Message);
             }
         }
 

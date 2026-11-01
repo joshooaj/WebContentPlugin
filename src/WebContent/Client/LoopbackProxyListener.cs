@@ -92,6 +92,27 @@ namespace WebContent.Client
             return client.RequestLeafAsync(host, port, subjectPublicKeyInfoDer);
         }
 
+        /// <summary>
+        /// Ticket #57: the websocket-tunnel channel over the same messaging client the fetches
+        /// use. Without a live client the upgrade fails as a plain 502 - never smuggled into
+        /// the HTTP fetch path.
+        /// </summary>
+        private static Task<ProxyTunnelOpenOutcome> OpenTunnelAsync(ProxyForwardedRequest request)
+        {
+            var client = ProxyFetchClient.Active;
+            if (client == null)
+            {
+                return Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Error,
+                    ErrorMessage = "The proxy fetch client is not connected to the Event Server.",
+                });
+            }
+
+            return client.OpenTunnelAsync(request);
+        }
+
         private async Task AcceptLoopAsync()
         {
             var listener = _listener;
@@ -132,7 +153,8 @@ namespace WebContent.Client
                             _canonicalTargets,
                             _fetch,
                             message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), $"Proxy listener on port {Port}: {message}"),
-                            _tls.AcceptTunnelAsync);
+                            _tls.AcceptTunnelAsync,
+                            OpenTunnelAsync);
                     }
                 }
                 catch (Exception exception)

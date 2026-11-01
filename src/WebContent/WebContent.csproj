@@ -123,6 +123,7 @@
     <Compile Include="ProxyWebSocketHandshake.cs" />
     <Compile Include="ProxyForwardConnection.cs" />
     <Compile Include="ProxyTunnelServer.cs" />
+    <Compile Include="ProxyTunnelCorrelation.cs" />
     <Compile Include="ProxyBrowserArguments.cs" />
     <Compile Include="ProxyWorkspaceProfile.cs" />
     <Compile Include="ProxyServerAllowlist.cs" />

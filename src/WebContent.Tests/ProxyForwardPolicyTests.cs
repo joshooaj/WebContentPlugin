@@ -187,7 +187,7 @@ namespace WebContent.Tests
         public void AllowlistedWebSocketUpgradeTunnelsInsteadOfForwarding()
         {
             var head =
-                "GET http://10.0.0.5:8080/ws/live HTTP/1.1\r\n" +
+                "GET ws://10.0.0.5:8080/ws/live HTTP/1.1\r\n" +
                 "Host: 10.0.0.5:8080\r\n" +
                 "Connection: keep-alive, Upgrade\r\n" +
                 "Upgrade: websocket\r\n" +
@@ -201,6 +201,23 @@ namespace WebContent.Tests
             Assert.Equal(ProxyForwardDisposition.WebSocketTunnel, decision);
             Assert.Equal("http://10.0.0.5:8080/ws/live", request.Uri.AbsoluteUri);
             Assert.Null(rejectReason);
+        }
+
+        [Fact]
+        public void RefusesAbsoluteWssUpgradeAsUnTunnelable()
+        {
+            var head =
+                "GET wss://10.0.0.5:8080/ws/live HTTP/1.1\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\n" +
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out _, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.WebSocketTunnelRefused, decision);
+            Assert.Contains("wss", rejectReason);
         }
 
         [Fact]

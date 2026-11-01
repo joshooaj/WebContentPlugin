@@ -32,9 +32,13 @@ namespace WebContent
         private MessageCommunication _messageCommunication;
         private object _requestFilterRegistration;
         private object _leafFilterRegistration;
+        private object _tunnelOpenFilterRegistration;
+        private object _tunnelDataFrameFilterRegistration;
+        private object _tunnelCloseFrameFilterRegistration;
         private SemaphoreSlim _fetchSlots;
         private ProxyServerAllowlist _allowlist;
         private ProxyLeafIssuer _leafIssuer;
+        private ProxyTunnelServer _tunnels;
 
         /// <summary>
         /// ADR-0003: the deployment CA is loaded/created lazily on the first leaf request and
@@ -91,6 +95,24 @@ namespace WebContent
                     OnProxyLeafRequest,
                     new CommunicationIdFilter(ProxyMessageIds.LeafRequestId));
 
+                // Ticket #57: the Event Server half of the websocket CONNECT tunnel. The client
+                // has already allowlist-gated the upgrade; this side re-gates against its own
+                // allowlist union, replays the handshake to the target over a raw socket, admits
+                // only a 101, and pumps raw bytes both directions. The open runs on the thread
+                // pool (connect + handshake is seconds long), so the receive thread stays free.
+                _tunnels = new ProxyTunnelServer(
+                    ProxyTunnelLimits.Default(),
+                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                _tunnelOpenFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxyTunnelOpen,
+                    new CommunicationIdFilter(ProxyMessageIds.TunnelOpenRequestId));
+                _tunnelDataFrameFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxyTunnelDataFrame,
+                    new CommunicationIdFilter(ProxyMessageIds.TunnelDataToTargetId));
+                _tunnelCloseFrameFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxyTunnelCloseFrame,
+                    new CommunicationIdFilter(ProxyMessageIds.TunnelCloseToTargetId));
+
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(ProxyFetchBackgroundPlugin),
@@ -134,6 +156,37 @@ namespace WebContent
             _requestFilterRegistration = null;
             _leafFilterRegistration = null;
             _leafIssuer = null;
+
+            // Tear tunnels down while messaging is still alive: each close rides a message
+            // notice back to its requester, and the sockets must not outlive the plugin.
+            var tunnels = _tunnels;
+            _tunnels = null;
+            tunnels?.Dispose();
+
+            if (_messageCommunication != null)
+            {
+                foreach (var registration in new[] { _tunnelOpenFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration })
+                {
+                    if (registration == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        _messageCommunication.UnRegisterCommunicationFilter(registration);
+                    }
+                    catch (Exception exception)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy tunnel filter detach failed: {exception.Message}");
+                    }
+                }
+            }
+
+            _tunnelOpenFilterRegistration = null;
+            _tunnelDataFrameFilterRegistration = null;
+            _tunnelCloseFrameFilterRegistration = null;
+
             _messageCommunication = null;
 
             // Deliberately no MessageCommunicationManager.Stop: the messaging session is
@@ -412,6 +465,168 @@ namespace WebContent
                 }
 
                 return _deploymentAuthority;
+            }
+        }
+
+        /// <summary>
+        /// Ticket #57: answer one tunnel-open. Re-gated against this process's own allowlist
+        /// union (the client's decision table is the first gate, not the only one), then the open
+        /// runs on the thread pool: connect + handshake replay is seconds long and must never
+        /// block the messaging receive thread. Frames for this tunnel unicast to the requester
+        /// endpoint - a null destination would broadcast one device's websocket frames to every
+        /// subscribed host.
+        /// </summary>
+        private object OnProxyTunnelOpen(Message message, FQID destination, FQID source)
+        {
+            var requester = ResolveRequester(source, message);
+
+            var payload = ProxyFetchWireCodec.TunnelFromWire(message?.Data);
+            if (payload == null || string.IsNullOrEmpty(payload.CorrelationId))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), "Tunnel open carried no usable payload; refused.");
+                return null;
+            }
+
+            var communication = _messageCommunication;
+            var tunnels = _tunnels;
+            if (communication == null || tunnels == null)
+            {
+                TransmitTunnelOpenAck(communication, requester, payload.CorrelationId, new ProxyTunnelOpenOutcome
+                {
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Error,
+                    ErrorMessage = "The proxy tunnel server is not ready.",
+                });
+                return null;
+            }
+
+            Uri target;
+            string allowReason = null;
+            if (!Uri.TryCreate(payload.Url, UriKind.Absolute, out target)
+                || target.Scheme != Uri.UriSchemeHttp
+                || _allowlist == null
+                || !_allowlist.IsAllowed(target, out allowReason))
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Tunnel open {payload.CorrelationId} refused: {(allowReason ?? "the tunnel target was not an allowlisted http origin")}.");
+                TransmitTunnelOpenAck(communication, requester, payload.CorrelationId, new ProxyTunnelOpenOutcome
+                {
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.NotAllowed,
+                    ErrorMessage = allowReason ?? "The tunnel target is not an allowlisted http origin.",
+                });
+                return null;
+            }
+
+            if (requester == null)
+            {
+                // Nowhere to unicast the frame stream: a broadcast tunnel leaks every frame to
+                // every subscriber, so the tunnel must not open at all.
+                return null;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                Func<ProxyTunnelPayload, Task> toClient = frame =>
+                {
+                    var id = frame.Kind == ProxyTunnelFrameKinds.Close
+                        ? ProxyMessageIds.TunnelCloseFromTargetId
+                        : ProxyMessageIds.TunnelDataFromTargetId;
+                    try
+                    {
+                        communication.TransmitMessage(new Message(id, ProxyFetchWireCodec.ToWire(frame)), requester, null, null);
+                    }
+                    catch (Exception exception)
+                    {
+                        EnvironmentManager.Instance.Log(
+                            true,
+                            nameof(ProxyFetchBackgroundPlugin),
+                            $"Tunnel {frame.CorrelationId} frame ({id}) not sent: {exception.Message}");
+                    }
+
+                    return Task.CompletedTask;
+                };
+
+                ProxyTunnelOpenOutcome outcome;
+                try
+                {
+                    outcome = await tunnels.OpenAsync(payload, toClient);
+                }
+                catch (Exception exception)
+                {
+                    // OpenAsync is written not to throw; anything escaping still answers as a
+                    // failure rather than leaving the browser waiting for a 101 that never comes.
+                    outcome = new ProxyTunnelOpenOutcome
+                    {
+                        Success = false,
+                        ErrorCode = ProxyFetchErrorCodes.Error,
+                        ErrorMessage = exception.Message,
+                    };
+                }
+
+                TransmitTunnelOpenAck(communication, requester, payload.CorrelationId, outcome);
+            });
+
+            return null;
+        }
+
+        private object OnProxyTunnelDataFrame(Message message, FQID destination, FQID source)
+        {
+            var tunnels = _tunnels;
+            if (tunnels != null)
+            {
+                tunnels.OnClientData(ProxyFetchWireCodec.TunnelFromWire(message?.Data));
+            }
+
+            return null;
+        }
+
+        private object OnProxyTunnelCloseFrame(Message message, FQID destination, FQID source)
+        {
+            var tunnels = _tunnels;
+            if (tunnels != null)
+            {
+                tunnels.OnClientClose(ProxyFetchWireCodec.TunnelFromWire(message?.Data));
+            }
+
+            return null;
+        }
+
+        private static void TransmitTunnelOpenAck(MessageCommunication communication, FQID requester, string tunnelId, ProxyTunnelOpenOutcome outcome)
+        {
+            if (communication == null || requester == null)
+            {
+                return;
+            }
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(
+                        ProxyMessageIds.TunnelOpenResponseId,
+                        ProxyFetchWireCodec.ToWire(new ProxyTunnelPayload
+                        {
+                            CorrelationId = tunnelId,
+                            Success = outcome.Success,
+                            StatusCode = outcome.StatusCode,
+                            DataBase64 = outcome.HandshakeBytes == null || outcome.HandshakeBytes.Length == 0
+                                ? null
+                                : Convert.ToBase64String(outcome.HandshakeBytes),
+                            ErrorCode = outcome.ErrorCode,
+                            ErrorMessage = outcome.ErrorMessage,
+                        })),
+                    requester,
+                    null,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Tunnel open ack {tunnelId} not sent: {exception.Message}");
             }
         }
 

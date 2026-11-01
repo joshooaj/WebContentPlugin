@@ -43,6 +43,8 @@ namespace WebContent.Tests
             Assert.Matches(@"override\s+List<string>\s+PluginDefinedMessageIds", definition);
             Assert.Matches("FetchRequestId", definition);
             Assert.Matches("FetchResponseId", definition);
+            Assert.Matches("TunnelOpenRequestId", definition);
+            Assert.Matches("TunnelCloseFromTargetId", definition);
         }
 
         [Fact]

@@ -109,6 +109,20 @@ namespace WebContent
                 rejectReason = $"The proxy request target '{requestLine[1]}' was not an absolute uri.";
                 return false;
             }
+            else if (uri.Scheme == "ws" || uri.Scheme == "wss")
+            {
+                // RFC 6455 5.1: a websocket upgrade reaches an HTTP proxy with the ABSOLUTE ws://
+                // or wss:// target, not the http one. The scheme letter carries no gating meaning
+                // here (ws is to http what wss is to https), so rebase the uri onto its transport
+                // twin: the origin allowlist, the decision table, and the tunnel handshake all
+                // speak http origins, and RawTarget keeps exactly what the wire carried.
+                var transportScheme = uri.Scheme == "ws" ? Uri.UriSchemeHttp : Uri.UriSchemeHttps;
+                if (!Uri.TryCreate(new UriBuilder(uri) { Scheme = transportScheme }.ToString(), UriKind.Absolute, out uri))
+                {
+                    rejectReason = $"The proxy websocket target '{requestLine[1]}' was not a usable uri.";
+                    return false;
+                }
+            }
 
             if (uri != null && !ProxyPolicy.IsHttpUri(uri))
             {
