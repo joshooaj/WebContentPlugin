@@ -338,8 +338,36 @@ public class ScProxyLoginProbeTests
         // rows the next one needs, so no blind walking or long sleeps are involved.
         ManagementClientUi.CollapseTreeToRoot(mcMain, timeoutSeconds: 60, allowExpanded: new[] { config.PluginNodeName });
         ManagementClientUi.EnsureExpanded(mcMain, config.PluginNodeName, ManagementClientUi.WorkspacesNodeName);
-        ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName);
-        ManagementClientUi.SelectTreeItem(mcMain, config.McWorkspaceName);
+
+        // A previous bad Save once renamed the item (txtName corrupted by an ungated paste -
+        // MIP.log 'ItemName.get ... http://httpforever.com'). If the expected child is gone but
+        // the workspaces node has a lone child, adopt it and repair its name before touching
+        // anything else.
+        var workspaceItem = config.McWorkspaceName;
+        try
+        {
+            ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName);
+        }
+        catch (InvalidOperationException)
+        {
+            // The last toggle strategy may have left the node collapsed: one more expansion
+            // pass with no child-name assertion, then look for the lone child.
+            try { ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, new string[0]); }
+            catch (InvalidOperationException) { }
+            var orphan = ManagementClientUi.OrphanWorkspaceName(mcMain, ManagementClientUi.WorkspacesNodeName);
+            if (orphan == null) throw;
+            log.AppendLine($"workspace item is named '{orphan}', not '{config.McWorkspaceName}' - adopting and renaming");
+            workspaceItem = orphan;
+        }
+        ManagementClientUi.SelectTreeItem(mcMain, workspaceItem);
+
+        var nameBox = ManagementClientUi.ExpectControl(mcMain, "txtName", 15);
+        var paneName = ReadValue(nameBox);
+        if (!string.Equals(paneName, config.McWorkspaceName, StringComparison.Ordinal))
+        {
+            log.AppendLine($"pane Name field reads '{paneName}'; retyping '{config.McWorkspaceName}'");
+            ManagementClientUi.RenameWorkspacePane(mcMain, config.McWorkspaceName);
+        }
 
         var targetsBox = ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 30);
         var current = ReadValue(targetsBox);
@@ -379,10 +407,23 @@ public class ScProxyLoginProbeTests
 
         if (!ManagementClientUi.WaitForSaveEnabled(mcMain, 6))
         {
-            log.AppendLine("Save still disabled after edit; keyboard-nudging the targets box");
-            ManagementClientUi.NudgeControlWithKeystroke(mcMain, "txtProxyTargets");
-            log.AppendLine($"Save enabled after nudge: {ManagementClientUi.WaitForSaveEnabled(mcMain, 6)}");
+            log.AppendLine("Save still disabled after edit; flipping chkProxyEnabled twice to dirty the pane");
+            ManagementClientUi.DirtyPaneViaCheckbox(mcMain, "chkProxyEnabled");
+            if (!ManagementClientUi.WaitForSaveEnabled(mcMain, 6))
+            {
+                log.AppendLine("Save still disabled after checkbox flip; keyboard-nudging the targets box");
+                ManagementClientUi.NudgeControlWithKeystroke(mcMain, "txtProxyTargets");
+                log.AppendLine($"Save enabled after nudge: {ManagementClientUi.WaitForSaveEnabled(mcMain, 6)}");
+            }
         }
+
+        // Guard before the Save: the shell writes EVERY pane field, and one bad run already
+        // saved a corrupted Name ('ItemName.get ... http://httpforever.com'). Never re-save
+        // a pane whose Name field does not read the workspace name.
+        var paneNameNow = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtName", 5));
+        if (!string.Equals(paneNameNow, config.McWorkspaceName, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Refusing to Save: the Name field reads '{paneNameNow}', expected '{config.McWorkspaceName}'.");
 
         if (!ManagementClientUi.Save(mc, mcMain, 20))
         {

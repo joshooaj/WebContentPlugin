@@ -722,17 +722,16 @@ public static class ManagementClientUi
 
     /// <summary>
     /// Replace the full contents of a detail-pane Edit through the keyboard route the login
-    /// harness proved reliable: focus, select-all, CF_UNICODETEXT clipboard paste. The plain
-    /// ValuePattern.SetValue route writes the text but during live probe runs the shell never
-    /// enabled Save from it (mc-save-attempts.txt: enabled=False for every poll), while typing
-    /// into the same box dirtied it in ~1.5 s. Paste keeps the WPF TextChanged chain firing.
-    /// Returns false when the clipboard was unavailable (caller falls back to SetValue).
+    /// harness proved reliable: focus (VERIFIED), select-all, CF_UNICODETEXT clipboard paste.
+    /// The verification is not decoration - an ungated run pasted the proxy-target list into
+    /// whatever field held focus (txtName), and the next Save renamed the workspace item to
+    /// 'http://httpforever.com' (MIP.log 19:12:31). Returns false when focus could not be
+    /// proven or the clipboard was unavailable; it NEVER types into an unproven control.
     /// </summary>
     public static bool PasteIntoControl(Window mainWindow, string automationId, string value)
     {
         var box = ExpectControl(mainWindow, automationId);
-        box.Focus();
-        System.Threading.Thread.Sleep(300);
+        if (!FocusVerified(mainWindow, box, automationId)) return false;
         if (!LoginFlow.TryClipboardSetText(value)) return false;
         FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
                                                       FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
@@ -741,6 +740,50 @@ public static class ManagementClientUi
                                                       FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_V);
         System.Threading.Thread.Sleep(300);
         return true;
+    }
+
+    /// <summary>
+    /// Focus an element and prove it took: UIA FocusedElement must carry the expected
+    /// AutomationId before any keystroke is sent. Retries the focus call once.
+    /// </summary>
+    public static bool FocusVerified(Window mainWindow, AutomationElement element, string expectedAutomationId)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try { element.Focus(); } catch { }
+            System.Threading.Thread.Sleep(300);
+            try
+            {
+                var focused = mainWindow.Automation.FocusedElement();
+                if (focused != null && string.Equals(focused.AutomationId, expectedAutomationId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Dirty the detail pane through the checkbox's Checked/Unchecked handlers: two Toggle
+    /// pattern flips leave the state as it was but fire the page's change events twice.
+    /// Programmatic TextBox writes proved not to raise the shell's dirty chain in a freshly
+    /// logged-in MC, while Toggle-driven changes do.
+    /// </summary>
+    public static bool DirtyPaneViaCheckbox(Window mainWindow, string automationId)
+    {
+        try
+        {
+            var box = ExpectControl(mainWindow, automationId, 10);
+            if (!box.Patterns.Toggle.IsSupported) return false;
+            var toggle = box.Patterns.Toggle.Pattern;
+            var wasOn = toggle.ToggleState == FlaUI.Core.Definitions.ToggleState.On;
+            toggle.Toggle();
+            System.Threading.Thread.Sleep(300);
+            toggle.Toggle();
+            System.Threading.Thread.Sleep(300);
+            return toggle.ToggleState == (wasOn ? FlaUI.Core.Definitions.ToggleState.On : FlaUI.Core.Definitions.ToggleState.Off);
+        }
+        catch { return false; }
     }
 
     /// <summary>True once the shell exposes an enabled, invokable "Save".</summary>
@@ -757,18 +800,56 @@ public static class ManagementClientUi
     }
 
     /// <summary>
-    /// Focus the Edit and press END, SPACE, BACK: a real keyboard round-trip through WPF input
-    /// that fires TextChanged even when a programmatic write left the shell's dirty state cold.
-    /// The box contents end up unchanged.
+    /// Focus the Edit (verified) and press END, SPACE, BACK: a real keyboard round-trip through
+    /// WPF input that fires TextChanged even when a programmatic write left the shell's dirty
+    /// state cold. The box contents end up unchanged; nothing is typed without the focus gate.
     /// </summary>
     public static void NudgeControlWithKeystroke(Window mainWindow, string automationId)
     {
         var box = ExpectControl(mainWindow, automationId, 10);
-        box.Focus();
-        System.Threading.Thread.Sleep(300);
+        if (!FocusVerified(mainWindow, box, automationId)) return;
         FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.END);
         FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.SPACE);
         FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.BACK);
+        System.Threading.Thread.Sleep(300);
+    }
+
+    /// <summary>
+    /// Name of the single workspace item under the workspaces node when the expected name is
+    /// gone - an item renamed by a stray paste still shows up in the tree under its bad name.
+    /// Null when the node has no deeper-indented child at all.
+    /// </summary>
+    public static string OrphanWorkspaceName(Window mainWindow, string workspacesNodeName)
+    {
+        var items = RealizedTreeItems(mainWindow);
+        var node = items.FirstOrDefault(t => string.Equals(t.Name, workspacesNodeName, StringComparison.OrdinalIgnoreCase));
+        if (node == null) return null;
+        var idx = items.IndexOf(node);
+        for (var i = idx + 1; i < items.Count; i++)
+        {
+            try
+            {
+                if (items[i].BoundingRectangle.X > node.BoundingRectangle.X) return items[i].Name;
+                break;
+            }
+            catch { break; }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Re-type the pane's Name field (focus-verified keyboard only): select-all, then plain
+    /// ASCII typing. Throws when focus cannot be proven - the field is never typed blind.
+    /// </summary>
+    public static void RenameWorkspacePane(Window mainWindow, string newName)
+    {
+        var box = ExpectControl(mainWindow, "txtName", 15);
+        if (!FocusVerified(mainWindow, box, "txtName"))
+            throw new InvalidOperationException("Cannot verify focus on txtName; refusing to type the workspace rename.");
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                      FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
+        System.Threading.Thread.Sleep(150);
+        FlaUI.Core.Input.Keyboard.Type(newName);
         System.Threading.Thread.Sleep(300);
     }
 
@@ -901,7 +982,12 @@ public static class ManagementClientUi
             var enabled = TryGet(() => b.IsEnabled.ToString());
             var invoke = TryGet(() => b.Patterns.Invoke.IsSupported.ToString());
             described.Add($"ct={ct} enabled={enabled} invoke={invoke}");
-            if (chosen == null && enabled == "True" && invoke == "True") chosen = b;
+            if (enabled != "True" || invoke != "True") continue;
+            // Prefer the VISIBLE toolbar affordance; an application-menu 'Save' MenuItem
+            // (zero rect) enumerates first but is the riskier click target.
+            var visible = TryGet(() => b.BoundingRectangle.Width.ToString()) != "0";
+            var chosenVisible = chosen != null && TryGet(() => chosen.BoundingRectangle.Width.ToString()) != "0";
+            if (chosen == null || (visible && !chosenVisible)) chosen = b;
         }
         if (attempt >= 0 && attempt < 40)
         {
