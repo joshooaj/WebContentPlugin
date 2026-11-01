@@ -514,6 +514,16 @@ Client restart after the ES restart, and the one-time CA provisioning pointer.
      to `84623C10…697AA41` (same per-file verification this script does remotely). Steps 2-4
      (blocked smoke row) still need an unlocked desktop on that machine; the hosts entry itself
      needs one more elevated write.
+   3. **Fresh-both-machine smoke row - PASSED 2026-11-01 ~09:03-09:04 (run `20261101-090329`).**
+      Against the fresh drop on both machines (BEAST Smart Client + `vms.joshooaj.com` Event
+      Server): the second elevation of the cycle added the hosts control
+      (`127.0.0.1 httpforever.com # webcontent-sc-1-block`), the row's pre-check confirmed the
+      direct client-side GET fails BEFORE navigating, the proxied workspace browser then rendered
+      `title='HTTP Forever - A reliably insecure connection'` (2103 body chars) - the page provably
+      originates on the Event Server machine while the client itself cannot reach the target.
+      Afterwards the elevated payload removed the hosts entry (record 2 step 4) and the workspace
+      home address is untouched (`https://joshooaj.com/`, last verified by the SC-5 restore).
+      The last open acceptance row of #59 is thereby satisfied.
 
 ## Known high-risk regressions → pinned by
 
