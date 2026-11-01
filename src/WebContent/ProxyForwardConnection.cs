@@ -131,7 +131,7 @@ namespace WebContent
 
                     try
                     {
-                        await ServeTunnelRequestsAsync(tunnel, canonicalTargets, request.Uri, fetch, log);
+                        await ServeTunnelRequestsAsync(tunnel, canonicalTargets, request.Uri, fetch, log, openTunnel);
                     }
                     finally
                     {
@@ -207,13 +207,6 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", rejectReason + " The workspace proxy supports http(s) allowlisted targets fetched by the VMS server; https pages need a CONNECT tunnel this proxy does not provide."));
                     return;
 
-                case ProxyForwardDisposition.WebSocketTunnelRefused:
-                    // A websocket upgrade this proxy cannot tunnel (wss:// inside a terminated
-                    // TLS tunnel): an explicit status, never smuggled into the fetch path.
-                    log(rejectReason);
-                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(501, "Not Implemented", rejectReason));
-                    return;
-
                 case ProxyForwardDisposition.WebSocketTunnel:
                     if (openTunnel == null)
                     {
@@ -266,7 +259,8 @@ namespace WebContent
             System.Collections.Generic.IEnumerable<string> canonicalTargets,
             Uri tunnelOrigin,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
-            Action<string> log)
+            Action<string> log,
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel)
         {
             var pending = new byte[0];
             while (true)
@@ -295,13 +289,49 @@ namespace WebContent
                         pending = head.Leftover;
                         continue;
 
-                    case ProxyForwardDisposition.WebSocketTunnelRefused:
-                        // #57 posture: a wss:// upgrade inside the terminated tunnel gets an
-                        // explicit refusal on the tunnel; the tunnel itself stays usable.
-                        log(rejectReason);
-                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(501, "Not Implemented", rejectReason));
-                        pending = head.Leftover;
-                        continue;
+                    case ProxyForwardDisposition.WebSocketTunnel:
+                        // #60: a wss:// upgrade inside this terminated tunnel gets its own byte
+                        // tunnel: the Event Server dials a validated TLS leg to the tunnel's
+                        // origin, replays the rebuilt handshake over it, and only a 101 admits
+                        // the tunnel. From there both sides pump decrypted websocket frames.
+                        if (openTunnel == null)
+                        {
+                            var inTunnelWiring = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws(s):// targets ride CONNECT-style byte tunnels the VMS server opens.";
+                            log(inTunnelWiring);
+                            await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", inTunnelWiring));
+                            pending = head.Leftover;
+                            continue;
+                        }
+
+                        ProxyTunnelOpenOutcome upgradeOutcome;
+                        try
+                        {
+                            upgradeOutcome = await openTunnel(request);
+                        }
+                        catch (Exception exception)
+                        {
+                            log($"Proxy in-tunnel websocket open for '{request.RawTarget}' threw: {exception.Message}");
+                            upgradeOutcome = null;
+                        }
+
+                        if (upgradeOutcome == null || !upgradeOutcome.Success)
+                        {
+                            // An open the Event Server refuses (an old ES still answering
+                            // https-scheme targets NotAllowed, an unreachable target, a non-101)
+                            // is an explicit 502 page ON the tunnel; the tunnel stays usable,
+                            // the upgrade is never fetched and never taken direct.
+                            var upgradeFailure = upgradeOutcome == null
+                                ? "The Event Server tunnel opener returned no outcome."
+                                : upgradeOutcome.ErrorMessage;
+                            log($"Proxy in-tunnel websocket tunnel to '{request.RawTarget}' refused (code={upgradeOutcome?.ErrorCode}): {upgradeFailure}");
+                            await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", upgradeFailure));
+                            pending = head.Leftover;
+                            continue;
+                        }
+
+                        log($"Proxy in-tunnel websocket tunnel to '{request.RawTarget}' established; pumping bytes in both directions.");
+                        await ServeWebSocketTunnelAsync(head.Leftover, tunnel, tunnel, upgradeOutcome, log);
+                        return;
 
                     default:
                         // OriginNotAllowed inside a tunnel means the inner target drifted off the

@@ -403,10 +403,26 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public async Task RefusesInTunnelWebSocketUpgradeWith501InsideTheTunnel()
+        public async Task TunnelsInTunnelWebSocketUpgradeAndRelaysTheHandshakeIntoTheTunnel()
         {
-            // #57 posture: a wss:// upgrade inside a terminated tunnel is refused explicitly -
-            // never smuggled through the HTTP fetch path, never taken direct.
+            // #60: a wss:// upgrade inside a terminated tunnel gets its own byte tunnel - the
+            // handshake gate and the open seam run inside the tunnel loop, and the target's 101
+            // answer rides back INTO the tunnel stream (plaintext onto the raw socket would make
+            // the browser fail TLS). The upgrade's pipelined first frame crosses into the tunnel.
+            ProxyForwardedRequest opened = null;
+            var handle = new FakeTunnelHandle();
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+            {
+                opened = request;
+                return Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = true,
+                    Handle = handle,
+                    HandshakeBytes = Encoding.UTF8.GetBytes(
+                        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s7AQWlie1Rh0h9M7N8QV3YQ==\r\n\r\n"),
+                });
+            };
+
             var fetchCalled = false;
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query =>
             {
@@ -414,19 +430,123 @@ namespace WebContent.Tests
                 return Task.FromResult(new ProxyFetchResult { Success = false });
             };
 
-            var request =
-                "CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n" +
-                "GET /ws/live HTTP/1.1\r\nHost: cam1.test:8443\r\n" +
-                "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
-                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n";
+            var inner = new DuplexStream(
+                new MemoryStream(Encoding.GetEncoding("ISO-8859-1").GetBytes(
+                    "GET /ws/live HTTP/1.1\r\nHost: cam1.test:8443\r\n" +
+                    "Connection: keep-alive, Upgrade\r\nUpgrade: websocket\r\n" +
+                    "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                    "\r\n\x81\x05hello")),
+                new MemoryStream());
 
-            var response = await HandleTunnel(request, new[] { "https://cam1.test:8443" }, fetch);
+            string response;
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes("CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, new[] { "https://cam1.test:8443" }, fetch, message => { },
+                    (stream, leftover, tunnelOrigin) => Task.FromResult<Stream>(inner),
+                    openTunnel);
+                response = Encoding.UTF8.GetString(output.ToArray());
+            }
 
-            Assert.False(fetchCalled);
+            // The CONNECT is accepted on the raw socket...
             Assert.StartsWith("HTTP/1.1 200 Connection established\r\n\r\n", response);
-            Assert.Contains("HTTP/1.1 501", response);
-            Assert.Contains("wss", response);
+            Assert.False(fetchCalled);
+
+            // ...the upgrade request reached the open seam resolved against the tunnel origin.
+            Assert.Equal("https://cam1.test:8443/ws/live", opened.Uri.AbsoluteUri);
+
+            // ...the target's 101 went back INTO the tunnel, verbatim, never onto the raw socket.
+            var inside = Encoding.UTF8.GetString(inner.WrittenBuffer.ToArray());
+            Assert.Contains(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s7AQWlie1Rh0h9M7N8QV3YQ==\r\n\r\n",
+                inside);
+
+            // ...and the decrypted first frame crossed into the byte tunnel.
+            Assert.Single(handle.Sent);
+            Assert.Equal(new byte[] { 0x81, 0x05, (byte)'h', (byte)'e', (byte)'l', (byte)'l', (byte)'o' }, handle.Sent[0]);
         }
+
+        [Fact]
+        public async Task Renders502InTheTunnelAndKeepsItWhenTheInTunnelOpenFails()
+        {
+            // #60 fail-closed: an in-tunnel wss upgrade the Event Server refuses (old ES still
+            // rejecting https-scheme targets, target unreachable, non-101) gets an explicit 502
+            // page on the TUNNEL - the tunnel itself stays usable for the page's other requests.
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.NotAllowed,
+                    ErrorMessage = "The tunnel target is not an allowlisted http origin.",
+                });
+
+            var inner = new DuplexStream(
+                new MemoryStream(Encoding.UTF8.GetBytes(
+                    "GET /ws/live HTTP/1.1\r\nHost: cam1.test:8443\r\n" +
+                    "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+                    "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n")),
+                new MemoryStream());
+
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes("CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, new[] { "https://cam1.test:8443" },
+                    query => Task.FromResult(new ProxyFetchResult { Success = false }),
+                    message => { },
+                    (stream, leftover, tunnelOrigin) => Task.FromResult<Stream>(inner),
+                    openTunnel);
+
+                var inside = Encoding.UTF8.GetString(inner.WrittenBuffer.ToArray());
+                Assert.Contains("HTTP/1.1 502", inside);
+                Assert.Contains("allowlisted http origin", inside);
+            }
+        }
+
+        [Fact]
+        public async Task PumpsInTunnelTargetBytesBackIntoTheTunnelUntilTheHandleCloses()
+        {
+            // Both directions ride the tunnel stream after the 101: target bytes land decrypted
+            // into the tunnel byte-identically - no chunking, no re-framing.
+            var handle = new FakeTunnelHandle();
+            handle.PushFromTarget(new byte[] { 0x81, 0x02, 0xAA, 0xBB });
+            handle.PushFromTarget(new byte[] { 0x88, 0x00 });
+
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = true,
+                    Handle = handle,
+                    HandshakeBytes = Encoding.UTF8.GetBytes("HTTP/1.1 101 Switching Protocols\r\n\r\n"),
+                });
+
+            var inner = new DuplexStream(
+                new MemoryStream(Encoding.UTF8.GetBytes(
+                    "GET /ws HTTP/1.1\r\nHost: cam1.test:8443\r\n" +
+                    "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+                    "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n")),
+                new MemoryStream());
+
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes("CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, new[] { "https://cam1.test:8443" },
+                    query => Task.FromResult(new ProxyFetchResult { Success = false }),
+                    message => { },
+                    (stream, leftover, tunnelOrigin) => Task.FromResult<Stream>(inner),
+                    openTunnel);
+
+                var inside = inner.WrittenBuffer.ToArray();
+                Assert.True(StartsWithBytes(inside, "HTTP/1.1 101 Switching Protocols\r\n\r\n"));
+                Assert.True(EndsWithBytes(inside, new byte[] { 0x81, 0x02, 0xAA, 0xBB, 0x88, 0x00 }),
+                    "target bytes did not land byte-identical in the tunnel stream");
+            }
+        }
+
+        private static bool StartsWithBytes(byte[] buffer, string prefix) =>
+            Encoding.UTF8.GetString(buffer, 0, Math.Min(prefix.Length, buffer.Length)) == prefix;
 
         [Fact]
         public async Task RefusesConnectWith502WhenNoTlsTerminationIsAvailable()

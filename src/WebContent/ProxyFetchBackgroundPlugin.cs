@@ -95,11 +95,12 @@ namespace WebContent
                     OnProxyLeafRequest,
                     new CommunicationIdFilter(ProxyMessageIds.LeafRequestId));
 
-                // Ticket #57: the Event Server half of the websocket CONNECT tunnel. The client
+                // Ticket #57/#60: the Event Server half of the websocket CONNECT tunnel. The client
                 // has already allowlist-gated the upgrade; this side re-gates against its own
-                // allowlist union, replays the handshake to the target over a raw socket, admits
-                // only a 101, and pumps raw bytes both directions. The open runs on the thread
-                // pool (connect + handshake is seconds long), so the receive thread stays free.
+                // allowlist union, replays the handshake to the target (raw socket for http-scheme
+                // targets, validated TLS leg for https-scheme wss targets), admits only a 101, and
+                // pumps raw bytes both directions. The open runs on the thread pool (connect +
+                // handshake is seconds long), so the receive thread stays free.
                 _tunnels = new ProxyTunnelServer(
                     ProxyTunnelLimits.Default(),
                     message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
@@ -503,19 +504,22 @@ namespace WebContent
             Uri target;
             string allowReason = null;
             if (!Uri.TryCreate(payload.Url, UriKind.Absolute, out target)
-                || target.Scheme != Uri.UriSchemeHttp
+                || !ProxyPolicy.IsHttpUri(target)
                 || _allowlist == null
                 || !_allowlist.IsAllowed(target, out allowReason))
             {
+                // #60: https-scheme tunnel targets (wss upgrades) are re-gated against this
+                // process's own allowlist exactly like http ones - the entry's scheme decides
+                // whether the dialer adds a validated TLS leg, never whether the target is asked.
                 EnvironmentManager.Instance.Log(
                     true,
                     nameof(ProxyFetchBackgroundPlugin),
-                    $"Tunnel open {payload.CorrelationId} refused: {(allowReason ?? "the tunnel target was not an allowlisted http origin")}.");
+                    $"Tunnel open {payload.CorrelationId} refused: {(allowReason ?? "the tunnel target was not an absolute http(s) origin")}.");
                 TransmitTunnelOpenAck(communication, requester, payload.CorrelationId, new ProxyTunnelOpenOutcome
                 {
                     Success = false,
                     ErrorCode = ProxyFetchErrorCodes.NotAllowed,
-                    ErrorMessage = allowReason ?? "The tunnel target is not an allowlisted http origin.",
+                    ErrorMessage = allowReason ?? "The tunnel target is not an absolute allowlisted http(s) origin.",
                 });
                 return null;
             }

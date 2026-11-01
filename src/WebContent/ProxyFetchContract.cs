@@ -342,7 +342,11 @@ namespace WebContent
         /// <summary>Server-pushed frames: Data or Close (see <see cref="ProxyTunnelFrameKinds"/>).</summary>
         public string Kind;
 
-        /// <summary>Open request: the ws:// target url (http-scheme origin + path).</summary>
+        /// <summary>
+        /// Open request: the target url. Plain ws:// upgrades arrive as their http twin; wss://
+        /// upgrades (#60) as the https origin - the scheme decides whether the Event Server's
+        /// dialer adds a validated TLS leg.
+        /// </summary>
         public string Url;
 
         /// <summary>

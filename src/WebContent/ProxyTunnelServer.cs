@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,10 +16,18 @@ namespace WebContent
     /// <summary>
     /// Ticket #57: the Event Server half of the websocket tunnel. Given the client's tunnel-open
     /// (already allowlist-gated twice — client decision table and the ES allowlist union), it
-    /// replays the rebuilt origin-form handshake over a raw socket to the target, admits the
-    /// tunnel only when the target answers 101, and then pumps raw bytes in both directions
-    /// until either side closes. Tunnel bytes never enter the HTTP fetch/chunking path: each
-    /// direction rides its own directional message, base64 at the JSON edge only.
+    /// replays the rebuilt origin-form handshake to the target, admits the tunnel only when the
+    /// target answers 101, and then pumps raw bytes in both directions until either side closes.
+    /// Tunnel bytes never enter the HTTP fetch/chunking path: each direction rides its own
+    /// directional message, base64 at the JSON edge only.
+    ///
+    /// Ticket #60 widened the target schemes: a plain ws:// upgrade tunnels to an http-scheme
+    /// target over a raw socket; a wss:// upgrade (an upgrade inside a terminated https tunnel,
+    /// or an absolute wss GET) gets a TLS leg — the handshake rides an SslStream the dialer
+    /// validates with FULL chain validation by default, and the pumps then carry decrypted
+    /// websocket frames. The per-target accept-untrusted override on this leg is a follow-on
+    /// ticket; <see cref="_tlsValidationResolver"/> is the seam it will use and stays null in
+    /// production until then.
     ///
     /// Event-Server protection: a hard concurrency cap (a tunnel is a parked socket plus two
     /// pumps), a per-message byte cap, and idle reclamation that also catches half-open tunnels
@@ -28,7 +40,7 @@ namespace WebContent
         {
             internal string Id;
             internal TcpClient Socket;
-            internal NetworkStream Stream;
+            internal Stream Stream;
             internal Func<ProxyTunnelPayload, Task> ToClient;
             internal DateTime LastActivityUtc;
             internal bool Closed;
@@ -41,14 +53,26 @@ namespace WebContent
 
         private readonly ProxyTunnelLimits _limits;
         private readonly Action<string> _log;
+
+        /// <summary>
+        /// Per-target TLS validation override for the https tunnel leg. Null (production, #60)
+        /// means SslStream's default FULL chain validation. The follow-on ticket wires it to the
+        /// allowlist's per-target accept-untrusted flag — never a process-wide bypass.
+        /// </summary>
+        private readonly Func<Uri, RemoteCertificateValidationCallback> _tlsValidationResolver;
+
         private readonly object _sync = new object();
         private readonly Dictionary<string, Session> _sessions = new Dictionary<string, Session>(StringComparer.Ordinal);
         private Timer _reaper;
 
-        internal ProxyTunnelServer(ProxyTunnelLimits limits, Action<string> log)
+        internal ProxyTunnelServer(
+            ProxyTunnelLimits limits,
+            Action<string> log,
+            Func<Uri, RemoteCertificateValidationCallback> tlsValidationResolver = null)
         {
             _limits = limits ?? ProxyTunnelLimits.Default();
             _log = log ?? (message => { });
+            _tlsValidationResolver = tlsValidationResolver;
             var period = TimeSpan.FromMilliseconds(Math.Max(1000, Math.Min(30_000, _limits.IdleTimeoutMs / 2)));
             _reaper = new Timer(_ => ReapSafely(), null, period, period);
         }
@@ -78,9 +102,11 @@ namespace WebContent
             }
 
             Uri target;
-            if (!Uri.TryCreate(open.Url, UriKind.Absolute, out target) || target.Scheme != Uri.UriSchemeHttp)
+            if (!Uri.TryCreate(open.Url, UriKind.Absolute, out target) || !ProxyPolicy.IsHttpUri(target))
             {
-                return OpenFailure(ProxyFetchErrorCodes.BadRequest, $"The tunnel target '{open.Url}' is not an absolute http url; only plain ws:// origins (http scheme) are tunnelled.");
+                return OpenFailure(
+                    ProxyFetchErrorCodes.BadRequest,
+                    $"The tunnel target '{open.Url}' is not an absolute http(s) url; plain ws:// origins tunnel over http, wss:// origins over https.");
             }
 
             lock (_sync)
@@ -110,7 +136,32 @@ namespace WebContent
                 }
 
                 await connectTask;
-                var stream = socket.GetStream();
+                Stream stream = socket.GetStream();
+
+                // #60: an https-scheme tunnel target (a wss upgrade) gets a TLS leg with the same
+                // full-chain-validation posture as the https fetcher. The rebuilt handshake and
+                // every frame byte ride this SslStream; the browser's frames reach it already
+                // decrypted by the loopback tunnel termination, so this is the target's real wss
+                // leg - exactly the leg ADR-0002 keeps the security decision on.
+                if (target.Scheme == Uri.UriSchemeHttps)
+                {
+                    var ssl = new SslStream(
+                        socket.GetStream(),
+                        false,
+                        _tlsValidationResolver == null ? null : _tlsValidationResolver(target));
+                    stream = ssl;
+
+                    var authenticateTask = ssl.AuthenticateAsClientAsync(target.IdnHost);
+                    if (await Task.WhenAny(authenticateTask, Task.Delay(_limits.HandshakeTimeoutMs)) != authenticateTask)
+                    {
+                        CloseSocket(socket);
+                        return OpenFailure(
+                            ProxyFetchErrorCodes.Timeout,
+                            $"{OriginOf(target)}: the TLS handshake for the websocket tunnel did not complete within {_limits.HandshakeTimeoutMs} ms.");
+                    }
+
+                    await authenticateTask;
+                }
 
                 var handshake = ProxyWebSocketHandshake.BuildTargetHandshake(target, open.Headers);
                 var writeTask = stream.WriteAsync(handshake, 0, handshake.Length);
@@ -193,6 +244,15 @@ namespace WebContent
                     StatusCode = 101,
                     HandshakeBytes = handshakeBytes,
                 };
+            }
+            catch (AuthenticationException authenticationException)
+            {
+                // #60 AC: an unvalidatable TLS target fails with an explicit TLS-validation
+                // error naming the target origin and the failing side (the Event Server's leg).
+                CloseSocket(socket);
+                return OpenFailure(
+                    ProxyFetchErrorCodes.TlsValidation,
+                    $"{OriginOf(target)}: the Event Server refused the target's TLS certificate on the websocket tunnel leg: {authenticationException.Message}");
             }
             catch (SocketException socketException)
             {
@@ -459,6 +519,9 @@ namespace WebContent
                 waiter?.TrySetResult(null);
             }
 
+            // Dispose the stream first: for a TLS leg that sends the close_notify and unwinds the
+            // pumps parked on it; then the socket, which is the caller's to own on the plain leg.
+            try { session.Stream?.Dispose(); } catch (Exception) { }
             CloseSocket(session.Socket);
 
             if (notifyClient)

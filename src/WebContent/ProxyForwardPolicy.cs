@@ -28,8 +28,10 @@ namespace WebContent
         ConnectRefused,
 
         /// <summary>
-        /// Plain ws:// upgrade to an allowlisted origin (#57): carried as a CONNECT-style byte
-        /// tunnel to the Event Server, never through the HTTP request/response forward path.
+        /// A websocket upgrade to an allowlisted origin (#57 plain ws://, #60 wss:// inside a
+        /// terminated TLS tunnel or absolute wss:// against an https entry): carried as a
+        /// CONNECT-style byte tunnel to the Event Server, never through the HTTP request/response
+        /// forward path. An https-scheme tunnel target gets a validated TLS leg at the target.
         /// </summary>
         WebSocketTunnel,
 
@@ -41,12 +43,6 @@ namespace WebContent
         /// tunnel is closed before any Event Server socket opens for anything else.
         /// </summary>
         ConnectWebSocketTunnel,
-
-        /// <summary>
-        /// A websocket upgrade this proxy cannot tunnel (wss:// inside a terminated TLS tunnel —
-        /// out of #57 scope) — refused with an explicit status, never smuggled through a forward.
-        /// </summary>
-        WebSocketTunnelRefused,
     }
 
     /// <summary>
@@ -142,18 +138,13 @@ namespace WebContent
                 return ProxyForwardDisposition.MethodNotAllowed;
             }
 
-            // #57: a websocket upgrade is not an HTTP forward. A plain ws:// upgrade (http-scheme
-            // origin) to an allowlisted target tunnels as raw bytes; a wss:// upgrade inside a
-            // TLS tunnel the listener terminated is refused outright — never relayed through the
-            // chunked fetch path, never taken direct.
+            // #57/#60: a websocket upgrade is not an HTTP forward. A plain ws:// upgrade
+            // (http-scheme origin) to an allowlisted target tunnels as raw bytes over a plain
+            // socket; a wss:// upgrade — absolute form or inside a TLS tunnel this listener
+            // terminated (#56) — tunnels too, with the Event Server dialing a validated TLS leg
+            // to the target. Either way the bytes never ride the chunked fetch path, never direct.
             if (ProxyWebSocketHandshake.IsWebSocketUpgrade(request))
             {
-                if (tunnelOrigin != null || request.Uri.Scheme != Uri.UriSchemeHttp)
-                {
-                    rejectReason = "A wss:// websocket upgrade cannot be tunnelled through this proxy: https targets terminate as TLS at the loopback listener, and only plain ws:// upgrades ride the byte tunnel (wss tunneling is not implemented).";
-                    return ProxyForwardDisposition.WebSocketTunnelRefused;
-                }
-
                 if (!ProxyWebSocketHandshake.HasValidClientHandshake(request, out rejectReason))
                 {
                     return ProxyForwardDisposition.BadRequest;

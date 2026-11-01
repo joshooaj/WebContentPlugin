@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using Xunit;
@@ -76,6 +77,24 @@ namespace WebContent.Tests
             // Per-hop proxy decoration never travels to the target, and the head terminates.
             Assert.DoesNotContain("Proxy-Connection", handshake);
             Assert.EndsWith("\r\n\r\n", handshake);
+        }
+
+        [Theory]
+        [InlineData("https://cam1.test/ws/live", "Host: cam1.test\r\n")]
+        [InlineData("https://cam1.test:8443/ws/live", "Host: cam1.test:8443\r\n")]
+        public void RebuiltHandshakeForTheTlsLegDerivesHostFromTheHttpsTarget(string target, string hostLine)
+        {
+            // #60: the same rebuild rides the Event Server's TLS leg to a wss target; the Host
+            // header comes from the uri (scheme default port omitted), never from the client.
+            var wire = new List<ProxyFetchHeader>
+            {
+                new ProxyFetchHeader { Name = "Sec-WebSocket-Key", Value = "dGhlIHNhbXBsZSBub25jZQ==" },
+            };
+
+            var handshake = Encoding.UTF8.GetString(
+                ProxyWebSocketHandshake.BuildTargetHandshake(new Uri(target), wire));
+
+            Assert.StartsWith($"GET /ws/live HTTP/1.1\r\n{hostLine}", handshake);
         }
 
         [Fact]
