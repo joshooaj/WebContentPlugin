@@ -120,6 +120,7 @@
     <Compile Include="ProxyFetchClient.cs" />
     <Compile Include="ProxyForwardCodec.cs" />
     <Compile Include="ProxyForwardPolicy.cs" />
+    <Compile Include="ProxyWebSocketHandshake.cs" />
     <Compile Include="ProxyForwardConnection.cs" />
     <Compile Include="ProxyBrowserArguments.cs" />
     <Compile Include="ProxyWorkspaceProfile.cs" />

@@ -29,6 +29,7 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyFetchHeader))]
         [InlineData(typeof(ProxyLeafRequestPayload))]
         [InlineData(typeof(ProxyLeafResponsePayload))]
+        [InlineData(typeof(ProxyTunnelPayload))]
         public void EveryPayloadFieldStaysInsideTheMessageWhitelist(Type payloadType)
         {
             foreach (var field in payloadType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -44,6 +45,7 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyFetchHeader))]
         [InlineData(typeof(ProxyLeafRequestPayload))]
         [InlineData(typeof(ProxyLeafResponsePayload))]
+        [InlineData(typeof(ProxyTunnelPayload))]
         public void PayloadsLiveInThePluginNamespaceTheWhitelistGrants(Type payloadType)
         {
             // The whitelist escape for plug-in types is namespace-based; a payload living under a

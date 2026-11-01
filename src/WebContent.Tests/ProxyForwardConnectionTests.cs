@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -335,6 +336,32 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public async Task RefusesInTunnelWebSocketUpgradeWith501InsideTheTunnel()
+        {
+            // #57 posture: a wss:// upgrade inside a terminated tunnel is refused explicitly -
+            // never smuggled through the HTTP fetch path, never taken direct.
+            var fetchCalled = false;
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query =>
+            {
+                fetchCalled = true;
+                return Task.FromResult(new ProxyFetchResult { Success = false });
+            };
+
+            var request =
+                "CONNECT cam1.test:8443 HTTP/1.1\r\n\r\n" +
+                "GET /ws/live HTTP/1.1\r\nHost: cam1.test:8443\r\n" +
+                "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n";
+
+            var response = await HandleTunnel(request, new[] { "https://cam1.test:8443" }, fetch);
+
+            Assert.False(fetchCalled);
+            Assert.StartsWith("HTTP/1.1 200 Connection established\r\n\r\n", response);
+            Assert.Contains("HTTP/1.1 501", response);
+            Assert.Contains("wss", response);
+        }
+
+        [Fact]
         public async Task RefusesConnectWith502WhenNoTlsTerminationIsAvailable()
         {
             // Defensive wiring path: an allowlisted CONNECT the listener cannot terminate (no
@@ -423,6 +450,289 @@ namespace WebContent.Tests
             }
         }
 
+        // #57: an allowlisted ws:// upgrade becomes a CONNECT-style byte tunnel to the Event
+        // Server instead of an HTTP forward. The open seam stands in for the MIP-messaging tunnel
+        // (ProxyFetchClient.OpenTunnelAsync in production); the handle stands in for the live
+        // tunnel. Everything after the 101 rides as opaque bytes in both directions.
+
+        [Fact]
+        public async Task TunnelsAllowlistedWebSocketUpgradeAndRelaysTheTargetsHandshakeVerbatim()
+        {
+            ProxyForwardedRequest opened = null;
+            var handle = new FakeTunnelHandle();
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+            {
+                opened = request;
+                return Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = true,
+                    Handle = handle,
+                    HandshakeBytes = Encoding.UTF8.GetBytes(
+                        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s7AQWlie1Rh0h9M7N8QV3YQ==\r\n\r\n"),
+                });
+            };
+
+            var request =
+                "GET http://10.0.0.5:8080/ws/live HTTP/1.1\r\n" +
+                "Connection: keep-alive, Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "\r\n" +
+                "\x81\x05hello"; // browser's first websocket frame rides the same segment
+
+            // Latin-1 keeps the frame bytes byte-faithful into the fake socket (UTF-8 would
+            // expand 0x81 the way a text encoding must not for HTTP framing).
+            var response = await HandleWebSocket(
+                Encoding.GetEncoding("ISO-8859-1").GetBytes(request), openTunnel);
+
+            Assert.Equal("http://10.0.0.5:8080/ws/live", opened.Uri.AbsoluteUri);
+
+            // The target's 101 answer goes to the browser verbatim — no re-rendering, no
+            // re-framing (the browser verifies Sec-WebSocket-Accept against the relayed key).
+            Assert.StartsWith(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s7AQWlie1Rh0h9M7N8QV3YQ==\r\n\r\n",
+                response);
+
+            // And the frame bytes that followed the upgrade head crossed into the tunnel.
+            Assert.Single(handle.Sent);
+            Assert.Equal(new byte[] { 0x81, 0x05, (byte)'h', (byte)'e', (byte)'l', (byte)'l', (byte)'o' }, handle.Sent[0]);
+        }
+
+        [Fact]
+        public async Task PumpsTargetBytesBackToTheBrowserUntilTheHandleCloses()
+        {
+            var handle = new FakeTunnelHandle();
+            handle.PushFromTarget(new byte[] { 0x81, 0x02, 0xAA, 0xBB });
+            handle.PushFromTarget(new byte[] { 0x88, 0x00 }); // close frame, then the tunnel ends
+
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = true,
+                    Handle = handle,
+                    HandshakeBytes = Encoding.UTF8.GetBytes("HTTP/1.1 101 Switching Protocols\r\n\r\n"),
+                });
+
+            var request =
+                "GET http://10.0.0.5:8080/ws HTTP/1.1\r\n" +
+                "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n";
+
+            var response = await HandleWebSocketBytes(Encoding.UTF8.GetBytes(request), openTunnel);
+
+            // The pumped target bytes land raw on the browser socket, in order, after the head -
+            // byte-identical, never base64 or chunk-framed a second time.
+            Assert.StartsWith("HTTP/1.1 101 Switching Protocols\r\n\r\n", Encoding.UTF8.GetString(response));
+            Assert.True(EndsWithBytes(response, new byte[] { 0x81, 0x02, 0xAA, 0xBB, 0x88, 0x00 }),
+                "target bytes did not land byte-identical on the browser socket");
+        }
+
+        [Fact]
+        public async Task RefusesWebSocketTunnelWith502WhenOpenFailsOnTheEventServer()
+        {
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = false,
+                    StatusCode = 401,
+                    ErrorCode = ProxyFetchErrorCodes.HandshakeRefused,
+                    ErrorMessage = "the target answered 401 instead of 101",
+                });
+
+            var response = await HandleWebSocket(Encoding.UTF8.GetBytes(
+                "GET http://10.0.0.5:8080/ws HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n"),
+                openTunnel);
+
+            Assert.StartsWith("HTTP/1.1 502 Bad Gateway\r\n", response);
+            Assert.Contains("401", response);
+        }
+
+        [Fact]
+        public async Task RefusesWebSocketUpgradeWith502WhenNoTunnelSeamIsWired()
+        {
+            // Defensive wiring: a listener without tunnel plumbing refuses outright - the
+            // upgrade is never smuggled through the HTTP forward path and never taken direct.
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes(
+                "GET http://10.0.0.5:8080/ws HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(input, output, Allowlist, query => Task.FromResult(new ProxyFetchResult { Success = true }), message => { });
+                Assert.StartsWith("HTTP/1.1 502 Bad Gateway", Encoding.UTF8.GetString(output.ToArray()));
+            }
+        }
+
+        [Fact]
+        public async Task ClosesTheTunnelHandleWhenTheBrowserSocketEnds()
+        {
+            var handle = new FakeTunnelHandle();
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = true,
+                    Handle = handle,
+                    HandshakeBytes = Encoding.UTF8.GetBytes("HTTP/1.1 101 Switching Protocols\r\n\r\n"),
+                });
+
+            await HandleWebSocket(Encoding.UTF8.GetBytes(
+                "GET http://10.0.0.5:8080/ws HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n"),
+                openTunnel);
+
+            Assert.True(handle.IsClosed);
+            Assert.NotNull(handle.ClosedReason);
+        }
+
+        [Fact]
+        public async Task EndsTheConnectionPromptlyWhenTheTunnelClosesOnTheTargetSide()
+        {
+            // Half-open reclaim: the target closed its end (handle finished) while the browser
+            // kept pushing bytes - the flow must return so the listener can close the socket
+            // instead of parking a task forever.
+            var handle = new FakeTunnelHandle();
+            var browser = new EndlessFrameSocket(Encoding.UTF8.GetBytes(
+                "GET http://10.0.0.5:8080/ws HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n"));
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = true,
+                    Handle = handle,
+                    HandshakeBytes = Encoding.UTF8.GetBytes("HTTP/1.1 101 Switching Protocols\r\n\r\n"),
+                });
+
+            using (var output = new MemoryStream())
+            {
+                var flow = ProxyForwardConnection.HandleAsync(
+                    browser, output, Allowlist,
+                    query => Task.FromResult(new ProxyFetchResult { Success = true }),
+                    message => { },
+                    null,
+                    openTunnel);
+
+                handle.Close("target closed");
+                await Task.WhenAny(flow, Task.Delay(TimeSpan.FromSeconds(10)));
+                Assert.True(flow.IsCompleted, "the flow stayed parked after the target side closed");
+            }
+
+            Assert.True(handle.IsClosed);
+        }
+
+        private static async Task<string> HandleWebSocket(byte[] requestBytes, Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel) =>
+            Encoding.UTF8.GetString(await HandleWebSocketBytes(requestBytes, openTunnel));
+
+        private static async Task<byte[]> HandleWebSocketBytes(byte[] requestBytes, Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel)
+        {
+            using (var input = new MemoryStream(requestBytes))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, Allowlist,
+                    query => Task.FromResult(new ProxyFetchResult { Success = true }),
+                    message => { },
+                    null,
+                    openTunnel);
+                return output.ToArray();
+            }
+        }
+
+        /// <summary>
+        /// In-memory stand-in for the messaging-backed tunnel handle.
+        /// </summary>
+        private sealed class FakeTunnelHandle : ProxyTunnelHandle
+        {
+            internal readonly List<byte[]> Sent = new List<byte[]>();
+            internal string ClosedReason;
+
+            private readonly Queue<byte[]> _fromTarget = new Queue<byte[]>();
+            private TaskCompletionSource<byte[]> _waiter;
+            private bool _closed;
+
+            internal override bool IsClosed => _closed;
+
+            internal void PushFromTarget(byte[] bytes)
+            {
+                lock (_fromTarget)
+                {
+                    _fromTarget.Enqueue(bytes);
+                    var waiter = _waiter;
+                    _waiter = null;
+                    waiter?.TrySetResult(bytes);
+                }
+            }
+
+            internal override Task SendAsync(byte[] bytes)
+            {
+                lock (Sent)
+                {
+                    Sent.Add(bytes);
+                }
+
+                return Task.CompletedTask;
+            }
+
+            internal override Task<byte[]> NextDataAsync()
+            {
+                lock (_fromTarget)
+                {
+                    if (_fromTarget.Count > 0)
+                    {
+                        return Task.FromResult(_fromTarget.Dequeue());
+                    }
+
+                    if (_closed)
+                    {
+                        return Task.FromResult<byte[]>(null);
+                    }
+
+                    _waiter = new TaskCompletionSource<byte[]>();
+                    return _waiter.Task;
+                }
+            }
+
+            internal override void Close(string reason)
+            {
+                lock (_fromTarget)
+                {
+                    if (_closed)
+                    {
+                        return;
+                    }
+
+                    _closed = true;
+                    ClosedReason = reason;
+                    var waiter = _waiter;
+                    _waiter = null;
+                    waiter?.TrySetResult(null);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A browser socket that keeps pushing websocket frame bytes forever (the half-open
+        /// case's busy direction); each read completes off-thread so the pump truly yields.
+        /// </summary>
+        private sealed class EndlessFrameSocket : MemoryStream
+        {
+            internal EndlessFrameSocket(byte[] buffer) : base(buffer)
+            {
+            }
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                Task.Run(() =>
+                {
+                    lock (this)
+                    {
+                        if (Position >= Length)
+                        {
+                            Position = 0;
+                        }
+
+                        return base.Read(buffer, offset, Math.Min(count, 64));
+                    }
+                });
+        }
+
         /// <summary>Read side and write side are different streams, like a real SslStream tunnel.</summary>
         private sealed class DuplexStream : Stream
         {
@@ -501,6 +811,24 @@ namespace WebContent.Tests
                 // echoed inner requests).
                 return Encoding.UTF8.GetString(output.ToArray()) + Encoding.UTF8.GetString(combined.ToArray());
             }
+        }
+
+        private static bool EndsWithBytes(byte[] actual, byte[] expectedTail)
+        {
+            if (actual.Length < expectedTail.Length)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < expectedTail.Length; i++)
+            {
+                if (actual[actual.Length - expectedTail.Length + i] != expectedTail[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static int CountLines(string response, string prefix)

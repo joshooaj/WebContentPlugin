@@ -26,6 +26,18 @@ namespace WebContent
 
         /// <summary>CONNECT that cannot be terminated here — 502, never taken direct.</summary>
         ConnectRefused,
+
+        /// <summary>
+        /// Plain ws:// upgrade to an allowlisted origin (#57): carried as a CONNECT-style byte
+        /// tunnel to the Event Server, never through the HTTP request/response forward path.
+        /// </summary>
+        WebSocketTunnel,
+
+        /// <summary>
+        /// A websocket upgrade this proxy cannot tunnel (wss:// inside a terminated TLS tunnel —
+        /// out of #57 scope) — refused with an explicit status, never smuggled through a forward.
+        /// </summary>
+        WebSocketTunnelRefused,
     }
 
     /// <summary>
@@ -107,6 +119,32 @@ namespace WebContent
             {
                 rejectReason = $"The proxy relays browser-flow verbs (GET/HEAD/POST/PUT/DELETE/OPTIONS/PATCH); '{request.Method}' to '{request.RawTarget}' is refused.";
                 return ProxyForwardDisposition.MethodNotAllowed;
+            }
+
+            // #57: a websocket upgrade is not an HTTP forward. A plain ws:// upgrade (http-scheme
+            // origin) to an allowlisted target tunnels as raw bytes; a wss:// upgrade inside a
+            // TLS tunnel the listener terminated is refused outright — never relayed through the
+            // chunked fetch path, never taken direct.
+            if (ProxyWebSocketHandshake.IsWebSocketUpgrade(request))
+            {
+                if (tunnelOrigin != null || request.Uri.Scheme != Uri.UriSchemeHttp)
+                {
+                    rejectReason = "A wss:// websocket upgrade cannot be tunnelled through this proxy: https targets terminate as TLS at the loopback listener, and only plain ws:// upgrades ride the byte tunnel (wss tunneling is not implemented).";
+                    return ProxyForwardDisposition.WebSocketTunnelRefused;
+                }
+
+                if (!ProxyWebSocketHandshake.HasValidClientHandshake(request, out rejectReason))
+                {
+                    return ProxyForwardDisposition.BadRequest;
+                }
+
+                if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri))
+                {
+                    rejectReason = $"The websocket origin '{ProxyPolicy.CanonicalOrigin(request.Uri)}' is not in the workspace proxy allowlist; the tunnel is refused and the browser is never taken direct.";
+                    return ProxyForwardDisposition.OriginNotAllowed;
+                }
+
+                return ProxyForwardDisposition.WebSocketTunnel;
             }
 
             if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri))

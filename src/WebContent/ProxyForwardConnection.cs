@@ -53,6 +53,25 @@ namespace WebContent
             Action<string> log,
             Func<Stream, byte[], Uri, Task<Stream>> unwrapTunnelTls)
         {
+            await HandleAsync(input, output, canonicalTargets, fetch, log, unwrapTunnelTls, null);
+        }
+
+        /// <summary>
+        /// Optional websocket-tunnel seam (#57): given the decided upgrade request, open the
+        /// CONNECT-style byte tunnel to the target through the Event Server and hand back a
+        /// handle to pump plus the target's verbatim 101 answer. Production passes
+        /// <c>ProxyFetchClient.OpenTunnelAsync</c>; the pure flow stays testable with an
+        /// in-memory handle.
+        /// </summary>
+        internal static async Task HandleAsync(
+            Stream input,
+            Stream output,
+            System.Collections.Generic.IEnumerable<string> canonicalTargets,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
+            Action<string> log,
+            Func<Stream, byte[], Uri, Task<Stream>> unwrapTunnelTls,
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel)
+        {
             var head = await ReadRequestHeadAsync(input);
             if (head == null)
             {
@@ -127,6 +146,48 @@ namespace WebContent
                     log(rejectReason);
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", rejectReason + " The workspace proxy supports http(s) allowlisted targets fetched by the VMS server; https pages need a CONNECT tunnel this proxy does not provide."));
                     return;
+
+                case ProxyForwardDisposition.WebSocketTunnelRefused:
+                    // A websocket upgrade this proxy cannot tunnel (wss:// inside a terminated
+                    // TLS tunnel): an explicit status, never smuggled into the fetch path.
+                    log(rejectReason);
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(501, "Not Implemented", rejectReason));
+                    return;
+
+                case ProxyForwardDisposition.WebSocketTunnel:
+                    if (openTunnel == null)
+                    {
+                        var tunnelWiring = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws:// targets ride CONNECT-style tunnels the VMS server opens.";
+                        log(tunnelWiring);
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", tunnelWiring));
+                        return;
+                    }
+
+                    ProxyTunnelOpenOutcome outcome;
+                    try
+                    {
+                        outcome = await openTunnel(request);
+                    }
+                    catch (Exception exception)
+                    {
+                        log($"Proxy websocket tunnel open for '{request.RawTarget}' threw: {exception.Message}");
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy tunnel failed to open: {exception.Message}"));
+                        return;
+                    }
+
+                    if (outcome == null || !outcome.Success)
+                    {
+                        var openFailure = outcome == null
+                            ? "The Event Server tunnel opener returned no outcome."
+                            : outcome.ErrorMessage;
+                        log($"Proxy websocket tunnel to '{request.RawTarget}' refused (code={outcome?.ErrorCode}): {openFailure}");
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", openFailure));
+                        return;
+                    }
+
+                    log($"Proxy websocket tunnel to '{request.RawTarget}' established; pumping bytes in both directions.");
+                    await ServeWebSocketTunnelAsync(head.Leftover, input, output, outcome, log);
+                    return;
             }
 
             await ServeForwardedRequestAsync(request, head.Leftover, input, output, fetch, log);
@@ -174,6 +235,14 @@ namespace WebContent
                         pending = head.Leftover;
                         continue;
 
+                    case ProxyForwardDisposition.WebSocketTunnelRefused:
+                        // #57 posture: a wss:// upgrade inside the terminated tunnel gets an
+                        // explicit refusal on the tunnel; the tunnel itself stays usable.
+                        log(rejectReason);
+                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(501, "Not Implemented", rejectReason));
+                        pending = head.Leftover;
+                        continue;
+
                     default:
                         // OriginNotAllowed inside a tunnel means the inner target drifted off the
                         // accepted origin (codec already blocks that) - refuse and keep the tunnel.
@@ -190,6 +259,87 @@ namespace WebContent
                 }
 
                 pending = remainder;
+            }
+        }
+
+        /// <summary>
+        /// The #57 tunnel flow after a successful open: the target's raw 101 answer goes to the
+        /// browser socket verbatim (the browser validates Sec-WebSocket-Accept against the key
+        /// the tunnel relayed untouched), then the connection becomes a pure byte pump in both
+        /// directions — RFC 6455 framing is opaque here, exactly like CONNECT carrying opaque TLS.
+        /// The traffic never enters the HTTP forward/chunking path, so nothing is re-encoded.
+        /// </summary>
+        private static async Task ServeWebSocketTunnelAsync(
+            byte[] leftover,
+            Stream input,
+            Stream output,
+            ProxyTunnelOpenOutcome outcome,
+            Action<string> log)
+        {
+            await WriteAsync(output, outcome.HandshakeBytes ?? new byte[0]);
+
+            var browserToTarget = PumpBrowserToTunnelAsync(leftover, input, outcome.Handle, log);
+            var targetToBrowser = PumpTunnelToBrowserAsync(outcome.Handle, output, log);
+
+            // Whichever side ends first ends the connection: browser EOF or socket fault, or the
+            // target/messaging side closing. The other pump unwinds on its own - the socket
+            // disposal in the caller's using-block breaks its pending read, or the closed handle
+            // answers the next wait - and its task is intentionally not awaited here so a silent
+            // half-open browser socket cannot park this flow forever.
+            await Task.WhenAny(browserToTarget, targetToBrowser);
+            outcome.Handle.Close("the proxied websocket connection ended");
+        }
+
+        private static async Task PumpBrowserToTunnelAsync(byte[] leftover, Stream input, ProxyTunnelHandle handle, Action<string> log)
+        {
+            try
+            {
+                if (leftover != null && leftover.Length > 0)
+                {
+                    // The upgrade head's pipelined bytes are the browser's first websocket frame(s).
+                    await handle.SendAsync(leftover);
+                }
+
+                var buffer = new byte[ProxyTunnelLimits.DefaultFrameMaxBytes];
+                while (!handle.IsClosed)
+                {
+                    var read = await input.ReadAsync(buffer, 0, buffer.Length);
+                    if (read <= 0)
+                    {
+                        return;
+                    }
+
+                    var bytes = new byte[read];
+                    Buffer.BlockCopy(buffer, 0, bytes, 0, read);
+                    await handle.SendAsync(bytes);
+                }
+            }
+            catch (Exception exception)
+            {
+                // Socket disposal at teardown is the normal ending of the losing direction.
+                log($"Proxy websocket tunnel browser-to-target pump ended: {exception.Message}");
+            }
+        }
+
+        private static async Task PumpTunnelToBrowserAsync(ProxyTunnelHandle handle, Stream output, Action<string> log)
+        {
+            try
+            {
+                while (true)
+                {
+                    var bytes = await handle.NextDataAsync();
+                    if (bytes == null)
+                    {
+                        return;
+                    }
+
+                    await output.WriteAsync(bytes, 0, bytes.Length);
+                    await output.FlushAsync();
+                }
+            }
+            catch (Exception exception)
+            {
+                log($"Proxy websocket tunnel target-to-browser pump ended: {exception.Message}");
             }
         }
 

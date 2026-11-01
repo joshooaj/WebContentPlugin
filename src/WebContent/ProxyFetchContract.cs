@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace WebContent
 {
@@ -24,6 +25,20 @@ namespace WebContent
         /// allowlisted origin, carrying the client-generated SubjectPublicKeyInfo.</summary>
         internal const string LeafRequestId = "WebContent.Proxy.LeafRequest";
         internal const string LeafResponseId = "WebContent.Proxy.LeafResponse";
+
+        /// <summary>
+        /// Ticket #57: the websocket tunnel's directional message pairs. Open is a request/
+        /// response handshake exchange (the Event Server reports whether the target accepted the
+        /// upgrade); data and close each get one id PER DIRECTION, so tunnel bytes flow as their
+        /// own messages — never through the #53 Response/Chunk fetch framing, and one client's
+        /// frames can never be swallowed by another client's filter.
+        /// </summary>
+        internal const string TunnelOpenRequestId = "WebContent.Proxy.TunnelOpenRequest";
+        internal const string TunnelOpenResponseId = "WebContent.Proxy.TunnelOpenResponse";
+        internal const string TunnelDataToTargetId = "WebContent.Proxy.TunnelDataToTarget";
+        internal const string TunnelDataFromTargetId = "WebContent.Proxy.TunnelDataFromTarget";
+        internal const string TunnelCloseToTargetId = "WebContent.Proxy.TunnelCloseToTarget";
+        internal const string TunnelCloseFromTargetId = "WebContent.Proxy.TunnelCloseFromTarget";
     }
 
     /// <summary>
@@ -79,6 +94,12 @@ namespace WebContent
         /// so no loopback leaf certificate can be minted.
         /// </summary>
         internal const string NoAuthority = "NoAuthority";
+
+        /// <summary>
+        /// Ticket #57: the tunnel's target answered the websocket handshake with something other
+        /// than 101 (a plain 200, a vendor 401) — the upgrade is refused, no tunnel exists.
+        /// </summary>
+        internal const string HandshakeRefused = "HandshakeRefused";
     }
 
     /// <summary>
@@ -282,5 +303,121 @@ namespace WebContent
         {
             return new ProxyFetchLimits();
         }
+    }
+
+    /// <summary>
+    /// Ticket #57: the single payload shape for every websocket-tunnel message (open request,
+    /// open response, data frame in either direction, close in either direction). Which fields
+    /// matter is decided by the message id the payload rides on, so one JSON string covers the
+    /// whole protocol like every other proxy payload (#54). The namespace/whitelist guards in
+    /// ProxyFetchContractGuardTests pin the field types.
+    /// </summary>
+    [Serializable]
+    public class ProxyTunnelPayload
+    {
+        /// <summary>The tunnel id; one Guid for the whole life of one tunnel.</summary>
+        public string CorrelationId;
+
+        /// <summary>Open request: the ws:// target url (http-scheme origin + path).</summary>
+        public string Url;
+
+        /// <summary>
+        /// Open request: the browser's handshake headers minus per-hop/proxy decoration, casing
+        /// and values intact — the target computes Sec-WebSocket-Accept from the relayed
+        /// Sec-WebSocket-Key, so the key must not be touched.
+        /// </summary>
+        public List<ProxyFetchHeader> Headers;
+
+        /// <summary>
+        /// Data frame: raw tunnel bytes base64-encoded at the JSON edge only. Open response:
+        /// the target's raw handshake answer (101 head plus any already-buffered frame bytes),
+        /// relayed verbatim so the browser sees exactly the target's Sec-WebSocket-Accept.
+        /// </summary>
+        public string DataBase64;
+
+        /// <summary>Open response: whether the tunnel is up. Close frames leave it default.</summary>
+        public bool Success;
+
+        /// <summary>Open response: the target's handshake status line code (101, or whatever else).</summary>
+        public int StatusCode;
+
+        // Failure/close fields.
+        public string ErrorCode;
+        public string ErrorMessage;
+    }
+
+    /// <summary>
+    /// Ticket #57: bounds the websocket tunnel enforces on both sides — the Event Server's
+    /// connect/handshake budget for the target leg, the idle timeout that reclaims stalled or
+    /// half-open tunnels, the per-message raw byte cap, and the concurrency caps that keep the
+    /// Event Server from accumulating sockets.
+    /// </summary>
+    internal sealed class ProxyTunnelLimits
+    {
+        internal const int DefaultConnectTimeoutMs = 5000;
+        internal const int DefaultHandshakeTimeoutMs = 10000;
+        internal const int DefaultIdleTimeoutMs = 5 * 60 * 1000;
+        internal const int DefaultHandshakeMaxBytes = 64 * 1024;
+        internal const int DefaultFrameMaxBytes = 16 * 1024;
+        internal const int DefaultEsMaxTunnels = 8;
+        internal const int DefaultClientMaxTunnels = 16;
+        internal const int DefaultClientOpenDeadlineMs = 30000;
+
+        internal int ConnectTimeoutMs = DefaultConnectTimeoutMs;
+        internal int HandshakeTimeoutMs = DefaultHandshakeTimeoutMs;
+        internal int IdleTimeoutMs = DefaultIdleTimeoutMs;
+        internal int HandshakeMaxBytes = DefaultHandshakeMaxBytes;
+        internal int FrameMaxBytes = DefaultFrameMaxBytes;
+        internal int EsMaxTunnels = DefaultEsMaxTunnels;
+        internal int ClientMaxTunnels = DefaultClientMaxTunnels;
+        internal int ClientOpenDeadlineMs = DefaultClientOpenDeadlineMs;
+
+        internal static ProxyTunnelLimits Default()
+        {
+            return new ProxyTunnelLimits();
+        }
+    }
+
+    /// <summary>
+    /// Ticket #57: the client-side seam a tunnelled browser connection pumps against. The
+    /// production implementation rides MIP messaging (ProxyFetchClient); tests substitute an
+    /// in-memory tunnel. Byte-oriented, not frame-oriented: everything after the 101 is opaque
+    /// RFC 6455 framing to the proxy, exactly like a CONNECT tunnel carries opaque TLS.
+    /// </summary>
+    internal abstract class ProxyTunnelHandle
+    {
+        internal string TunnelId;
+
+        /// <summary>True once either side closed the tunnel (no further data will arrive).</summary>
+        internal abstract bool IsClosed { get; }
+
+        /// <summary>Relay browser bytes toward the target; no-op once closed.</summary>
+        internal abstract Task SendAsync(byte[] bytes);
+
+        /// <summary>
+        /// Await the next target→browser bytes; null once the tunnel is closed (either side).
+        /// </summary>
+        internal abstract Task<byte[]> NextDataAsync();
+
+        /// <summary>Close the tunnel and tell the Event Server; idempotent.</summary>
+        internal abstract void Close(string reason);
+    }
+
+    /// <summary>
+    /// Ticket #57: outcome of a tunnel-open attempt on the client side. Success carries the
+    /// handle to pump plus the target's raw handshake answer to write to the browser socket
+    /// before the first pump byte; failure carries the refusal to render as 502.
+    /// </summary>
+    internal sealed class ProxyTunnelOpenOutcome
+    {
+        internal bool Success;
+        internal ProxyTunnelHandle Handle;
+
+        /// <summary>The target's 101 answer (head + buffered bytes), relayed verbatim.</summary>
+        internal byte[] HandshakeBytes;
+
+        internal int StatusCode;
+        internal string ErrorCode;
+        internal string ErrorMessage;
     }
 }

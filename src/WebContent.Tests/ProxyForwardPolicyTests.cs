@@ -178,5 +178,120 @@ namespace WebContent.Tests
             Assert.Equal(ProxyForwardDisposition.MethodNotAllowed, decision);
             Assert.Contains("CONNECT", rejectReason);
         }
+
+        // #57: a plain ws:// upgrade reaches an HTTP proxy as an absolute-form GET carrying
+        // Connection/Upgrade headers. The decision table routes it to the CONNECT-style tunnel,
+        // never to the HTTP forward path; the origin gate is the ws origin spelled as http.
+
+        [Fact]
+        public void AllowlistedWebSocketUpgradeTunnelsInsteadOfForwarding()
+        {
+            var head =
+                "GET http://10.0.0.5:8080/ws/live HTTP/1.1\r\n" +
+                "Host: 10.0.0.5:8080\r\n" +
+                "Connection: keep-alive, Upgrade\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Origin: http://10.0.0.5:8080\r\n" +
+                "Sec-WebSocket-Version: 13\r\n" +
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out var request, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.WebSocketTunnel, decision);
+            Assert.Equal("http://10.0.0.5:8080/ws/live", request.Uri.AbsoluteUri);
+            Assert.Null(rejectReason);
+        }
+
+        [Fact]
+        public void RefusesWebSocketUpgradeToOriginsNoWorkspaceAllowlists()
+        {
+            var head =
+                "GET http://elsewhere.test/ws HTTP/1.1\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\n" +
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out _, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.OriginNotAllowed, decision);
+            Assert.Contains("elsewhere.test", rejectReason);
+        }
+
+        [Fact]
+        public void RefusesWebSocketUpgradeWithoutTheHandshakeKey()
+        {
+            // A crafted "upgrade" without the mandatory client handshake fields is malformed, not
+            // a tunnel candidate.
+            var head =
+                "GET http://10.0.0.5:8080/ws HTTP/1.1\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Upgrade: websocket\r\n" +
+                "\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out _, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.BadRequest, decision);
+            Assert.Contains("Sec-WebSocket", rejectReason);
+        }
+
+        [Fact]
+        public void RefusesWebSocketUpgradeWithAnUnsupportedVersion()
+        {
+            var head =
+                "GET http://10.0.0.5:8080/ws HTTP/1.1\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 8\r\n" +
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out _, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.BadRequest, decision);
+            Assert.Contains("Sec-WebSocket-Version", rejectReason);
+        }
+
+        [Fact]
+        public void RefusesWebSocketUpgradeInsideATerminatedTunnel()
+        {
+            // wss:// reaches this proxy as an upgrade inside a CONNECT tunnel the listener
+            // terminated (#56). Tunnel-replay of that upgrade is out of #57 scope: refuse it
+            // explicitly rather than smuggling it through the HTTP fetch path.
+            var head =
+                "GET /ws/live HTTP/1.1\r\n" +
+                "Host: cam1.test:8443\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\n" +
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(
+                new[] { "https://cam1.test:8443" }, head, new Uri("https://cam1.test:8443"), out _, out var rejectReason);
+
+            Assert.Equal(ProxyForwardDisposition.WebSocketTunnelRefused, decision);
+            Assert.Contains("wss", rejectReason);
+        }
+
+        [Fact]
+        public void UpgradesToOtherProtocolsStayOrdinaryForwardedRequests()
+        {
+            // Only the websocket protocol tunnels. A non-websocket upgrade header (h2c chasing)
+            // rides the normal forward path; the fetcher strips hop-by-hop upgrade headers anyway.
+            var head =
+                "GET http://10.0.0.5:8080/ HTTP/1.1\r\n" +
+                "Connection: Upgrade, HTTP2-Settings\r\n" +
+                "Upgrade: h2c\r\n" +
+                "HTTP2-Settings: AABAAABIAAAACw\r\n" +
+                "\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out var request, out _);
+
+            Assert.Equal(ProxyForwardDisposition.Forward, decision);
+            Assert.Equal("http://10.0.0.5:8080/", request.Uri.AbsoluteUri);
+        }
     }
 }

@@ -34,6 +34,9 @@ namespace WebContent
         private static readonly DataContractJsonSerializer LeafResponseSerializer =
             new DataContractJsonSerializer(typeof(ProxyLeafResponsePayload));
 
+        private static readonly DataContractJsonSerializer TunnelSerializer =
+            new DataContractJsonSerializer(typeof(ProxyTunnelPayload));
+
         /// <summary>Encode a request payload for Message.Data.</summary>
         internal static string ToWire(ProxyFetchRequestPayload payload)
         {
@@ -105,6 +108,24 @@ namespace WebContent
             }
 
             return Deserialize<ProxyLeafResponsePayload>(json, LeafResponseSerializer);
+        }
+
+        /// <summary>Encode one websocket-tunnel message (#57) for Message.Data.</summary>
+        internal static string ToWire(ProxyTunnelPayload payload)
+        {
+            return Serialize(payload, TunnelSerializer);
+        }
+
+        /// <summary>Decode one websocket-tunnel message from Message.Data; null when unusable.</summary>
+        internal static ProxyTunnelPayload TunnelFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyTunnelPayload>(json, TunnelSerializer);
         }
 
         private static string Serialize(object payload, DataContractJsonSerializer serializer)
