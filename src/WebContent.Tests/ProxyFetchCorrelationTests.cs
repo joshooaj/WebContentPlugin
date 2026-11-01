@@ -139,13 +139,14 @@ namespace WebContent.Tests
             await Task.Delay(400);
 
             Assert.True(completion.IsCompleted);
-            Assert.False(completion.Result.Success);
-            Assert.Equal(ProxyFetchErrorCodes.ServerUnavailable, completion.Result.ErrorCode);
-            Assert.Contains("VMS Event Server", completion.Result.ErrorMessage);
+            var timedOut = await completion;
+            Assert.False(timedOut.Success);
+            Assert.Equal(ProxyFetchErrorCodes.ServerUnavailable, timedOut.ErrorCode);
+            Assert.Contains("VMS Event Server", timedOut.ErrorMessage);
         }
 
         [Fact]
-        public void FailCompletesThePendingExchangeWithTheGivenLocalFailure()
+        public async Task FailCompletesThePendingExchangeWithTheGivenLocalFailure()
         {
             // #58: the requester learns at transmit time that the messaging channel is dead; the
             // exchange must complete with that reason immediately, not sit until the deadline.
@@ -155,9 +156,10 @@ namespace WebContent.Tests
             correlation.Fail("corr-fail", ProxyFetchErrorCodes.ServerUnavailable, "the messaging channel is down");
 
             Assert.True(completion.IsCompleted);
-            Assert.False(completion.Result.Success);
-            Assert.Equal(ProxyFetchErrorCodes.ServerUnavailable, completion.Result.ErrorCode);
-            Assert.Equal("the messaging channel is down", completion.Result.ErrorMessage);
+            var failed = await completion;
+            Assert.False(failed.Success);
+            Assert.Equal(ProxyFetchErrorCodes.ServerUnavailable, failed.ErrorCode);
+            Assert.Equal("the messaging channel is down", failed.ErrorMessage);
         }
 
         [Fact]

@@ -345,7 +345,7 @@ namespace WebContent.Tests
             var response = await HandleTunnel(request, new[] { "https://cam1.test:8443" }, fetch);
 
             Assert.StartsWith("HTTP/1.1 200 Connection established\r\n\r\n", response);
-            Assert.Equal(1, seen.Count);
+            Assert.Single(seen);
             Assert.Equal("https://cam1.test:8443/live/index.html", seen[0].Uri.AbsoluteUri);
             Assert.Contains("HTTP/1.1 200 OK\r\n", response);
             Assert.Contains("\r\n\r\nsecure", response);
