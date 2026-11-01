@@ -264,7 +264,8 @@ public static class LoginFlow
         => session.WaitForWindow(w => w.AutomationId == "_mainApplicationWindow", timeoutSeconds, "Smart Client main window");
 
     public static Window WaitForAdminMain(ClientSession session, int timeoutSeconds = 120)
-        => session.WaitForWindow(
+    {
+        var window = session.WaitForWindow(
             w =>
             {
                 var cls = w.ClassName;
@@ -275,6 +276,19 @@ public static class LoginFlow
                        w.BoundingRectangle.Width > 400 && w.Name != null && w.Name.Contains("Management Client", StringComparison.OrdinalIgnoreCase);
             },
             timeoutSeconds, "Management Client main window");
+
+        // MC restores its window position from the last interactive session - it can come back
+        // hanging off the monitor, where UIA still READS every tree row but mouse clicks land on
+        // nothing (collapse strikes become silent no-ops). Normalize before any geometry work.
+        try
+        {
+            if (window.Patterns.Window.IsSupported)
+                window.Patterns.Window.Pattern.SetWindowVisualState(FlaUI.Core.Definitions.WindowVisualState.Maximized);
+            Thread.Sleep(600);
+        }
+        catch { }
+        return window;
+    }
 
     private static void SetValueOrType(AutomationElement element, string value)
     {
