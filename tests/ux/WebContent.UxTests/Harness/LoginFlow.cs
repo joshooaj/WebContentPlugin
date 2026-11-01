@@ -1,7 +1,10 @@
+using System.Runtime.InteropServices;
+using System.Text;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
+using FlaUI.Core.WindowsAPI;
 
 namespace WebContent.UxTests.Harness;
 
@@ -199,8 +202,8 @@ public static class LoginFlow
     /// Keyboard.Type lands on whatever owns the FOREGROUND window, and a plain Focus() can be
     /// silently ignored while another app (e.g. a just-retired Management Client) still owns
     /// the foreground - the login then proceeds with an empty password and Smart Client answers
-    /// "insufficient user rights". Verify the element actually holds focus before typing,
-    /// re-activating the window between attempts.
+    /// "insufficient user rights". Verify the element actually holds focus before entering the
+    /// text, re-activating the window between attempts.
     /// </summary>
     private static void FocusAndType(ClientSession session, Window window, AutomationElement element, string text)
     {
@@ -215,7 +218,7 @@ public static class LoginFlow
                     && string.Equals(focused.AutomationId, element.AutomationId, StringComparison.OrdinalIgnoreCase)
                     && focused.Properties.NativeWindowHandle.Value == window.Properties.NativeWindowHandle.Value)
                 {
-                    Keyboard.Type(text);
+                    EnterText(text);
                     return;
                 }
             }
@@ -224,9 +227,78 @@ public static class LoginFlow
         }
 
         // Focus never verified (some WPF builds report it oddly): mouse-click the box to force
-        // foreground + focus together, then type anyway.
+        // foreground + focus together, then enter the text anyway.
         element.Click();
         Thread.Sleep(150);
+        EnterText(text);
+    }
+
+    /// <summary>
+    /// Enter text as clipboard paste (Ctrl+V) when possible: the VMS password carries characters
+    /// ($ &amp; * @) whose shifted virtual-key mapping is layout-dependent, and Keyboard.Type had
+    /// been sending silently CORRUPTED passwords. CF_UNICODETEXT pastes exact UTF-16 regardless
+    /// of keyboard layout; Keyboard.Type remains the fallback if the clipboard is unavailable.
+    /// </summary>
+    private static void EnterText(string text)
+    {
+        if (TryClipboardSetText(text))
+        {
+            Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
+            return;
+        }
         Keyboard.Type(text);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool OpenClipboard(IntPtr newOwner);
+    [DllImport("user32.dll")] private static extern bool CloseClipboard();
+    [DllImport("user32.dll")] private static extern bool EmptyClipboard();
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetClipboardData(uint format, IntPtr data);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
+    [DllImport("kernel32.dll")] private static extern IntPtr GlobalLock(IntPtr handle);
+    [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(IntPtr handle);
+    [DllImport("kernel32.dll")] private static extern IntPtr GlobalFree(IntPtr handle);
+
+    private const uint CF_UNICODETEXT = 13;
+    private const uint GHND = 0x42; // GMEM_MOVEABLE | GMEM_ZEROINIT
+
+    private static bool TryClipboardSetText(string text)
+    {
+        var handle = IntPtr.Zero;
+        try
+        {
+            var bytes = (uint)((text.Length + 1) * 2);
+            handle = GlobalAlloc(GHND, (UIntPtr)bytes);
+            if (handle == IntPtr.Zero) return false;
+            var block = GlobalLock(handle);
+            if (block == IntPtr.Zero) return false;
+            Marshal.Copy(text.ToCharArray(), 0, block, text.Length); // +2 zero bytes = UTF-16 NUL terminator
+            GlobalUnlock(handle);
+
+            if (!OpenClipboard(IntPtr.Zero)) return false;
+            try
+            {
+                EmptyClipboard();
+                // On success the CLIPBOARD owns the handle - do not GlobalFree it.
+                if (SetClipboardData(CF_UNICODETEXT, handle) == IntPtr.Zero) return false;
+                handle = IntPtr.Zero;
+                return true;
+            }
+            finally
+            {
+                CloseClipboard();
+            }
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                try { GlobalUnlock(handle); } catch { }
+                try { GlobalFree(handle); } catch { } // clipboard never took ownership
+            }
+        }
     }
 }
