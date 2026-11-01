@@ -306,6 +306,17 @@ namespace WebContent
     }
 
     /// <summary>
+    /// Frame kinds inside the tunnel messages the Event Server pushes toward the client: raw
+    /// tunnel bytes versus the end-of-tunnel notice. The client's receiving side picks the
+    /// directional message id from this kind.
+    /// </summary>
+    internal static class ProxyTunnelFrameKinds
+    {
+        internal const string Data = "Data";
+        internal const string Close = "Close";
+    }
+
+    /// <summary>
     /// Ticket #57: the single payload shape for every websocket-tunnel message (open request,
     /// open response, data frame in either direction, close in either direction). Which fields
     /// matter is decided by the message id the payload rides on, so one JSON string covers the
@@ -317,6 +328,9 @@ namespace WebContent
     {
         /// <summary>The tunnel id; one Guid for the whole life of one tunnel.</summary>
         public string CorrelationId;
+
+        /// <summary>Server-pushed frames: Data or Close (see <see cref="ProxyTunnelFrameKinds"/>).</summary>
+        public string Kind;
 
         /// <summary>Open request: the ws:// target url (http-scheme origin + path).</summary>
         public string Url;

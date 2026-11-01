@@ -45,6 +45,7 @@
     <Compile Include="..\WebContent\ProxyForwardPolicy.cs" Link="ProxyForwardPolicy.cs" />
     <Compile Include="..\WebContent\ProxyWebSocketHandshake.cs" Link="ProxyWebSocketHandshake.cs" />
     <Compile Include="..\WebContent\ProxyForwardConnection.cs" Link="ProxyForwardConnection.cs" />
+    <Compile Include="..\WebContent\ProxyTunnelServer.cs" Link="ProxyTunnelServer.cs" />
     <Compile Include="..\WebContent\ProxyBrowserArguments.cs" Link="ProxyBrowserArguments.cs" />
     <Compile Include="..\WebContent\ProxyWorkspaceProfile.cs" Link="ProxyWorkspaceProfile.cs" />
     <Compile Include="..\WebContent\ProxyServerAllowlist.cs" Link="ProxyServerAllowlist.cs" />
