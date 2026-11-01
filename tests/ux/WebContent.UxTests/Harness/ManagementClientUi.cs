@@ -721,6 +721,58 @@ public static class ManagementClientUi
     }
 
     /// <summary>
+    /// Replace the full contents of a detail-pane Edit through the keyboard route the login
+    /// harness proved reliable: focus, select-all, CF_UNICODETEXT clipboard paste. The plain
+    /// ValuePattern.SetValue route writes the text but during live probe runs the shell never
+    /// enabled Save from it (mc-save-attempts.txt: enabled=False for every poll), while typing
+    /// into the same box dirtied it in ~1.5 s. Paste keeps the WPF TextChanged chain firing.
+    /// Returns false when the clipboard was unavailable (caller falls back to SetValue).
+    /// </summary>
+    public static bool PasteIntoControl(Window mainWindow, string automationId, string value)
+    {
+        var box = ExpectControl(mainWindow, automationId);
+        box.Focus();
+        System.Threading.Thread.Sleep(300);
+        if (!LoginFlow.TryClipboardSetText(value)) return false;
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                      FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
+        System.Threading.Thread.Sleep(150);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                      FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_V);
+        System.Threading.Thread.Sleep(300);
+        return true;
+    }
+
+    /// <summary>True once the shell exposes an enabled, invokable "Save".</summary>
+    public static bool WaitForSaveEnabled(Window mainWindow, int seconds)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            try { if (FindSaveButton(mainWindow, -1) != null) return true; }
+            catch { }
+            Thread.Sleep(400);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Focus the Edit and press END, SPACE, BACK: a real keyboard round-trip through WPF input
+    /// that fires TextChanged even when a programmatic write left the shell's dirty state cold.
+    /// The box contents end up unchanged.
+    /// </summary>
+    public static void NudgeControlWithKeystroke(Window mainWindow, string automationId)
+    {
+        var box = ExpectControl(mainWindow, automationId, 10);
+        box.Focus();
+        System.Threading.Thread.Sleep(300);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.END);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.SPACE);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.BACK);
+        System.Threading.Thread.Sleep(300);
+    }
+
+    /// <summary>
     /// Drives a checkbox in the detail pane (WPF hosted control: AutomationId is the x:Name)
     /// to the requested state using the UIA Toggle pattern.
     /// </summary>
@@ -782,10 +834,19 @@ public static class ManagementClientUi
     public static bool Save(ClientSession session, Window mainWindow, int timeoutSeconds = 20)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        var attempt = 0;
         while (DateTime.UtcNow < deadline)
         {
             AcceptPendingModal(session, 1);
-            var button = FindSaveButton(mainWindow);
+            AutomationElement button = null;
+            try
+            {
+                button = FindSaveButton(mainWindow, attempt);
+            }
+            catch (Exception ex)
+            {
+                LogSaveAttempt(attempt, "locator threw " + ex.GetType().Name + ": " + ex.Message);
+            }
             if (button != null)
             {
                 try
@@ -814,6 +875,7 @@ public static class ManagementClientUi
                 AcceptPendingModal(session, 2);
                 return true;
             }
+            attempt++;
             Thread.Sleep(500);
         }
         DumpSaveCandidates(mainWindow);
@@ -824,12 +886,44 @@ public static class ManagementClientUi
     /// The shell's enabled "Save" affordance. Name match is any control type: the MC toolbar
     /// renders Save as a button, but a toolbar element surfacing through the WinForms/WPF
     /// bridge can report as Text or Custom, and insisting on ControlType.Button hid a live,
-    /// enabled Save from the harness.
+    /// enabled Save from the harness. Each poll records what every name-matching candidate
+    /// looked like, because "never became enabled" without the toolbar's actual state was a
+    /// guess-and-recheck loop across several runs.
     /// </summary>
-    private static AutomationElement FindSaveButton(Window mainWindow)
+    private static AutomationElement FindSaveButton(Window mainWindow, int attempt)
     {
-        return mainWindow.FindAllDescendants(cf => cf.ByName("Save"))
-            .FirstOrDefault(b => b.IsEnabled && b.Patterns.Invoke.IsSupported);
+        var candidates = mainWindow.FindAllDescendants(cf => cf.ByName("Save"));
+        var described = new List<string>();
+        AutomationElement chosen = null;
+        foreach (var b in candidates)
+        {
+            var ct = TryGet(() => b.ControlType.ToString());
+            var enabled = TryGet(() => b.IsEnabled.ToString());
+            var invoke = TryGet(() => b.Patterns.Invoke.IsSupported.ToString());
+            described.Add($"ct={ct} enabled={enabled} invoke={invoke}");
+            if (chosen == null && enabled == "True" && invoke == "True") chosen = b;
+        }
+        if (attempt >= 0 && attempt < 40)
+        {
+            LogSaveAttempt(attempt, described.Count == 0 ? "no ByName('Save') candidates" : string.Join(" | ", described));
+        }
+        return chosen;
+    }
+
+    private static string TryGet(Func<object> read)
+    {
+        try { return Convert.ToString(read()); }
+        catch (Exception ex) { return "<threw " + ex.GetType().Name + ">"; }
+    }
+
+    private static void LogSaveAttempt(int attempt, string line)
+    {
+        try
+        {
+            File.AppendAllText(Artifacts.PathOf("mc-save-attempts.txt"),
+                $"{DateTime.Now:HH:mm:ss} attempt={attempt} {line}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     /// <summary>
@@ -857,11 +951,7 @@ public static class ManagementClientUi
             sb.AppendLine($"save-census {DateTime.Now:HH:mm:ss} candidates={hits.Count()}");
             foreach (var e in hits)
             {
-                try
-                {
-                    sb.AppendLine($"  ct={e.ControlType} aid='{e.AutomationId}' name='{e.Name}' enabled={e.IsEnabled} invoke={e.Patterns.Invoke.IsSupported}");
-                }
-                catch (Exception ex) { sb.AppendLine("  element threw " + ex.GetType().Name); }
+                sb.AppendLine($"  ct={TryGet(() => e.ControlType.ToString())} aid={TryGet(() => e.AutomationId)} name={TryGet(() => e.Name)} enabled={TryGet(() => e.IsEnabled)} invoke={TryGet(() => e.Patterns.Invoke.IsSupported)}");
             }
             File.AppendAllText(Artifacts.PathOf("mc-save-census.txt"), sb + Environment.NewLine);
         }

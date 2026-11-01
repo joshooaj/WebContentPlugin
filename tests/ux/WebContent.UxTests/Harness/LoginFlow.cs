@@ -494,7 +494,7 @@ public static class LoginFlow
     private const uint CF_UNICODETEXT = 13;
     private const uint GHND = 0x42; // GMEM_MOVEABLE | GMEM_ZEROINIT
 
-    private static bool TryClipboardSetText(string text)
+    internal static bool TryClipboardSetText(string text)
     {
         var handle = IntPtr.Zero;
         try

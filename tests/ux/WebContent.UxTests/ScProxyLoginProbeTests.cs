@@ -365,9 +365,24 @@ public class ScProxyLoginProbeTests
 
         ManagementClientUi.EnsureCheckBox(mcMain, "chkProxyEnabled", true);
         lines.Add(entry);
-        ManagementClientUi.SetValue(mcMain, "txtProxyTargets", string.Join("\n", lines));
+        var joined = string.Join("\n", lines);
+
+        var pasted = ManagementClientUi.PasteIntoControl(mcMain, "txtProxyTargets", joined);
         var edited = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 5));
-        log.AppendLine($"proxy targets right after SetValue: '{edited}'");
+        if (!SameLines(joined, edited))
+        {
+            log.AppendLine($"paste route {(pasted ? "" : "(clipboard unavailable) ")}did not land (readback '{edited}'); ValuePattern fallback");
+            ManagementClientUi.SetValue(mcMain, "txtProxyTargets", joined);
+            edited = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 5));
+        }
+        log.AppendLine($"proxy targets right after edit: '{edited}'");
+
+        if (!ManagementClientUi.WaitForSaveEnabled(mcMain, 6))
+        {
+            log.AppendLine("Save still disabled after edit; keyboard-nudging the targets box");
+            ManagementClientUi.NudgeControlWithKeystroke(mcMain, "txtProxyTargets");
+            log.AppendLine($"Save enabled after nudge: {ManagementClientUi.WaitForSaveEnabled(mcMain, 6)}");
+        }
 
         if (!ManagementClientUi.Save(mc, mcMain, 20))
         {
@@ -405,5 +420,16 @@ public class ScProxyLoginProbeTests
     {
         try { return element.Patterns.Value.IsSupported ? element.Patterns.Value.Pattern.Value.Value : element.Name; }
         catch { return element.Name; }
+    }
+
+    /// <summary>True when two multiline texts carry the same trimmed, non-empty lines.</summary>
+    private static bool SameLines(string expected, string actual)
+    {
+        string[] Norm(string s) => (s ?? string.Empty)
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .ToArray();
+        return Norm(expected).SequenceEqual(Norm(actual));
     }
 }
