@@ -856,45 +856,62 @@ public static class ManagementClientUi
     }
 
     /// <summary>
-    /// Right-clicks a tree node and invokes the shell's New-item menu entry (whatever it is
-    /// called - every menu item is logged so the caption is recorded, not guessed). Used to
-    /// recreate the workspace item after a bad Save destroyed it.
+    /// Create a new item of the kind via the shell's 'Add New ...' menu entry (the tree
+    /// right-click opens no usable context menu on this shell - the menu bar census proved
+    /// 'Add New ...' is the real affordance). Every window/dialog that shows up afterwards is
+    /// logged so the follow-up dialog's shape is recorded, not guessed.
     /// </summary>
     public static bool NewItemUnderNode(Window mainWindow, ClientSession session, string nodeName, StringBuilder log)
     {
-        var items = RealizedTreeItems(mainWindow);
-        var node = items.FirstOrDefault(t => string.Equals(t.Name, nodeName, StringComparison.OrdinalIgnoreCase));
-        if (node == null) return false;
-        var r = node.BoundingRectangle;
-        FlaUI.Core.Input.Mouse.RightClick(new System.Drawing.Point(r.X + 30, r.Y + r.Height / 2));
-        Thread.Sleep(1500);
-
-        var scopes = new List<AutomationElement> { mainWindow };
-        try { scopes.AddRange(session.Windows()); } catch { }
-        AutomationElement newItem = null;
-        foreach (var w in scopes)
+        var addNew = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem))
+            .FirstOrDefault(mi => (mi.Name ?? string.Empty).IndexOf("add new", StringComparison.OrdinalIgnoreCase) >= 0);
+        if (addNew == null)
         {
-            try
-            {
-                foreach (var mi in w.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem)))
-                {
-                    var n = mi.Name ?? string.Empty;
-                    if (n.Length == 0) continue;
-                    log.AppendLine($"ctx-menu '{n}' enabled={TryGet(() => mi.IsEnabled.ToString())}");
-                    if (newItem == null && n.StartsWith("New", StringComparison.OrdinalIgnoreCase)) newItem = mi;
-                }
-            }
-            catch { }
-        }
-        if (newItem == null)
-        {
-            log.AppendLine("no New* context-menu entry found");
-            try { FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE); } catch { }
+            log.AppendLine("no 'Add New ...' menu-bar entry found");
             return false;
         }
-        try { newItem.Patterns.Invoke.Pattern.Invoke(); }
-        catch { try { newItem.Click(); } catch { } }
+        try { addNew.Patterns.Invoke.Pattern.Invoke(); }
+        catch (Exception ex) { log.AppendLine("Add New invoke threw " + ex.GetType().Name); try { addNew.Click(); } catch { } }
         Thread.Sleep(2500);
+
+        // What did it open? Log windows, their edits/buttons, and any menu items left over.
+        try
+        {
+            foreach (var w in session.Windows())
+            {
+                string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
+                log.AppendLine($"after AddNew window aid='{Safex(() => w.AutomationId)}' name='{Safex(() => w.Name)}' class='{Safex(() => w.ClassName)}'");
+                try
+                {
+                    foreach (var b in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit)).Take(10))
+                        log.AppendLine($"   edit aid='{Safex(() => b.AutomationId)}' name='{Safex(() => b.Name)}'");
+                    foreach (var b in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).Take(15))
+                        log.AppendLine($"   button aid='{Safex(() => b.AutomationId)}' name='{Safex(() => b.Name)}'");
+                    foreach (var b in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Text)).Take(15))
+                        log.AppendLine($"   text name='{Safex(() => b.Name)}'");
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex) { log.AppendLine("AddNew aftermath dump threw " + ex.GetType().Name); }
+
+        // If the shell opened a kind-picker, select our kind before accepting the dialog.
+        try
+        {
+            foreach (var w in session.Windows())
+            {
+                foreach (var kind in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                            .Concat(w.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem)))
+                            .Where(e => (e.Name ?? string.Empty).IndexOf("Web Content", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    log.AppendLine($"AddNew picker: choosing '{kind.Name}'");
+                    try { kind.Patterns.Invoke.Pattern.Invoke(); } catch { try { kind.Click(); } catch { } }
+                    Thread.Sleep(1500);
+                    break;
+                }
+            }
+        }
+        catch { }
         return true;
     }
 
