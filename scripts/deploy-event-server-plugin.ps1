@@ -183,8 +183,27 @@ try {
         }
     }
 
-    Copy-Item -Path (Join-Path $SourceDrop '*') -Destination $InstallFolder -ToSession $session -Recurse -Force
-    Write-Output "Drop copied to $ComputerName`:$InstallFolder."
+    # The service state flips to Stopped slightly BEFORE the last thread lets go of
+    # WebContent.dll (observed live, #60 rollout): a single copy attempt fails on the
+    # lock even though the stop completed. Retry briefly instead of failing the run.
+    $copied = $false
+    $copyAttempts = 0
+    $copyError = $null
+    while (-not $copied -and $copyAttempts -lt 10) {
+        $copyAttempts++
+        try {
+            Copy-Item -Path (Join-Path $SourceDrop '*') -Destination $InstallFolder -ToSession $session -Recurse -Force -ErrorAction Stop
+            $copied = $true
+        } catch {
+            $copyError = $_
+            Write-Warning "Copy attempt $copyAttempts failed (the service process may still be releasing the dll): $($_.Exception.Message)"
+            Start-Sleep -Seconds 5
+        }
+    }
+    if (-not $copied) {
+        throw "Drop copy to $ComputerName failed after $copyAttempts attempts - a process other than the service still holds the files: $($copyError.Exception.Message)"
+    }
+    Write-Output "Drop copied to $ComputerName`:$InstallFolder (attempt $copyAttempts)."
 
     # --- Phase 3: hash verification, per file, against the local source. ------
     # Hashes, not timestamps: Copy-Item carries the source LastWriteTime over,
