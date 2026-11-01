@@ -856,6 +856,49 @@ public static class ManagementClientUi
     }
 
     /// <summary>
+    /// Right-clicks a tree node and invokes the shell's New-item menu entry (whatever it is
+    /// called - every menu item is logged so the caption is recorded, not guessed). Used to
+    /// recreate the workspace item after a bad Save destroyed it.
+    /// </summary>
+    public static bool NewItemUnderNode(Window mainWindow, ClientSession session, string nodeName, StringBuilder log)
+    {
+        var items = RealizedTreeItems(mainWindow);
+        var node = items.FirstOrDefault(t => string.Equals(t.Name, nodeName, StringComparison.OrdinalIgnoreCase));
+        if (node == null) return false;
+        var r = node.BoundingRectangle;
+        FlaUI.Core.Input.Mouse.RightClick(new System.Drawing.Point(r.X + 30, r.Y + r.Height / 2));
+        Thread.Sleep(1500);
+
+        var scopes = new List<AutomationElement> { mainWindow };
+        try { scopes.AddRange(session.Windows()); } catch { }
+        AutomationElement newItem = null;
+        foreach (var w in scopes)
+        {
+            try
+            {
+                foreach (var mi in w.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem)))
+                {
+                    var n = mi.Name ?? string.Empty;
+                    if (n.Length == 0) continue;
+                    log.AppendLine($"ctx-menu '{n}' enabled={TryGet(() => mi.IsEnabled.ToString())}");
+                    if (newItem == null && n.StartsWith("New", StringComparison.OrdinalIgnoreCase)) newItem = mi;
+                }
+            }
+            catch { }
+        }
+        if (newItem == null)
+        {
+            log.AppendLine("no New* context-menu entry found");
+            try { FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE); } catch { }
+            return false;
+        }
+        try { newItem.Patterns.Invoke.Pattern.Invoke(); }
+        catch { try { newItem.Click(); } catch { } }
+        Thread.Sleep(2500);
+        return true;
+    }
+
+    /// <summary>
     /// Re-type the pane's Name field (focus-verified keyboard only): select-all, then plain
     /// ASCII typing. Throws when focus cannot be proven - the field is never typed blind.
     /// </summary>

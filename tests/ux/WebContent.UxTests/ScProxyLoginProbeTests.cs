@@ -344,6 +344,7 @@ public class ScProxyLoginProbeTests
         // the workspaces node has a lone child, adopt it and repair its name before touching
         // anything else.
         var workspaceItem = config.McWorkspaceName;
+        var paneReady = false;
         try
         {
             ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName);
@@ -357,11 +358,23 @@ public class ScProxyLoginProbeTests
             catch (InvalidOperationException) { }
             ManagementClientUi.DumpWorkspaceChildren(mcMain, log);
             var orphan = ManagementClientUi.OrphanWorkspaceName(mcMain, ManagementClientUi.WorkspacesNodeName);
-            if (orphan == null) throw;
-            log.AppendLine($"workspace item is named '{orphan}', not '{config.McWorkspaceName}' - adopting and renaming");
-            workspaceItem = orphan;
+            if (orphan != null)
+            {
+                log.AppendLine($"workspace item is named '{orphan}', not '{config.McWorkspaceName}' - adopting and renaming");
+                workspaceItem = orphan;
+            }
+            else
+            {
+                log.AppendLine("workspaces node has NO children - recreating the item via the shell New menu");
+                if (!ManagementClientUi.NewItemUnderNode(mcMain, mc, ManagementClientUi.WorkspacesNodeName, log))
+                    throw new InvalidOperationException(
+                        $"Workspace '{config.McWorkspaceName}' is gone from the config and the shell New menu was unavailable.");
+                ManagementClientUi.AcceptPendingModal(mc, 5); // a name prompt, if the shell shows one
+                paneReady = true; // the New flow leaves the pane showing the fresh item
+                log.AppendLine("created new workspace item; filling the pane");
+            }
         }
-        ManagementClientUi.SelectTreeItem(mcMain, workspaceItem);
+        if (!paneReady) ManagementClientUi.SelectTreeItem(mcMain, workspaceItem);
 
         var nameBox = ManagementClientUi.ExpectControl(mcMain, "txtName", 15);
         var paneName = ReadValue(nameBox);
