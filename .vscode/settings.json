@@ -1,15 +1,46 @@
 {
-    "powershell.codeFormatting.preset": "OTBS",
-    "powershell.scriptAnalysis.settingsPath": "PSScriptAnalyzerSettings.psd1",
-    "files.encoding": "utf8",
-    "[powershell]": {
-        "editor.tabSize": 4,
-        "editor.insertSpaces": true,
-        "editor.formatOnSave": true
-    },
-    "[csharp]": {
-        "editor.tabSize": 4,
-        "editor.insertSpaces": true,
-        "editor.formatOnSave": true
-    }
+  "powershell.codeFormatting.preset": "OTBS",
+  "powershell.scriptAnalysis.settingsPath": "PSScriptAnalyzerSettings.psd1",
+  "files.encoding": "utf8",
+  "[powershell]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": true
+  },
+  "[csharp]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": true
+  },
+  "[json]": {
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": true
+  },
+  "[xaml]": {
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": true
+  },
+  "[xml]": {
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": true
+  },
+  "cSpell.words": [
+    "Cascadia",
+    "correlator",
+    "FQID",
+    "LASTEXITCODE",
+    "mintable",
+    "nbgv",
+    "nologo",
+    "Spki",
+    "unicasted",
+    "unicasts",
+    "vdproj",
+    "WEBCONTENT",
+    "wixproj",
+    "xunit"
+  ]
 }
