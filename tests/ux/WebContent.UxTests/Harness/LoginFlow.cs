@@ -43,7 +43,12 @@ public static class LoginFlow
             return;
         }
 
-        var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
+        // The dialog may vanish mid-entry because the client's own auto-login just connected
+        // (stale element: UIA throws InvalidOperationException / ElementNotAvailable). That is a
+        // SUCCESS outcome, not a broken login - recognize it instead of faulting the probe.
+        try
+        {
+            var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
         if (serverBox != null && !string.IsNullOrWhiteSpace(config.VmsAddress))
         {
             serverBox.Focus();
@@ -91,6 +96,18 @@ public static class LoginFlow
             if (HasMainSessionWindow(session)) return;
         }
         connect.Patterns.Invoke.Pattern.Invoke();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException
+                                   || ex is FlaUI.Core.Exceptions.ElementNotAvailableException)
+        {
+            // Stale mid-entry: the dialog closed because the client's own auto-login connected.
+            if (HasMainSessionWindow(session) || WaitForConnected(session, 15))
+            {
+                LogEntry($"login dialog vanished mid-entry ({ex.GetType().Name}) but the session window is up - auto-login won; treating as signed in");
+                return;
+            }
+            throw;
+        }
     }
 
     private static bool WaitForConnected(ClientSession session, int seconds)
