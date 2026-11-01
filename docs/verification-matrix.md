@@ -593,10 +593,15 @@ the `VMS_ADDRESS` host):
 dotnet test tests/ux/WebContent.UxTests --filter "FullyQualifiedName~ScProxyWssProbeTests"
 ```
 
-**Status: automated, live record outstanding.** Prerequisites before the rows can go green: both
-machines redeployed to the #60 drop (the SC-5/DP-1 elevation loop), the unlocked-interactive-
-desktop window per SC-5 record 2, and the row's own certificate import against the running
-Event Server.
+**Status: automated; live record outstanding.** The Event Server machine is deployed at the
+#60 drop (2026-11-01, `scripts/deploy-event-server-plugin.ps1` with `-Confirm:$False`: pwsh
+7.6.9 NREs in a non-interactive `ShouldProcess` prompt; 10 files hash-identical,
+`WebContent.dll` `78990278…629F1`, service back to `Running`). The rollout also caught a real
+script defect: the service state flips to `Stopped` a moment before the last thread releases
+`WebContent.dll`, so the single copy attempt failed on the lock twice - the script now retries
+the copy. What is still missing for the rows: the Smart Client machine's elevated copy of the
+same drop (UAC consent attempts unattended auto-cancel, per SC-5 record 2), the
+unlocked-interactive-desktop window, and then the run itself.
 
 ## Known high-risk regressions → pinned by
 
