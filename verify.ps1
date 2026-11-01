@@ -31,8 +31,7 @@ if ($IncludePluginBuild) {
     if (-not (Test-Path -LiteralPath $msbuild)) {
         Write-Host 'MSBuild not found (PATH or VS2022 Community default). Install VS2022 or add msbuild to PATH.' -ForegroundColor Red
         $gates.Add([pscustomobject]@{ Name = 'Plugin build'; ExitCode = 1 })
-    }
-    else {
+    } else {
         & $msbuild (Join-Path $repoRoot 'src/WebContent/WebContent.csproj') /t:Build /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
         # PostBuildEvent sbom generation is warning-free and self-overwriting (-D true); exit code is authoritative.
         $gates.Add([pscustomobject]@{ Name = 'Plugin build'; ExitCode = $LASTEXITCODE })
@@ -44,8 +43,7 @@ $failed = $false
 foreach ($gate in $gates) {
     if ($gate.ExitCode -eq 0) {
         Write-Host ("PASS  {0} (exit 0)" -f $gate.Name) -ForegroundColor Green
-    }
-    else {
+    } else {
         Write-Host ("FAIL  {0} (exit {1})" -f $gate.Name, $gate.ExitCode) -ForegroundColor Red
         $failed = $true
     }

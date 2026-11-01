@@ -1,4 +1,8 @@
-$projectRoot = if ([string]::IsNullOrEmpty($PSScriptRoot)) { $PWD } else { $PSScriptRoot }
+$projectRoot = if ([string]::IsNullOrEmpty($PSScriptRoot)) {
+    $PWD
+} else {
+    $PSScriptRoot
+}
 $nbgv = dotnet nbgv get-version -f json | ConvertFrom-Json
 $vdprojPath = (Resolve-Path "$projectRoot\Setup\Setup.vdproj" -ErrorAction Stop).Path
 $vdproj = Get-Content $vdprojPath -Raw

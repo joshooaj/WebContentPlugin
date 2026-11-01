@@ -1,3 +1,15 @@
 {
-    "dotnet.preferCSharpExtension": true
+    "powershell.codeFormatting.preset": "OTBS",
+    "powershell.scriptAnalysis.settingsPath": "PSScriptAnalyzerSettings.psd1",
+    "files.encoding": "utf8",
+    "[powershell]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.formatOnSave": true
+    },
+    "[csharp]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.formatOnSave": true
+    }
 }

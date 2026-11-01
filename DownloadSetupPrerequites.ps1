@@ -31,8 +31,7 @@ foreach ($dependency in $dependencies) {
                 $argList += $MyInvocation.UnboundArguments
                 Start-Process PowerShell.exe -Verb Runas -WorkingDirectory $pwd -ArgumentList $argList
                 return
-            }
-            else {
+            } else {
                 throw "You must be administrator to run this script"
             }
         }
@@ -47,16 +46,14 @@ foreach ($dependency in $dependencies) {
                 $argList += $MyInvocation.UnboundArguments
                 Start-Process PowerShell.exe -Verb Runas -WorkingDirectory $pwd -ArgumentList $argList
                 return
-            }
-            else {
+            } else {
                 throw "You must be administrator to run this script"
             }
         }
         Write-Host "Downloading $($dependency.Name) to $($dependency.Destination)"
         $ProgressPreference = 'SilentlyContinue'
         Invoke-WebRequest -Uri $dependency.Url -OutFile $dependency.Destination
-    }
-    else {
+    } else {
         Write-Host "$($dependency.Name) already available at $($dependency.Destination)"
     }
 }
