@@ -1,3 +1,5 @@
+using System.IO;
+using System.Text;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 
@@ -70,6 +72,25 @@ public static class SmartClientUi
             }
             Thread.Sleep(1000);
         }
+        Artifacts.Window(mainWindow, "sc-select-workspace-fail");
+        try
+        {
+            var dump = new StringBuilder();
+            dump.AppendLine($"select-workspace-fail for '{workspaceName}' {DateTime.Now:HH:mm:ss}");
+            foreach (var w in session.Windows())
+            {
+                string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
+                dump.AppendLine($"  window aid='{Safex(() => w.AutomationId)}' class='{Safex(() => w.ClassName)}' name='{Safex(() => w.Name)}'");
+            }
+            var blocks = mainWindow.FindAllDescendants(cf => cf.ByAutomationId("_textTextBlock"))
+                .Select(t => "'" + t.Name + "'");
+            var texts = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Text))
+                .Take(40).Select(t => "'" + t.Name + "'");
+            dump.AppendLine("  _textTextBlock strip: " + string.Join(", ", blocks));
+            dump.AppendLine("  Text elements: " + string.Join(", ", texts));
+            File.AppendAllText(Artifacts.PathOf("sc-select-workspace-fail.txt"), dump + Environment.NewLine);
+        }
+        catch { }
         throw new TimeoutException($"Workspace '{workspaceName}' is neither a strip tab nor an overflow entry. Overflow saw: {string.Join(", ", seen)}");
     }
 
