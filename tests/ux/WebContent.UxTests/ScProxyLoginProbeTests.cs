@@ -350,10 +350,12 @@ public class ScProxyLoginProbeTests
         }
         catch (InvalidOperationException)
         {
+            ManagementClientUi.DumpWorkspaceChildren(mcMain, log);
             // The last toggle strategy may have left the node collapsed: one more expansion
             // pass with no child-name assertion, then look for the lone child.
             try { ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, new string[0]); }
             catch (InvalidOperationException) { }
+            ManagementClientUi.DumpWorkspaceChildren(mcMain, log);
             var orphan = ManagementClientUi.OrphanWorkspaceName(mcMain, ManagementClientUi.WorkspacesNodeName);
             if (orphan == null) throw;
             log.AppendLine($"workspace item is named '{orphan}', not '{config.McWorkspaceName}' - adopting and renaming");

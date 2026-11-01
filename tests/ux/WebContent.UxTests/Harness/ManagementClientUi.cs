@@ -837,6 +837,24 @@ public static class ManagementClientUi
         return null;
     }
 
+    /// <summary>Every realized tree row (name, indent X, Y) - so a "no children appeared"
+    /// failure says what the tree ACTUALLY shows.</summary>
+    public static void DumpWorkspaceChildren(Window mainWindow, StringBuilder log)
+    {
+        try
+        {
+            var items = RealizedTreeItems(mainWindow);
+            var idx = items.FindIndex(t => string.Equals(t.Name, WorkspacesNodeName, StringComparison.OrdinalIgnoreCase));
+            log.AppendLine($"tree rows={items.Count}, workspaces-node idx={(idx < 0 ? "ABSENT" : idx.ToString())}");
+            foreach (var t in items)
+            {
+                var r = t.BoundingRectangle;
+                log.AppendLine($"  '{t.Name}' x={r.X} y={r.Y}");
+            }
+        }
+        catch (Exception ex) { log.AppendLine("tree dump threw " + ex.GetType().Name); }
+    }
+
     /// <summary>
     /// Re-type the pane's Name field (focus-verified keyboard only): select-all, then plain
     /// ASCII typing. Throws when focus cannot be proven - the field is never typed blind.
