@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using FlaUI.Core;
@@ -44,6 +45,19 @@ public static class LoginFlow
         var connect = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect"))
                       ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
         if (connect == null) throw new InvalidOperationException("Login dialog has no connect button.");
+
+        // The login control disables Connect while it considers the input incomplete - a
+        // dropped password shows up as this, not as an error. Re-enter once before giving up.
+        if (!WaitUntilEnabled(connect, 3))
+        {
+            LogEntry($"connect disabled; re-entering password (loginWindow aid='{loginWindow.AutomationId}')");
+            Artifacts.Window(loginWindow, "login-filled-disabled");
+            FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
+            if (!WaitUntilEnabled(connect, 3))
+                throw new InvalidOperationException(
+                    "Connect stayed disabled after two password entries - the text never reached _passwordBox " +
+                    "(see login-entry-log.txt artifact).");
+        }
         connect.Patterns.Invoke.Pattern.Invoke();
     }
 
@@ -199,11 +213,11 @@ public static class LoginFlow
     }
 
     /// <summary>
-    /// Keyboard.Type lands on whatever owns the FOREGROUND window, and a plain Focus() can be
-    /// silently ignored while another app (e.g. a just-retired Management Client) still owns
-    /// the foreground - the login then proceeds with an empty password and Smart Client answers
-    /// "insufficient user rights". Verify the element actually holds focus before entering the
-    /// text, re-activating the window between attempts.
+    /// Keyboard input (both typed keys and Ctrl+V) is routed by Windows to the FOREGROUND
+    /// window, while UIA focus is a different fact - a plain Focus() can report success while
+    /// another app still owns the foreground, so the password lands nowhere (empty box, disabled
+    /// Connect, or a stale corrupted value). Verify BOTH that _passwordBox holds UIA focus and
+    /// that its window is the foreground window before entering text.
     /// </summary>
     private static void FocusAndType(ClientSession session, Window window, AutomationElement element, string text)
     {
@@ -211,27 +225,60 @@ public static class LoginFlow
         {
             try { window.Focus(); } catch { }
             try { element.Focus(); } catch { }
+            Thread.Sleep(150);
             try
             {
+                var hwnd = window.Properties.NativeWindowHandle.Value;
+                var foreground = GetForegroundWindow().ToInt64();
                 var focused = session.Automation.FocusedElement();
-                if (focused != null
-                    && string.Equals(focused.AutomationId, element.AutomationId, StringComparison.OrdinalIgnoreCase)
-                    && focused.Properties.NativeWindowHandle.Value == window.Properties.NativeWindowHandle.Value)
+                var focusOk = focused != null
+                              && string.Equals(focused.AutomationId, element.AutomationId, StringComparison.OrdinalIgnoreCase)
+                              && focused.Properties.NativeWindowHandle.Value == hwnd;
+                var fgOk = foreground == (hwnd & 0xFFFFFFFFL);
+                if (focusOk && fgOk)
                 {
                     EnterText(text);
                     return;
                 }
+                LogEntry($"focus attempt {attempt}: focusOk={focusOk} fgOk={fgOk} fg=0x{foreground:X} hwnd=0x{hwnd & 0xFFFFFFFFL:X}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LogEntry($"focus attempt {attempt} threw {ex.GetType().Name}: {ex.Message}");
+            }
             Thread.Sleep(250);
         }
 
-        // Focus never verified (some WPF builds report it oddly): mouse-click the box to force
-        // foreground + focus together, then enter the text anyway.
+        // Focus never verified: mouse-click the box (click forces foreground AND focus together),
+        // then enter the text anyway - the Connect-disabled check upstream catches a miss.
         element.Click();
         Thread.Sleep(150);
         EnterText(text);
+        LogEntry("entry via click-fallback (focus unverified)");
     }
+
+    private static bool WaitUntilEnabled(AutomationElement element, int seconds)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            try { if (element.IsEnabled) return true; } catch { }
+            Thread.Sleep(250);
+        }
+        try { return element.IsEnabled; } catch { return false; }
+    }
+
+    private static void LogEntry(string line)
+    {
+        try
+        {
+            File.AppendAllText(Artifacts.PathOf("login-entry-log.txt"),
+                DateTime.Now.ToString("HH:mm:ss") + " " + line + Environment.NewLine);
+        }
+        catch { }
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
 
     /// <summary>
     /// Enter text as clipboard paste (Ctrl+V) when possible: the VMS password carries characters
@@ -243,9 +290,11 @@ public static class LoginFlow
     {
         if (TryClipboardSetText(text))
         {
+            LogEntry("entry-via=paste (Ctrl+V)");
             Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
             return;
         }
+        LogEntry("entry-via=typed-keys (clipboard unavailable - password may corrupt)");
         Keyboard.Type(text);
     }
 
