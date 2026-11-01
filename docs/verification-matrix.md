@@ -38,6 +38,7 @@ is not evidence the plugin never ran.
 | HTTPS targets: target TLS verdict, per-target override, loopback leaf mint (ADR-0002/0003) | #56 | `ProxyFetchTlsDecisionTests` (https targets get full chain validation on the Event Server; an untrusted chain refuses with `TlsValidation` unless the allowlist entry carries the per-target accept-untrusted override — never a global bypass), `ProxyPolicyTests` (target-line grammar: `https://host:port accept-untrusted` in either token order; unknown tokens or a second origin reject the whole entry), `ProxyServerAllowlistTests` (the `acceptUntrusted` flag round-trips with its entry through the workspace JSON), `ProxyLeafContractTests` (LeafRequest carries ONLY the client-generated SPKI; the allowlist union is the minting gate — `NotAllowed` fail-closed like the fetcher, `BadRequest` for malformed origin/key, `NoAuthority` when the deployment CA cannot load/create; minted leaf chains to the deployment CA with host SAN + serverAuth EKU; single-frame correlation with deadline), `ProxyLoopbackTlsTests` (leaves cached per host:port, one mint exchange per origin; refused mint fails the tunnel with the server's code; seeded `AcceptTunnelAsync` + real Schannel server handshake on a channel-minted leaf), `ProxyLoopbackClientKeyTests` (exported SPKI is public-only; `AttachLeaf` yields a private key Schannel accepts; failed attach keeps the key usable), `ProxyFetchReplyGuardTests` (leaf answers unicasted to the requester endpoint, never broadcast), `EventServerLoadGuardTests` (leaf message ids declared) | See SC-3 below: both-machine drop plus the one-time elevated CA import into `LocalMachine\Root`; a self-signed https target fails closed WITHOUT the override (proxy error page names the exact per-target switch) and the full login flow completes WITH it |
 | WebSocket CONNECT tunnels through the proxy (raw bytes both directions, outside the fetch chunking path) | #57 | `ProxyForwardPolicyTests` (absolute ws:// upgrade to an allowlisted http origin tunnels; CONNECT to an http-twin-allowlisted origin accepted as the ws-tunnel posture live Chromium actually uses — https entries keep precedence for the #56 TLS posture; wss:// and in-tunnel upgrades refused 501, never fetched; missing Sec-WebSocket-Key / wrong version 400; h2c upgrades stay ordinary forwards), `ProxyWebSocketHandshakeTests` (upgrade recognized only for GET+Connection upgrade token+Upgrade websocket; rebuilt origin-form handshake: uri-derived Host, browser's Sec-WebSocket-Key byte-identical, explicit Connection/Upgrade pair, header-injection gate; 101-only admission; head terminator), `ProxyTunnelContractTests` (six directional ids; one JSON-string payload shape for the whole protocol; Data/Close kinds; limits), `ProxyForwardConnectionTests` (upgrade head pipelined bytes ride into the tunnel first; the target's verbatim 101 written to the browser before the first pump byte; both pumps; either side ending ends both; in-tunnel wss refused 501 through the tunnel stream), `ProxyTunnelServerTests` (in-process ws target: 101 admits and both pumps echo; non-101 refused HandshakeRefused; dead target Unreachable; ES cap rejects; duplicate id rejected; client bytes reach the target in order through the serialized writer; idle reclaim closes and notifies; CloseAll), `ProxyTunnelCorrelationTests` (client registry: ordered pump queue, open deadline completes as failure, half-open + idle reclaim return ids for close notification, orphan open-ack closes its handle, teardown closes all), `EventServerLoadGuardTests` (tunnel ids declared in PluginDefinedMessageIds) | See SC-4 below: the ws-echo page in a proxied Smart Client browser shows its token echoed (client-side proof) while the ws server journals WS-HANDSHAKE + WS-ECHO (server-side proof the upgrade arrived as a tunnel, not a fetch) |
 | Explicit proxy error pages in the view, no direct fallback (#58) | #58 | `ProxyForwardConnectionTests` (each failure kind renders its own page with the failing side named: `ServerUnavailable` → 503 page naming the VMS proxy component and forbidding direct fallback; server-side `NotAllowed` → 403 allowlist posture distinct from target failure; `Unreachable` → 502 "VMS server could not reach the target"; `Timeout` frame → 504 target-leg; `TooLarge` → page naming the size cap), `ProxyFetchCorrelationTests` (deadline silence = `ServerUnavailable`, never the target-leg `Timeout` code; `Fail` completes the exchange with the channel reason) | See SC-5 below: an off-allowlist start URL renders the 403 page as the workspace's first document, and a stopped Event Server turns the reloaded proxied page into the 503 component page — then a fresh client session recovers when the service is back |
+| Server-side deployment + rollout docs for proxied connections (#59) | #59 | `scripts/deploy-event-server-plugin.ps1` refuses a drop whose `plugin.def` lacks the `Service` environment before touching the server; stop-wait/stop, copy, per-file SHA-256 verification against the source, restart-wait, and the two rollout follow-ups (client restart, fetcher-ready marker) are printed by the script itself | See DP-1 below: the script validated live end-to-end against the Event Server machine (11 files hash-identical, `Proxy fetcher ready` after restart); README/log-path/version claims checked against the lab |
 
 ## Manual host checks
 
@@ -382,6 +383,38 @@ the view (title `Web Content proxy: <status>`) whose body names which side faile
    runs with `WEBCONTENT_ES_STOP=1` (row goes red without the flag, never silently skips);
    the finally block always restarts the service. The start-URL row restores the previous
    home address through the guarded Management Client path.
+
+### DP-1 Event Server deployment script and rollout records (#59)
+
+The proxied feature is both-machine; the Event Server side has a deployment the installer
+cannot shortcut (plugins load only at service start). `scripts/deploy-event-server-plugin.ps1`
+is the remote, repeatable form of the documented procedure: local pre-check that the drop
+carries a `plugin.def` declaring the `Service` environment (an old def copies fine and then
+silently never loads - refused up front), WinRM with explicit credentials, stop
+`MilestoneEventServerService` and WAIT for `Stopped` (the stop is slow and the dll is locked
+until then), copy into the installer's `INSTALLFOLDER`, verify EVERY copied file by SHA-256
+against the local source (never by timestamp - the copy preserves it), start and wait for
+`Running`, then print the rollout follow-ups: fetcher-ready marker check, mandatory Smart
+Client restart after the ES restart, and the one-time CA provisioning pointer.
+
+1. **Record (script validated live end-to-end) - PASSED 2026-11-01** against
+   `vms.joshooaj.com`: drop built from HEAD (post-#58), `WebContent.dll` SHA-256
+   `84623C10…697AA41`, all 11 drop files hash-identical in
+   `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin`, service back to `Running`,
+   and the ES `logs\MIP.log` gained `Proxy fetcher ready (concurrency=3,
+   request id=WebContent.Proxy.FetchRequest)` at startup. ES machine product: **XProtect 2024
+   R2** (event server binaries file-version 24.2a) - the README's "verified against" line.
+   - Live defect the run caught and fixed: the script's stop-wait loop hung while the service
+     was actually stopped - WinRM deserializes `ServiceControllerStatus` as its underlying
+     **Int32**, so the remote `$state -eq 'Stopped'` comparison never matched; the poll now
+     calls `.ToString()` remotely. The script's log-location note was also corrected to the
+     observed layout (`%ProgramData%\Milestone\XProtect Event Server\logs\MIP.log` plus
+     `logs\MIPLogs\` rolled archives).
+2. **Fresh-both-machine smoke row (SC-1 procedure against a fresh drop) - pending**: the
+   Smart Client machine's MIP-root copy needs one interactive UAC consent on that machine;
+   the unattended `Start-Process -Verb runas` was auto-cancelled ("The operation was canceled
+   by the user", 2026-11-01 ~04:00). The Event Server side of the same drop is already live
+   (record 1).
 
 ## Known high-risk regressions → pinned by
 
