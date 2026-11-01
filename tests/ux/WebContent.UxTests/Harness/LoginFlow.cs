@@ -16,28 +16,26 @@ namespace WebContent.UxTests.Harness;
 public static class LoginFlow
 {
     /// <summary>
-    /// Waits for the login dialog. Returns NULL when the client never shows (or already closed)
-    /// it because Auto-login connected on its own - the main window is up instead. Login() and
-    /// the WaitFor*Main helpers handle that path.
+    /// Waits for the login dialog. Returns NULL only when the Smart Client main window (whose
+    /// _mainApplicationWindow AutomationId no other window carries) is up while NO window of the
+    /// process wears login controls - i.e. Auto-login connected on its own. That shortcut is
+    /// deliberately NOT extended to the Management Client: MC's main shell window exists from
+    /// launch, BEFORE login (login is a separate window), so its absence/presence proves nothing.
     /// </summary>
     public static Window WaitForLoginWindow(ClientSession session, int timeoutSeconds = 60)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
         while (DateTime.UtcNow < deadline)
         {
-            // "Login is over" must be proven positively (session window WITHOUT login controls),
-            // not inferred from "no _btnConnect/_connectButton found": the Management Client
-            // login window carries the MAIN window's title ("Milestone XProtect Management
-            // Client <ver>"), so a title-based session match can be the login dialog itself.
-            if (HasMainSessionWindow(session))
+            var window = session.FindWindow(HasLoginControls);
+            if (window != null) return window;
+            if (session.Windows().Any(w =>
+                    string.Equals(w.AutomationId, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase)
+                    && !HasLoginControls(w)))
             {
-                LogEntry("connected without a login dialog (auto-login); no entry needed");
+                LogEntry("Smart Client main window up with no login dialog anywhere (auto-login); no entry needed");
                 return null;
             }
-            var window = session.FindWindow(
-                w => w.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect")) != null ||
-                     w.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton")) != null);
-            if (window != null) return window;
             Thread.Sleep(300);
         }
         throw new TimeoutException($"Timed out waiting for login dialog (process {session.Process.ProcessName}, pid {session.Process.Id}).");
@@ -223,25 +221,36 @@ public static class LoginFlow
     }
 
     /// <summary>
-    /// True when the client's own SESSION window is up (Smart Client or Management Client) -
-    /// positively required to be free of login controls, because the Management Client login
-    /// window shares the main window's title and would otherwise masquerade as a session.
+    /// True when the process shows a session window AND no login dialog anywhere:
+    /// Smart Client's _mainApplicationWindow or a >800px Management Client shell, with no
+    /// window carrying _btnConnect/_connectButton. (MC's login window is separate from its
+    /// main shell, so "no dialog" must be checked process-wide, not window-by-window.)
     /// </summary>
-    private static bool HasMainSessionWindow(ClientSession session) =>
-        session.Windows().ToList().Any(IsSessionWindowWithoutLogin);
+    private static bool HasMainSessionWindow(ClientSession session)
+    {
+        var windows = session.Windows().ToList();
+        if (windows.Any(HasLoginControls)) return false;
+        return windows.Any(w =>
+        {
+            try
+            {
+                if (string.Equals(w.AutomationId, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase)) return true;
+                var name = w.Name ?? string.Empty;
+                var cls = w.ClassName ?? string.Empty;
+                return name.Contains("Management Client", StringComparison.OrdinalIgnoreCase)
+                       && cls.StartsWith("WindowsForms", StringComparison.Ordinal)
+                       && w.BoundingRectangle.Width > 800;
+            }
+            catch { return false; }
+        });
+    }
 
-    private static bool IsSessionWindowWithoutLogin(Window w)
+    private static bool HasLoginControls(Window w)
     {
         try
         {
-            if (w.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect")) != null) return false;
-            if (w.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton")) != null) return false;
-            if (string.Equals(w.AutomationId, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase)) return true;
-            var name = w.Name ?? string.Empty;
-            var cls = w.ClassName ?? string.Empty;
-            return name.Contains("Management Client", StringComparison.OrdinalIgnoreCase)
-                   && cls.StartsWith("WindowsForms", StringComparison.Ordinal)
-                   && w.BoundingRectangle.Width > 800;
+            return w.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect")) != null
+                   || w.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton")) != null;
         }
         catch { return false; }
     }
