@@ -384,6 +384,19 @@ the view (title `Web Content proxy: <status>`) whose body names which side faile
    the finally block always restarts the service. The start-URL row restores the previous
    home address through the guarded Management Client path.
 
+    Deployment prerequisite (2026-11-01 loop): the rows need the Smart Client machine's MIP root
+    at the same drop the Event Server runs — the 503 `ServerUnavailable` page is #58 *client*
+    code, and BEAST is still on the #57 drop (`49E4F8C7…A6EEE3`). The ES drop
+    (`84623C10…697AA41`, DP-1 record 1) was staged byte-identically via `Copy-Item
+    -FromSession` under `.cache\es-drop-84623C10\`, so the SC copy only needs the one elevated
+    consent already handed off in DP-1 record 2. Elevation attempts 2026-11-01 ~04:15/~04:25
+    (AGENTS.md `Start-Process -Verb runas`, no `-Wait`): the RDP session is connected, so unlike
+    the DP-1 attempts (auto-cancelled) the consent prompt stayed PENDING until the idle timeout
+    cancelled it — nobody was at the desktop. The unattended loop re-attempts the elevated copy
+    each wake; once the deployed `WebContent.dll` hashes to `84623C10…697AA41`, run the rows:
+    `dotnet test tests/ux/WebContent.UxTests --filter "FullyQualifiedName~ScProxyErrorProbeTests"`
+    plus `$env:WEBCONTENT_ES_STOP='1'` for the outage row.
+
 ### DP-1 Event Server deployment script and rollout records (#59)
 
 The proxied feature is both-machine; the Event Server side has a deployment the installer
