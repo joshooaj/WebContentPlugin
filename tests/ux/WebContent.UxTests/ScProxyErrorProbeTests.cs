@@ -31,6 +31,14 @@ public class ScProxyErrorProbeTests
     /// </summary>
     private const string OffAllowlistHome = "http://neverssl.com/";
 
+    /// <summary>
+    /// Split live-host run (SC-5): the Management Client phase and the Smart Client view may run on
+    /// different boxes against the same VMS, because the workspace state lives on the server. With this
+    /// control set the view machine trusts the state the other box prepared and only drives the browser;
+    /// whoever sets it owns restoring the workspace home address afterwards.
+    /// </summary>
+    private static bool SkipMcProvisioning => Environment.GetEnvironmentVariable("UX_SKIP_MC_PROVISIONING") == "1";
+
     private readonly ITestOutputHelper _output;
 
     public ScProxyErrorProbeTests(ITestOutputHelper output) => _output = output;
@@ -51,8 +59,16 @@ public class ScProxyErrorProbeTests
         ClientSession sc = null;
         try
         {
-            ProxyTargetProvisioning.Ensure(config, AllowlistEntry, log);
-            previousHome = WorkspaceHomeAddress.Ensure(config, OffAllowlistHome, log);
+            if (SkipMcProvisioning)
+            {
+                log.AppendLine("CONTROL: UX_SKIP_MC_PROVISIONING=1 - the workspace allowlist entry and the off-allowlist home " +
+                               $"address were applied from another box against the same VMS ({config.VmsAddress}); this run only drives the view.");
+            }
+            else
+            {
+                ProxyTargetProvisioning.Ensure(config, AllowlistEntry, log);
+                previousHome = WorkspaceHomeAddress.Ensure(config, OffAllowlistHome, log);
+            }
 
             CdpConnector.CleanStalePortFiles(config.WebView2DataRoot);
             ProcessKiller.KillClients("Client");
@@ -89,11 +105,12 @@ public class ScProxyErrorProbeTests
         catch (Exception ex)
         {
             failure = $"{ex.GetType().Name}: {ex.Message}";
-            log.AppendLine($"probe failed: {failure}");
+            log.AppendLine($"probe failed: {failure}{Environment.NewLine}{ex}");
         }
         finally
         {
             ProcessKiller.KillClients("Client");
+            ProcessKiller.KillClients("VideoOS.Administration");
             ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
             sc?.Dispose();
             if (previousHome != null)
@@ -142,7 +159,10 @@ public class ScProxyErrorProbeTests
         var serviceStopped = false;
         try
         {
-            ProxyTargetProvisioning.Ensure(config, AllowlistEntry, log);
+            if (SkipMcProvisioning)
+                log.AppendLine($"CONTROL: UX_SKIP_MC_PROVISIONING=1 - the '{AllowlistEntry}' allowlist entry was applied from another box against {config.VmsAddress}.");
+            else
+                ProxyTargetProvisioning.Ensure(config, AllowlistEntry, log);
 
             CdpConnector.CleanStalePortFiles(config.WebView2DataRoot);
             ProcessKiller.KillClients("Client");
@@ -221,7 +241,7 @@ public class ScProxyErrorProbeTests
         catch (Exception ex)
         {
             failure = $"{ex.GetType().Name}: {ex.Message}";
-            log.AppendLine($"probe failed: {failure}");
+            log.AppendLine($"probe failed: {failure}{Environment.NewLine}{ex}");
         }
         finally
         {
@@ -239,6 +259,7 @@ public class ScProxyErrorProbeTests
                 log.AppendLine($"!!! Event Server START FAILED - manual recovery required on {config.VmsAddress}: {ex.Message}");
             }
             ProcessKiller.KillClients("Client");
+            ProcessKiller.KillClients("VideoOS.Administration");
             ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
             sc?.Dispose();
             Artifacts.WriteText("sc-error-probe-es-outage-results.txt", log.ToString());

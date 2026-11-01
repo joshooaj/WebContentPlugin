@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -587,12 +588,80 @@ public static class ManagementClientUi
     }
 
     /// <summary>
+    /// Raises the Management Client window over the rest of the desktop. Every tree route in this
+    /// harness is mouse input at absolute screen points (the tree ignores keyboard scrolling and its
+    /// selection state is often unreadable), so a click lands on whatever window overlaps the tree -
+    /// and a login performed through the Value pattern never raises the window by itself.
+    /// </summary>
+    public static void BringToFront(Window mainWindow)
+    {
+        try
+        {
+            // Windows refuses SetForegroundWindow for a background process unless it just received
+            // input; automation is exactly that case. Two routes, because a Management Client that
+            // is not the topmost window silently swallows every mouse route in this harness: the
+            // click lands on whatever overlaps the tree.
+            //   1. attach to the foreground thread and set the foreground window, and
+            //   2. make the window topmost, which is enough for absolute mouse input regardless of
+            //      which window the shell considers foreground.
+            var hwnd = new IntPtr(mainWindow.Properties.NativeWindowHandle.Value);
+            if (hwnd == IntPtr.Zero) return;
+            ShowWindow(hwnd, SW_MAXIMIZE);
+
+            var fgThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+            var ownThread = GetCurrentThreadId();
+            if (fgThread != 0 && fgThread != ownThread)
+            {
+                AttachThreadInput(ownThread, fgThread, true);
+                SetForegroundWindow(hwnd);
+                AttachThreadInput(ownThread, fgThread, false);
+            }
+            else
+            {
+                SetForegroundWindow(hwnd);
+            }
+            SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_TOPMOST);
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            Artifacts.WriteText("mc-front.txt", $"hwnd={hwnd:x} foregroundNow={ForegroundDebugInfo()} want pid {mainWindow.Properties.ProcessId.Value}");
+        }
+        catch { }
+        Thread.Sleep(400);
+    }
+
+    public static string ForegroundDebugInfo()
+    {
+        try
+        {
+            var fg = GetForegroundWindow();
+            GetWindowThreadProcessId(fg, out var pid);
+            return $"hwnd={fg:x} pid={pid}";
+        }
+        catch (Exception ex) { return "ERR:" + ex.GetType().Name; }
+    }
+
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_TOPMOST = 0x0008;
+    private const uint SWP_NOMOVE = 0x0002, SWP_NOSIZE = 0x0001;
+    private const int SW_MAXIMIZE = 3;
+
+    /// <summary>
     /// Polls until the navigation tree exists and its first TreeItem (the Home root) is realized.
     /// MC realizes the tree some time AFTER the main window appears, so this replaces fixed
     /// startup sleeps: it proceeds as soon as CollapseTreeToRoot can actually do work.
     /// </summary>
     public static bool WaitForTreeReady(Window mainWindow, int timeoutSeconds = 30)
     {
+        BringToFront(mainWindow);
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
         while (DateTime.UtcNow < deadline)
         {

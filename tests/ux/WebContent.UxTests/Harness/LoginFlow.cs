@@ -70,10 +70,13 @@ public static class LoginFlow
             }
         }
 
+        // Focus is a hint, not a contract: on a locked/idle desktop UIA SetFocus throws
+        // "Operation is not valid due to the current state of the object" - never let it
+        // abort the login flow when SetValueOrType carries its own entry routes.
         var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
         if (serverBox != null && !string.IsNullOrWhiteSpace(config.VmsAddress))
         {
-            serverBox.Focus();
+            try { serverBox.Focus(); } catch { }
             SetValueOrType(serverBox, config.VmsAddress);
         }
 
@@ -81,7 +84,7 @@ public static class LoginFlow
         var userBox = userCombo?.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
         if (userBox != null)
         {
-            userBox.Focus();
+            try { userBox.Focus(); } catch { }
             SetValueOrType(userBox, config.VmsUsername);
         }
 
@@ -120,7 +123,9 @@ public static class LoginFlow
         connect.Patterns.Invoke.Pattern.Invoke();
         }
         catch (Exception ex) when (ex is InvalidOperationException
-                                   || ex is FlaUI.Core.Exceptions.ElementNotAvailableException)
+                                   || ex is FlaUI.Core.Exceptions.ElementNotAvailableException
+                                   || ex is FlaUI.Core.Exceptions.NoClickablePointException
+                                   || ex is FlaUI.Core.Exceptions.ElementNotEnabledException)
         {
             // Stale mid-entry: the dialog closed because the client's own auto-login connected.
             if (HasMainSessionWindow(session) || WaitForConnected(session, 15))
@@ -367,6 +372,20 @@ public static class LoginFlow
     /// </summary>
     private static void FocusAndType(ClientSession session, Window window, AutomationElement element, string text)
     {
+        // The Value pattern needs neither UIA focus nor the foreground window, so it is the
+        // cheapest route; XProtect's login edits answer it even while the desktop has no focus
+        // to give. Keyboard entry is the fallback because a PasswordBox can refuse SetValue.
+        try
+        {
+            if (element.Patterns.Value.IsSupported)
+            {
+                element.Patterns.Value.Pattern.SetValue(text);
+                LogEntry("entry via Value pattern");
+                return;
+            }
+        }
+        catch (Exception ex) { LogEntry($"Value pattern entry threw {ex.GetType().Name}: {ex.Message}"); }
+
         for (var attempt = 0; attempt < 6; attempt++)
         {
             try { window.Focus(); } catch { }
@@ -384,8 +403,9 @@ public static class LoginFlow
                 var focused = session.Automation.FocusedElement();
                 int focusedPid = -1;
                 try { focusedPid = focused == null ? -1 : focused.Properties.ProcessId.Value; } catch { }
+                var focusedAid = SafeAutomationId(focused);
                 var focusOk = focused != null
-                              && string.Equals(focused.AutomationId, element.AutomationId, StringComparison.OrdinalIgnoreCase)
+                              && string.Equals(focusedAid, SafeAutomationId(element), StringComparison.OrdinalIgnoreCase)
                               && focusedPid == pid;
                 var fgOk = fgPid == pid;
                 if (focusOk && fgOk)
@@ -393,7 +413,7 @@ public static class LoginFlow
                     EnterText(text);
                     return;
                 }
-                LogEntry($"focus attempt {attempt}: focusOk={focusOk} (focusedAid='{focused?.AutomationId}' focusedPid={focusedPid}) fgOk={fgOk} (fgPid={fgPid} want={pid})");
+                LogEntry($"focus attempt {attempt}: focusOk={focusOk} (focusedAid='{focusedAid}' focusedPid={focusedPid}) fgOk={fgOk} (fgPid={fgPid} want={pid})");
             }
             catch (Exception ex)
             {
@@ -403,11 +423,26 @@ public static class LoginFlow
         }
 
         // Focus never verified: mouse-click the box (click forces foreground AND focus together),
-        // then enter the text anyway - the Connect-disabled check upstream catches a miss.
-        element.Click();
+        // then enter the text anyway - the Connect-disabled check upstream catches a miss. A box
+        // that is off-screen has no clickable point; then keyboard input to the foreground window
+        // is all that is left and the Connect guard decides whether it landed.
+        try { element.Click(); }
+        catch (Exception ex) { LogEntry($"click-fallback threw {ex.GetType().Name}: {ex.Message} (rect={SafeRect(element)})"); }
         Thread.Sleep(150);
         EnterText(text);
         LogEntry("entry via click-fallback (focus unverified)");
+    }
+
+    /// <summary>AutomationId is not implemented by every provider (a terminal or shell window can
+    /// hold focus while this runs), and the property read throws rather than returning null.</summary>
+    private static string SafeAutomationId(AutomationElement element)
+    {
+        try { return element?.AutomationId; } catch { return null; }
+    }
+
+    private static string SafeRect(AutomationElement element)
+    {
+        try { return element == null ? "<null>" : element.BoundingRectangle.ToString(); } catch { return "<unreadable>"; }
     }
 
     private static bool WaitUntilEnabled(AutomationElement element, int seconds)
