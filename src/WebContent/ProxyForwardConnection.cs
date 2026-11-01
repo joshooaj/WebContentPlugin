@@ -142,6 +142,66 @@ namespace WebContent
 
                     return;
 
+                case ProxyForwardDisposition.ConnectWebSocketTunnel:
+                    if (openTunnel == null)
+                    {
+                        var connectWiring = $"The CONNECT to '{request.RawTarget}' cannot be tunnelled by this listener; ws:// targets ride CONNECT-style byte tunnels the VMS server opens.";
+                        log(connectWiring);
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", connectWiring));
+                        return;
+                    }
+
+                    // Live repro (#57): Chromium proxies plain ws:// as CONNECT plus a PLAINTEXT
+                    // websocket handshake inside the tunnel. The 200 must go out before the
+                    // browser writes that handshake, and inside a CONNECT tunnel no HTTP status
+                    // can follow it - so a tunnel whose first bytes are not a valid ws upgrade
+                    // (wss ClientHello, junk) is simply closed, before any Event Server socket
+                    // or target dial exists.
+                    log($"Proxy CONNECT to '{request.RawTarget}' allowlisted as an http twin; expecting a plaintext ws:// handshake in the tunnel.");
+                    await WriteAsync(output, Encoding.ASCII.GetBytes("HTTP/1.1 200 Connection established\r\n\r\n"));
+
+                    var inner = await ReadRequestHeadAsync(input, head.Leftover);
+                    if (inner == null)
+                    {
+                        log($"The CONNECT tunnel to '{request.RawTarget}' produced no request head; the tunnel is closed.");
+                        return;
+                    }
+
+                    var wsTwinOrigin = new UriBuilder(request.Uri) { Scheme = Uri.UriSchemeHttp }.Uri;
+                    ProxyForwardedRequest upgrade;
+                    string upgradeReason;
+                    if (!ProxyForwardCodec.TryParseRequestHead(inner.Text, wsTwinOrigin, out upgrade, out upgradeReason)
+                        || !ProxyWebSocketHandshake.IsWebSocketUpgrade(upgrade)
+                        || !ProxyWebSocketHandshake.HasValidClientHandshake(upgrade, out upgradeReason))
+                    {
+                        log($"The CONNECT tunnel to '{request.RawTarget}' did not carry a valid plain ws:// handshake ({upgradeReason}); the tunnel is closed.");
+                        return;
+                    }
+
+                    ProxyTunnelOpenOutcome connectOutcome;
+                    try
+                    {
+                        connectOutcome = await openTunnel(upgrade);
+                    }
+                    catch (Exception exception)
+                    {
+                        log($"Proxy websocket CONNECT tunnel open for '{request.RawTarget}' threw: {exception.Message}");
+                        return;
+                    }
+
+                    if (connectOutcome == null || !connectOutcome.Success)
+                    {
+                        var connectFailure = connectOutcome == null
+                            ? "The Event Server tunnel opener returned no outcome."
+                            : connectOutcome.ErrorMessage;
+                        log($"Proxy websocket CONNECT tunnel to '{request.RawTarget}' refused (code={connectOutcome?.ErrorCode}): {connectFailure}");
+                        return;
+                    }
+
+                    log($"Proxy websocket CONNECT tunnel to '{request.RawTarget}' established; pumping bytes in both directions.");
+                    await ServeWebSocketTunnelAsync(inner.Leftover, input, output, connectOutcome, log);
+                    return;
+
                 case ProxyForwardDisposition.ConnectRefused:
                     log(rejectReason);
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", rejectReason + " The workspace proxy supports http(s) allowlisted targets fetched by the VMS server; https pages need a CONNECT tunnel this proxy does not provide."));

@@ -498,6 +498,101 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public async Task TunnelsConnectCarriedWebSocketHandshakeAndRelaysBothAnswersVerbatim()
+        {
+            // Live repro (#57): Chromium proxies plain ws:// as CONNECT + a PLAINTEXT upgrade
+            // inside the tunnel, origin-form against the CONNECT authority. The listener answers
+            // the CONNECT, verifies the inner handshake, opens the byte tunnel, then relays the
+            // target's 101 as the next bytes on the raw socket.
+            ProxyForwardedRequest opened = null;
+            var handle = new FakeTunnelHandle();
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+            {
+                opened = request;
+                return Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = true,
+                    Handle = handle,
+                    HandshakeBytes = Encoding.UTF8.GetBytes(
+                        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s7AQWlie1Rh0h9M7N8QV3YQ==\r\n\r\n"),
+                });
+            };
+
+            var request =
+                "CONNECT 10.0.0.5:8080 HTTP/1.1\r\nProxy-Connection: keep-alive\r\n\r\n" +
+                "GET /ws/live HTTP/1.1\r\nHost: 10.0.0.5:8080\r\n" +
+                "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "\r\n" +
+                "\x81\x05hello"; // the first websocket frame rides the same segment
+
+            var response = await HandleWebSocket(
+                Encoding.GetEncoding("ISO-8859-1").GetBytes(request), openTunnel);
+
+            // The CONNECT is accepted first (the browser sends the handshake only after the 200)...
+            Assert.StartsWith("HTTP/1.1 200 Connection established\r\n\r\n", response);
+            // ...then the target's 101 rides the same raw stream verbatim.
+            Assert.Contains(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s7AQWlie1Rh0h9M7N8QV3YQ==\r\n\r\n",
+                response);
+
+            // The inner origin-form upgrade resolved against the tunnel's http twin origin.
+            Assert.Equal("http://10.0.0.5:8080/ws/live", opened.Uri.AbsoluteUri);
+
+            // And the frame bytes that followed the inner head crossed into the tunnel.
+            Assert.Single(handle.Sent);
+            Assert.Equal(new byte[] { 0x81, 0x05, (byte)'h', (byte)'e', (byte)'l', (byte)'l', (byte)'o' }, handle.Sent[0]);
+        }
+
+        [Fact]
+        public async Task ClosesConnectWebSocketTunnelWhenTheFirstTunnelBytesAreNotAWebsocketHandshake()
+        {
+            // The http-twin CONNECT posture admits a WEBSOCKET handshake and nothing else: a
+            // plain in-tunnel request (or a wss ClientHello) gets the tunnel closed with no
+            // Event Server socket opened - never blind-tunnelled, never fetched.
+            var openCalled = 0;
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+            {
+                openCalled++;
+                return Task.FromResult<ProxyTunnelOpenOutcome>(null);
+            };
+
+            var request =
+                "CONNECT 10.0.0.5:8080 HTTP/1.1\r\n\r\n" +
+                "GET /quiet HTTP/1.1\r\nHost: 10.0.0.5:8080\r\n\r\n";
+
+            var response = await HandleWebSocket(Encoding.UTF8.GetBytes(request), openTunnel);
+
+            Assert.Equal("HTTP/1.1 200 Connection established\r\n\r\n", response);
+            Assert.Equal(0, openCalled);
+        }
+
+        [Fact]
+        public async Task ClosesConnectWebSocketTunnelQuietlyWhenTheEventServerOpenFails()
+        {
+            // Inside a CONNECT tunnel no HTTP status can follow the 200: a failed tunnel open
+            // ends the connection (the browser's websocket fails with onerror), it never writes
+            // a plaintext error page into the tunnel stream.
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel = request =>
+                Task.FromResult(new ProxyTunnelOpenOutcome
+                {
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Unreachable,
+                    ErrorMessage = "the target refused the tunnel handshake",
+                });
+
+            var request =
+                "CONNECT 10.0.0.5:8080 HTTP/1.1\r\n\r\n" +
+                "GET /ws/live HTTP/1.1\r\nHost: 10.0.0.5:8080\r\n" +
+                "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: kEy==\r\n\r\n";
+
+            var response = await HandleWebSocket(Encoding.UTF8.GetBytes(request), openTunnel);
+
+            Assert.Equal("HTTP/1.1 200 Connection established\r\n\r\n", response);
+        }
+
+        [Fact]
         public async Task PumpsTargetBytesBackToTheBrowserUntilTheHandleCloses()
         {
             var handle = new FakeTunnelHandle();

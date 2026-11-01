@@ -34,6 +34,15 @@ namespace WebContent
         WebSocketTunnel,
 
         /// <summary>
+        /// CONNECT to an origin whose HTTP twin is allowlisted (#57): live Chromium proxies plain
+        /// ws:// as CONNECT + a plaintext websocket handshake inside the tunnel (live repro -
+        /// not the absolute GET ws:// form RFC 6455 describes). The listener answers the CONNECT,
+        /// then admits the tunnel ONLY when its first bytes are a valid ws:// upgrade head; the
+        /// tunnel is closed before any Event Server socket opens for anything else.
+        /// </summary>
+        ConnectWebSocketTunnel,
+
+        /// <summary>
         /// A websocket upgrade this proxy cannot tunnel (wss:// inside a terminated TLS tunnel —
         /// out of #57 scope) — refused with an explicit status, never smuggled through a forward.
         /// </summary>
@@ -108,8 +117,20 @@ namespace WebContent
                 // origin posture as a plain request, and the browser is never let go direct.
                 if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri))
                 {
-                    rejectReason = $"The CONNECT target '{ProxyPolicy.CanonicalOrigin(request.Uri)}' is not an allowlisted https proxy origin; the tunnel is refused and the browser is never taken direct.";
-                    return ProxyForwardDisposition.OriginNotAllowed;
+                    // #57 (live repro): plain ws:// reaches the browser proxy as CONNECT too, so
+                    // an origin allowlisted as its http twin gets the tunnel accepted - but only
+                    // for a plaintext ws handshake, which the connection flow validates before
+                    // any target socket is opened. The allowlist entry's scheme IS the posture:
+                    // https entries terminate as MITM TLS, http entries may only ride a verified
+                    // ws:// byte tunnel.
+                    var httpTwin = new UriBuilder(request.Uri) { Scheme = Uri.UriSchemeHttp }.Uri;
+                    if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, httpTwin))
+                    {
+                        rejectReason = $"The CONNECT target '{ProxyPolicy.CanonicalOrigin(request.Uri)}' is not an allowlisted https proxy origin (nor an http twin for a ws:// CONNECT tunnel); the tunnel is refused and the browser is never taken direct.";
+                        return ProxyForwardDisposition.OriginNotAllowed;
+                    }
+
+                    return ProxyForwardDisposition.ConnectWebSocketTunnel;
                 }
 
                 return ProxyForwardDisposition.ConnectTerminate;

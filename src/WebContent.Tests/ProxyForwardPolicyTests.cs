@@ -123,15 +123,33 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void RefusesConnectTunnelsToHttpOrigins()
+        public void ConnectToHttpTwinOriginIsAcceptedForAWebsocketHandshakeOnly()
         {
-            // CONNECT speaks a TLS tunnel; an http allowlist entry must not open one for it.
+            // #57 live repro: Chromium proxies plain ws:// as CONNECT + a plaintext websocket
+            // handshake inside the tunnel, so an http allowlist entry DOES open a CONNECT tunnel -
+            // but one the connection flow validates before any target socket opens (a non-ws
+            // first-tunnel-bytes test lives in ProxyForwardConnectionTests).
             var head = "CONNECT 10.0.0.5:8080 HTTP/1.1\r\n\r\n";
 
-            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out _, out var rejectReason);
+            var decision = ProxyForwardPolicy.Decide(Allowlist, head, out var request, out var rejectReason);
 
-            Assert.Equal(ProxyForwardDisposition.OriginNotAllowed, decision);
-            Assert.Contains("10.0.0.5", rejectReason);
+            Assert.Equal(ProxyForwardDisposition.ConnectWebSocketTunnel, decision);
+            Assert.Equal("https://10.0.0.5:8080", ProxyPolicy.CanonicalOrigin(request.Uri));
+            Assert.Null(rejectReason);
+        }
+
+        [Fact]
+        public void AnHttpsEntryWinsTheConnectOverItsHttpTwin()
+        {
+            // The allowlist entry's scheme is the posture: an origin listed as https gets the
+            // #56 TLS-terminating tunnel, never the ws:// byte-tunnel posture, even though the
+            // http twin would technically also match.
+            var head = "CONNECT 10.0.0.5:8080 HTTP/1.1\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(
+                new[] { "http://10.0.0.5:8080", "https://10.0.0.5:8080" }, head, out _, out _);
+
+            Assert.Equal(ProxyForwardDisposition.ConnectTerminate, decision);
         }
 
         [Theory]
