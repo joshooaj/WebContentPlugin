@@ -191,6 +191,10 @@ device or any http page — https is refused by design, see below).
    body chars); the blocked control rendered identically while the same process's direct GET
    failed with `actively refused it` — server-origin proof satisfied. Rows 4–6 are pinned by the
    unit table (403/405/502 policy table, listener teardown) rather than a live probe run.
+   Regression re-pass on the #56 drop `683FA932…A47A9C58` (run `20261031-235301`): same title
+   and body size — and the fetch probe now provisions its own allowlist entry through the
+   shared Management Client phase (a recreated workspace item proved assuming the entry wrong:
+   the probe went red with 403 until it self-provisioned).
 
 ### SC-2 Vendor login flow through the proxy (#55)
 
@@ -291,6 +295,13 @@ tunnel then fails closed with a logged mint refusal), plus the one-time machine 
    `ProxyForwardConnectionTests.WritesInnerTunnelResponsesIntoTheTunnelNotOntoTheRawSocket`).
 
    Artifacts: `%TEMP%\webcontent-sc-proxy-probe\<run>\sc-login-probe-tls-{open,closed}-*.png/.txt.
+
+   Full-suite green (2026-10-31, drop `683FA932…A47A9C58` hash-verified on both hosts, one
+   detached xunit run, filter `~ProbeProxied`): fetch `20261031-235301`, login
+   `20261031-235408`, tls-open `20261031-235514`, tls-closed `20261031-235635`. The override
+   row rewrote its own allowlist line through the live Management Client edit → guarded Save
+   → verified-readback path, and the suite left the live allowlist at the fail-closed default
+   (no flags).
 
 ## Known high-risk regressions → pinned by
 
