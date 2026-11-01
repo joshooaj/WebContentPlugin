@@ -161,8 +161,10 @@ try {
     }
     $stopped = $false
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        # ToString() remotely: WinRM can deserialize the ServiceControllerStatus
+        # enum as its underlying Int32, and a numeric 1 never equals 'Stopped'.
         $state = Invoke-Command -Session $session -ScriptBlock {
-            (Get-Service -Name $Using:ServiceName).Status
+            (Get-Service -Name $Using:ServiceName).Status.ToString()
         }
         if ($state -eq 'Stopped') {
             $stopped = $true
@@ -219,7 +221,7 @@ try {
     $running = $false
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $state = Invoke-Command -Session $session -ScriptBlock {
-            (Get-Service -Name $Using:ServiceName).Status
+            (Get-Service -Name $Using:ServiceName).Status.ToString()
         }
         if ($state -eq 'Running') {
             $running = $true
@@ -237,7 +239,8 @@ try {
 
 Write-Output ''
 Write-Output 'Post-deployment checks:'
-Write-Output '  1. Event Server MIP log (Event Server ProgramData logs\MIPLogs\, or the tray icon "Show MIP logs") must contain:'
+Write-Output '  1. Event Server MIP log (%ProgramData%\Milestone\XProtect Event Server\logs\MIP.log, rolled'
+Write-Output '     archives under logs\MIPLogs\, or the tray icon "Show MIP logs") must contain:'
 Write-Output '       "Proxy fetcher ready (concurrency=..., request id=WebContent.Proxy.FetchRequest)"'
 Write-Output '     A failure instead logs "Proxy fetcher failed to start: ...". Use the Management Client'
 Write-Output '     workspace page "Test proxy fetch" row as the end-to-end check.'
