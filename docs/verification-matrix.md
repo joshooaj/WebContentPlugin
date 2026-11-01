@@ -410,11 +410,22 @@ Client restart after the ES restart, and the one-time CA provisioning pointer.
      calls `.ToString()` remotely. The script's log-location note was also corrected to the
      observed layout (`%ProgramData%\Milestone\XProtect Event Server\logs\MIP.log` plus
      `logs\MIPLogs\` rolled archives).
-2. **Fresh-both-machine smoke row (SC-1 procedure against a fresh drop) - pending**: the
-   Smart Client machine's MIP-root copy needs one interactive UAC consent on that machine;
-   the unattended `Start-Process -Verb runas` was auto-cancelled ("The operation was canceled
-   by the user", 2026-11-01 ~04:00). The Event Server side of the same drop is already live
-   (record 1).
+2. **Fresh-both-machine smoke row (SC-1 procedure against a fresh drop) - pending human
+   elevation (`ready-for-human`)**: the Smart Client machine's MIP-root copy needs ONE
+   interactive UAC consent on that machine; three unattended `Start-Process -Verb runas`
+   attempts were auto-cancelled ("The operation was canceled by the user", 2026-11-01 ~03:50,
+   ~04:00 and ~04:25 - no console user to answer the prompt). The Event Server side of the
+   same drop is already live (record 1). Human steps on the Smart Client machine (BEAST):
+   1. elevated once: append `127.0.0.1 httpforever.com # webcontent-sc-1-block` to
+      `%SystemRoot%\System32\drivers\etc\hosts` and copy the drop:
+      `Copy-Item C:\repos\WebContentPlugin\output\WebContent\* "C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin" -Recurse -Force`
+      (kill `client`/`VideoOS.Administration` first if open);
+   2. hash-verify: the deployed `WebContent.dll` must be SHA-256 `84623C10…697AA41` (record 1);
+   3. run the blocked smoke row: `$env:WEBCONTENT_SC1_BLOCKED='1'` then
+      `dotnet test tests/ux/WebContent.UxTests --filter "FullyQualifiedName~ScProxyFetchProbeTests"` -
+      the proxied page must render through the proxy while the client itself cannot reach
+      `httpforever.com` (the row itself goes red if the hosts control is not in place);
+   4. remove the hosts entry afterwards.
 
 ## Known high-risk regressions → pinned by
 
