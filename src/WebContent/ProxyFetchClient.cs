@@ -199,7 +199,11 @@ namespace WebContent
             var communication = _communication;
             if (communication == null)
             {
-                return Task.FromResult(Failure(ProxyFetchErrorCodes.Error, "The proxy fetch harness is not connected to the Event Server."));
+                // #58: this is a component/channel failure on the Smart Client side, not a target
+                // failure - the distinct code renders the distinct proxy error page.
+                return Task.FromResult(Failure(
+                    ProxyFetchErrorCodes.ServerUnavailable,
+                    "The Smart Client has no proxy messaging channel to the VMS Event Server (the Event Server may be stopped or restarted since this session connected)."));
             }
 
             Uri target = query == null ? null : query.Uri;
@@ -237,9 +241,13 @@ namespace WebContent
             }
             catch (Exception exception)
             {
-                // MIP messaging is down: the correlator already owns the task, so let its
-                // deadline/abandon path complete it, and label the outcome locally.
-                _correlation.Abandon(correlationId);
+                // MIP messaging is down (a stopped/restarted Event Server disposes every client's
+                // MessageCommunication): name the channel failure for the view (#58) instead of
+                // letting the request time out as an anonymous 30-second wait.
+                _correlation.Fail(
+                    correlationId,
+                    ProxyFetchErrorCodes.ServerUnavailable,
+                    $"The proxy fetch request could not be sent over the VMS messaging channel (the Event Server proxy component is down, or an Event Server restart disposed this session's messaging channel): {exception.Message}");
                 EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy fetch request not sent: {exception.Message}");
             }
 

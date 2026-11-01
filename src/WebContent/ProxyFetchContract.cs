@@ -100,6 +100,16 @@ namespace WebContent
         /// than 101 (a plain 200, a vendor 401) — the upgrade is refused, no tunnel exists.
         /// </summary>
         internal const string HandshakeRefused = "HandshakeRefused";
+
+        /// <summary>
+        /// Ticket #58 (CLIENT-SIDE only — never carried by a wire Failure frame): the VMS-side
+        /// proxy component itself is unavailable. Raised when the Smart Client's messaging channel
+        /// to the Event Server is not connected, a transmit fails (an Event Server restart disposes
+        /// every client's MessageCommunication), or the Event Server never answers a request within
+        /// the response deadline (no fetcher plugin loaded there). It separates "proxy component
+        /// absent/unreachable" from "server side reached the messaging layer but the target failed".
+        /// </summary>
+        internal const string ServerUnavailable = "ServerUnavailable";
     }
 
     /// <summary>

@@ -228,6 +228,9 @@ namespace WebContent.Tests
 
             Assert.StartsWith("HTTP/1.1 502 Bad Gateway\r\n", response);
             Assert.Contains("no route to host", response);
+            // #58: the page names the side that failed - the VMS server could not reach the
+            // target; the Smart Client machine is explicitly ruled out.
+            Assert.Contains("VMS server could not reach the target", response);
         }
 
         [Fact]
@@ -243,6 +246,70 @@ namespace WebContent.Tests
             var response = await Handle("GET http://10.0.0.5:8080/slow HTTP/1.1\r\n\r\n", fetch);
 
             Assert.StartsWith("HTTP/1.1 504 Gateway Timeout\r\n", response);
+            // #58: a Timeout FAILURE FRAME is the target leg timing out at the VMS server -
+            // distinct from the silent-channel case below.
+            Assert.Contains("VMS server could not get an answer from the target", response);
+        }
+
+        [Fact]
+        public async Task RendersAnExplicit503PageWhenTheServerSideProxyComponentIsUnavailable()
+        {
+            // #58 AC1: the Event Server proxy component absent/unreachable gets its own page
+            // naming the component - never a spinner, never a direct fallback.
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query => Task.FromResult(new ProxyFetchResult
+            {
+                Success = false,
+                ErrorCode = ProxyFetchErrorCodes.ServerUnavailable,
+                ErrorMessage = "The Smart Client has no proxy messaging channel to the VMS Event Server.",
+            });
+
+            var logged = new List<string>();
+            var response = await Handle("GET http://10.0.0.5:8080/ HTTP/1.1\r\n\r\n", fetch, null, logged.Add);
+
+            Assert.StartsWith("HTTP/1.1 503 Service Unavailable\r\n", response);
+            Assert.Contains("Web Content proxy: 503", response);
+            Assert.Contains("VMS server proxy component is not available", response);
+            Assert.Contains("never loaded direct from this computer", response);
+            // AC4: the log line attributes the failure to the Smart Client side, with the code.
+            Assert.Contains(logged, line => line.Contains("Smart Client side") && line.Contains("ServerUnavailable"));
+        }
+
+        [Fact]
+        public async Task RendersServerSideAllowlistRefusalAs403DistinctFromTargetFailure()
+        {
+            // #58: a server-side NotAllowed (allowlist drift between the two machines) keeps the
+            // allowlist posture - it must not be mistaken for "the server could not reach it".
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query => Task.FromResult(new ProxyFetchResult
+            {
+                Success = false,
+                ErrorCode = ProxyFetchErrorCodes.NotAllowed,
+                ErrorMessage = "The origin 'http://10.0.0.9:80' is not in the proxy allowlist of any proxied workspace.",
+            });
+
+            var response = await Handle("GET http://10.0.0.9:80/ HTTP/1.1\r\n\r\n", fetch);
+
+            Assert.StartsWith("HTTP/1.1 403 Forbidden\r\n", response);
+            Assert.Contains("allowlist", response);
+            Assert.DoesNotContain("could not reach", response);
+        }
+
+        [Fact]
+        public async Task RendersAnExplicitPageWhenTheResponseExceedsTheSizeCap()
+        {
+            // #58 AC1: past the response size cap the view gets a page naming the cap, not a
+            // truncated document and not a hang.
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch = query => Task.FromResult(new ProxyFetchResult
+            {
+                Success = false,
+                ErrorCode = ProxyFetchErrorCodes.TooLarge,
+                ErrorMessage = "Response body from 10.0.0.5:8080 exceeded the 5242880 byte response cap.",
+            });
+
+            var response = await Handle("GET http://10.0.0.5:8080/huge HTTP/1.1\r\n\r\n", fetch);
+
+            Assert.StartsWith("HTTP/1.1 502 Bad Gateway\r\n", response);
+            Assert.Contains("exceeded the VMS proxy response size cap", response);
+            Assert.Contains("5242880", response);
         }
 
         // #56: allowlisted CONNECT tunnels are terminated at the listener; the decrypted inner
@@ -858,12 +925,13 @@ namespace WebContent.Tests
         private static async Task<string> Handle(
             string request,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
-            string[] allowlist = null)
+            string[] allowlist = null,
+            Action<string> log = null)
         {
             using (var input = new MemoryStream(Encoding.UTF8.GetBytes(request)))
             using (var output = new MemoryStream())
             {
-                await ProxyForwardConnection.HandleAsync(input, output, allowlist ?? Allowlist, fetch, message => { });
+                await ProxyForwardConnection.HandleAsync(input, output, allowlist ?? Allowlist, fetch, message => { log?.Invoke(message); });
                 return Encoding.UTF8.GetString(output.ToArray());
             }
         }

@@ -450,17 +450,70 @@ namespace WebContent
                 return bodyOutcome.Remainder;
             }
 
+            // #58: every failure kind renders its own explicit page in the view, and every log line
+            // names WHICH side failed - the Smart Client's channel to the VMS, the VMS server
+            // itself, or the target behind it. A proxied workspace never falls back to a direct
+            // connection, so an unexplained page would be a dead end for the admin.
             var message = result == null ? "The VMS proxy fetcher returned no outcome." : result.ErrorMessage;
-            if (result != null && result.ErrorCode == ProxyFetchErrorCodes.Timeout)
+            switch (result == null ? null : result.ErrorCode)
             {
-                log($"Proxy fetch for {request.Uri} timed out: {message}");
-                await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(504, "Gateway Timeout", message));
-                return bodyOutcome.Remainder;
-            }
+                case ProxyFetchErrorCodes.ServerUnavailable:
+                    log($"Proxy fetch for {request.Uri} failed on the Smart Client side before any VMS fetcher answered (code={ProxyFetchErrorCodes.ServerUnavailable}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        503,
+                        "Service Unavailable",
+                        $"The VMS server proxy component is not available: {message} A proxied workspace is never loaded direct from this computer - make sure the Web Content plugin is deployed to the XProtect Event Server and the Event Server service is running."));
+                    return bodyOutcome.Remainder;
 
-            log($"Proxy fetch for {request.Uri} failed (code={result?.ErrorCode}): {message}");
-            await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", message));
-            return bodyOutcome.Remainder;
+                case ProxyFetchErrorCodes.NotAllowed:
+                    // Server-side allowlist gate disagreeing with the local one (config drift
+                    // between the two machines): same refusal posture as the local 403.
+                    log($"Proxy fetch for {request.Uri} refused by the VMS server (code={ProxyFetchErrorCodes.NotAllowed}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        403,
+                        "Forbidden",
+                        $"The VMS server also refuses this target, although the local workspace decision allowed it (the two machines' proxy allowlists differ): {message}"));
+                    return bodyOutcome.Remainder;
+
+                case ProxyFetchErrorCodes.Timeout:
+                    // A Failure FRAME carrying Timeout means the messaging round trip worked and the
+                    // VMS server gave up on the TARGET - distinct from ServerUnavailable silence above.
+                    log($"Proxy fetch for {request.Uri} timed out on the VMS server side (code={ProxyFetchErrorCodes.Timeout}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        504,
+                        "Gateway Timeout",
+                        $"The VMS server could not get an answer from the target in time: {message}"));
+                    return bodyOutcome.Remainder;
+
+                case ProxyFetchErrorCodes.Unreachable:
+                    log($"Proxy fetch for {request.Uri} failed on the VMS server side (code={ProxyFetchErrorCodes.Unreachable}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        502,
+                        "Bad Gateway",
+                        $"The VMS server could not reach the target (connection refused, DNS, or network failure at the server, not at this computer): {message}"));
+                    return bodyOutcome.Remainder;
+
+                case ProxyFetchErrorCodes.TooLarge:
+                    log($"Proxy fetch for {request.Uri} failed on the VMS server side (code={ProxyFetchErrorCodes.TooLarge}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        502,
+                        "Bad Gateway",
+                        $"The target's response exceeded the VMS proxy response size cap and was not relayed: {message}"));
+                    return bodyOutcome.Remainder;
+
+                case ProxyFetchErrorCodes.TlsValidation:
+                    log($"Proxy fetch for {request.Uri} failed on the VMS server side (code={ProxyFetchErrorCodes.TlsValidation}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        502,
+                        "Bad Gateway",
+                        $"The VMS server refused the target's TLS certificate: {message}"));
+                    return bodyOutcome.Remainder;
+
+                default:
+                    log($"Proxy fetch for {request.Uri} failed (code={result?.ErrorCode}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", message));
+                    return bodyOutcome.Remainder;
+            }
         }
 
         /// <summary>

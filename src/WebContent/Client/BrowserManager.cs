@@ -162,11 +162,13 @@ namespace WebContent.Client
             var client = ProxyFetchClient.Active;
             if (client == null || !client.IsReady)
             {
+                // #58: the server-side proxy component is unreachable - a distinct code so the
+                // view names the missing Event Server component instead of a generic gateway fault.
                 return Task.FromResult(new ProxyFetchResult
                 {
                     Success = false,
-                    ErrorCode = ProxyFetchErrorCodes.Error,
-                    ErrorMessage = "The Smart Client is not connected to the Event Server proxy fetcher.",
+                    ErrorCode = ProxyFetchErrorCodes.ServerUnavailable,
+                    ErrorMessage = "The Smart Client is not connected to the VMS server proxy component: the Web Content fetcher on the XProtect Event Server is absent, or this session's messaging channel to the Event Server is down (restart the Smart Client after an Event Server restart).",
                 });
             }
 

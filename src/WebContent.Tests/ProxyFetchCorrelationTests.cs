@@ -129,8 +129,10 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public async Task ExpiredDeadlineCompletesTheTaskWithALocalTimeoutResult()
+        public async Task ExpiredDeadlineCompletesTheTaskWithALocalServerUnavailableResult()
         {
+            // #58: silence for the whole exchange means no VMS fetcher answered at all - a distinct
+            // ServerUnavailable outcome, never the target-leg Timeout code a Failure frame carries.
             var correlation = new ProxyFetchCorrelation();
             var completion = correlation.Begin("corr-4", TimeSpan.FromMilliseconds(50));
 
@@ -138,7 +140,24 @@ namespace WebContent.Tests
 
             Assert.True(completion.IsCompleted);
             Assert.False(completion.Result.Success);
-            Assert.Equal(ProxyFetchErrorCodes.Timeout, completion.Result.ErrorCode);
+            Assert.Equal(ProxyFetchErrorCodes.ServerUnavailable, completion.Result.ErrorCode);
+            Assert.Contains("VMS Event Server", completion.Result.ErrorMessage);
+        }
+
+        [Fact]
+        public void FailCompletesThePendingExchangeWithTheGivenLocalFailure()
+        {
+            // #58: the requester learns at transmit time that the messaging channel is dead; the
+            // exchange must complete with that reason immediately, not sit until the deadline.
+            var correlation = new ProxyFetchCorrelation();
+            var completion = correlation.Begin("corr-fail", TimeSpan.FromSeconds(30));
+
+            correlation.Fail("corr-fail", ProxyFetchErrorCodes.ServerUnavailable, "the messaging channel is down");
+
+            Assert.True(completion.IsCompleted);
+            Assert.False(completion.Result.Success);
+            Assert.Equal(ProxyFetchErrorCodes.ServerUnavailable, completion.Result.ErrorCode);
+            Assert.Equal("the messaging channel is down", completion.Result.ErrorMessage);
         }
 
         [Fact]

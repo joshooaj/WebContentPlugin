@@ -49,11 +49,14 @@ namespace WebContent
                 var id = correlationId;
                 pending.Deadline.Token.Register(() =>
                 {
+                    // #58: silence from the whole exchange is not a target timeout — it means no
+                    // VMS-side fetcher answered at all (component absent, or the messaging channel
+                    // to the Event Server is down). The distinct code renders a distinct page.
                     Complete(pending, new ProxyFetchResult
                     {
                         Success = false,
-                        ErrorCode = ProxyFetchErrorCodes.Timeout,
-                        ErrorMessage = $"No proxy-fetch response for {id} within the response deadline.",
+                        ErrorCode = ProxyFetchErrorCodes.ServerUnavailable,
+                        ErrorMessage = $"No proxy-fetch answer arrived from the VMS Event Server within {timeout.TotalSeconds:0}s (exchange {id}): the server-side Web Content proxy component did not answer, or the messaging channel to the Event Server is down.",
                     });
                 });
 
@@ -127,6 +130,16 @@ namespace WebContent
         /// </summary>
         internal void Abandon(string correlationId)
         {
+            Fail(correlationId, ProxyFetchErrorCodes.Error, "The proxy-fetch request was abandoned locally.");
+        }
+
+        /// <summary>
+        /// Complete a pending exchange with an explicit local failure (#58): the requester knows
+        /// WHY the exchange died before any answer arrived (messaging channel down, Event Server
+        /// restarting), and that reason — not a vague timeout — is what the view must show.
+        /// </summary>
+        internal void Fail(string correlationId, string errorCode, string message)
+        {
             lock (_sync)
             {
                 if (_pending.TryGetValue(correlationId, out var pending))
@@ -134,8 +147,8 @@ namespace WebContent
                     Complete(pending, new ProxyFetchResult
                     {
                         Success = false,
-                        ErrorCode = ProxyFetchErrorCodes.Error,
-                        ErrorMessage = "The proxy-fetch request was abandoned locally.",
+                        ErrorCode = errorCode,
+                        ErrorMessage = message,
                     });
                 }
             }
