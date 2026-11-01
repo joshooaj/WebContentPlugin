@@ -15,14 +15,34 @@ namespace WebContent.UxTests.Harness;
 /// </summary>
 public static class LoginFlow
 {
+    /// <summary>
+    /// Waits for the login dialog. Returns NULL when the client never shows (or already closed)
+    /// it because Auto-login connected on its own - the main window is up instead. Login() and
+    /// the WaitFor*Main helpers handle that path.
+    /// </summary>
     public static Window WaitForLoginWindow(ClientSession session, int timeoutSeconds = 60)
-        => session.WaitForWindow(
-            w => w.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect")) != null ||
-                 w.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton")) != null,
-            timeoutSeconds, "login dialog");
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            var window = session.FindWindow(
+                w => w.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect")) != null ||
+                     w.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton")) != null);
+            if (window != null) return window;
+            if (HasMainSessionWindow(session)) return null;
+            Thread.Sleep(300);
+        }
+        throw new TimeoutException($"Timed out waiting for login dialog (process {session.Process.ProcessName}, pid {session.Process.Id}).");
+    }
 
     public static void Login(ClientSession session, Window loginWindow, UxConfig config)
     {
+        if (loginWindow == null || HasMainSessionWindow(session))
+        {
+            LogEntry("main window already up (client auto-login with remembered credentials); nothing to enter");
+            return;
+        }
+
         var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
         if (serverBox != null && !string.IsNullOrWhiteSpace(config.VmsAddress))
         {
@@ -46,23 +66,42 @@ public static class LoginFlow
                       ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
         if (connect == null) throw new InvalidOperationException("Login dialog has no connect button.");
 
-        // The login control disables Connect while it considers the input incomplete - a
-        // dropped password shows up as this, not as an error. Re-enter once before giving up.
+        // The client may ALREADY be auto-connecting (Auto-login was remembered from an
+        // interactive session): the dialog shows filled remembered fields, Connect is disabled
+        // for the duration of the attempt, and on success the main window simply appears.
+        // Never fight that dialog - give the auto-login room, then fall back to entering.
         if (!WaitUntilEnabled(connect, 3))
         {
+            if (WaitForConnected(session, 10))
+            {
+                LogEntry("auto-login completed while waiting; leaving the dialog alone");
+                return;
+            }
             LogEntry($"connect disabled; re-entering password (loginWindow aid='{loginWindow.AutomationId}')");
             Artifacts.Window(loginWindow, "login-filled-disabled");
             DumpLoginTree(loginWindow, "login-tree-disabled.txt");
             FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
-            if (!WaitUntilEnabled(connect, 3))
+            if (!WaitUntilEnabled(connect, 3) && !WaitForConnected(session, 5))
             {
                 DumpLoginTree(loginWindow, "login-tree-disabled2.txt");
                 throw new InvalidOperationException(
-                    "Connect stayed disabled after two password entries - the text never reached _passwordBox " +
+                    "Connect stayed disabled after two password entries and no session window appeared " +
                     "(see login-entry-log.txt + login-tree-disabled*.txt artifacts).");
             }
+            if (HasMainSessionWindow(session)) return;
         }
         connect.Patterns.Invoke.Pattern.Invoke();
+    }
+
+    private static bool WaitForConnected(ClientSession session, int seconds)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (HasMainSessionWindow(session)) return true;
+            Thread.Sleep(400);
+        }
+        return false;
     }
 
     private static readonly string[] PreferredTrustButtonIds =
