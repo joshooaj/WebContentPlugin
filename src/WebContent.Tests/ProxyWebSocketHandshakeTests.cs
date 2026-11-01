@@ -79,6 +79,23 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void RebuiltHandshakeCarriesExactlyOneConnectionUpgradePair()
+        {
+            // The browser spells its upgrade "Connection: keep-alive, Upgrade"; the rebuilt
+            // handshake restates the pair canonically, so relaying the browser's copy too would
+            // send two Connection lines (and a duplicated Upgrade) and a target may reject the
+            // malformed upgrade. Exactly one of each must reach the wire.
+            var request = Parse(BrowserUpgradeHead);
+            var wire = ProxyWebSocketHandshake.ToTunnelWireHeaders(request);
+
+            var handshake = Encoding.UTF8.GetString(ProxyWebSocketHandshake.BuildTargetHandshake(request.Uri, wire));
+
+            Assert.DoesNotContain("keep-alive, Upgrade", handshake);
+            Assert.Equal(2, handshake.Split(new[] { "\r\nConnection: " }, System.StringSplitOptions.None).Length);
+            Assert.Equal(2, handshake.Split(new[] { "\r\nUpgrade: " }, System.StringSplitOptions.None).Length);
+        }
+
+        [Fact]
         public void DropsTheClientsHostHeaderSoTheTargetSeesTheDerivedOne()
         {
             var request = Parse(

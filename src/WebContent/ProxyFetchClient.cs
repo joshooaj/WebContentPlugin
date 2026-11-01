@@ -486,6 +486,15 @@ namespace WebContent
                 return null;
             }
 
+            // A success ack for a session the client already gave up on (open deadline fired, or
+            // the sweep reclaimed it mid-handshake) must still release the Event Server's fresh
+            // socket: a chatty target keeps the ES-side idle sweep from ever firing.
+            if (payload.Success && tunnels.IsClosed(payload.CorrelationId))
+            {
+                TryTransmitTunnelClose(payload.CorrelationId, "the Smart Client stopped waiting before the tunnel opened");
+                return null;
+            }
+
             tunnels.CompleteOpen(payload.CorrelationId, new ProxyTunnelOpenOutcome
             {
                 Success = payload.Success,

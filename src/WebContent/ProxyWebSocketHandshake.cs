@@ -84,6 +84,11 @@ namespace WebContent
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "Host",
+                // The rebuilt handshake states Connection/Upgrade itself (explicit and canonical);
+                // relaying the browser's pair too would send two Connection lines and a target
+                // could reject the malformed upgrade.
+                "Connection",
+                "Upgrade",
                 "Proxy-Connection",
                 "Proxy-Authenticate",
                 "Proxy-Authorization",
