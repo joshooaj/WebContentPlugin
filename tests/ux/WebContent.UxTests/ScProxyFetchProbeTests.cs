@@ -18,6 +18,14 @@ public class ScProxyFetchProbeTests
 {
     private const string FetchUrl = "http://httpforever.com/";
 
+    /// <summary>
+    /// The origin form of <see cref="FetchUrl"/> as the workspace allowlist stores it: no
+    /// trailing slash. The fetch probe depends on this entry; the login probes learned the
+    /// hard way that the entry must be (re)provisioned, not assumed, after the workspace
+    /// item was recreated.
+    /// </summary>
+    private const string AllowlistEntry = "http://httpforever.com";
+
     private readonly ITestOutputHelper _output;
 
     public ScProxyFetchProbeTests(ITestOutputHelper output) => _output = output;
@@ -30,27 +38,35 @@ public class ScProxyFetchProbeTests
         Artifacts.Init(Path.Combine(Path.GetTempPath(), "webcontent-sc-proxy-probe"));
         _output.WriteLine($"Artifacts: {Artifacts.RunDirectory}");
 
-        CdpConnector.CleanStalePortFiles(config.WebView2DataRoot);
-        ProcessKiller.KillClients("Client");
-        ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
-
-        using var sc = ClientSession.Launch(config.SmartClientExe);
-        var login = LoginFlow.WaitForLoginWindow(sc);
-        LoginFlow.Login(sc, login, config);
-        LoginFlow.AcceptCertificateTrust(sc);
-        var main = LoginFlow.WaitForSmartClientMain(sc);
-        SmartClientUi.Maximize(main);
-        Thread.Sleep(1500);
-        main = sc.Windows().First(w => w.AutomationId == "_mainApplicationWindow");
-
         var log = new System.Text.StringBuilder();
         string failure = null;
         string title = null;
         var bodyChars = -1;
         var directReachedTarget = false;
         var blockedControl = Environment.GetEnvironmentVariable("WEBCONTENT_SC1_BLOCKED") == "1";
+        ClientSession sc = null;
         try
         {
+            // Phase 1 (Management Client): provision the allowlist entry this probe depends
+            // on before the Smart Client logs in. Assuming the workspace keeps the entry
+            // forever is what turned this row red (403) after the Demo Workspace item was
+            // recreated without it.
+            ProxyTargetProvisioning.Ensure(config, AllowlistEntry, log);
+
+            // Phase 2: fresh Smart Client so it fetches the updated configuration.
+            CdpConnector.CleanStalePortFiles(config.WebView2DataRoot);
+            ProcessKiller.KillClients("Client");
+            ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+
+            sc = ClientSession.Launch(config.SmartClientExe);
+            var login = LoginFlow.WaitForLoginWindow(sc);
+            LoginFlow.Login(sc, login, config);
+            LoginFlow.AcceptCertificateTrust(sc);
+            var main = LoginFlow.WaitForSmartClientMain(sc);
+            SmartClientUi.Maximize(main);
+            Thread.Sleep(1500);
+            main = sc.Windows().First(w => w.AutomationId == "_mainApplicationWindow");
+
             main = SmartClientUi.SelectWorkspace(main, sc, config.WorkspaceName);
             var item = SmartClientUi.WaitForMipViewItem(main);
             Assert.NotNull(item);
@@ -119,7 +135,7 @@ public class ScProxyFetchProbeTests
         {
             failure = $"{ex.GetType().Name}: {ex.Message}";
             log.AppendLine($"probe failed: {failure}");
-            var fresh = sc.Windows().FirstOrDefault(w => w.AutomationId == "_mainApplicationWindow");
+            var fresh = sc?.Windows().FirstOrDefault(w => w.AutomationId == "_mainApplicationWindow");
             if (fresh != null)
             {
                 Artifacts.Window(fresh, "sc-proxy-probe-failure");
@@ -131,6 +147,7 @@ public class ScProxyFetchProbeTests
             _output.WriteLine(log.ToString());
             ProcessKiller.KillClients("Client");
             ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+            sc?.Dispose();
         }
 
         // The probe goes RED: evidence in the artifacts file is for humans, but a proxy that
