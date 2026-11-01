@@ -25,7 +25,7 @@ if (!$PSCmdlet.MyInvocation.BoundParameters.ContainsKey('Version')) {
 }
 
 Write-Host "Building CascadiaWebContentPlugin.$Version.msi"
-& msbuild src/Setup/setup.wixproj /t:Rebuild /restore:True /p:Configuration=Release /p:Platform=x64 /p:BuildVersion=$Version
+& dotnet build src/Setup/setup.wixproj -t:Rebuild -p:Configuration=Release -p:Platform=x64 -p:BuildVersion=$Version
 
 if (!$?) {
     throw "MSBuild exited with code $LASTEXITCODE"

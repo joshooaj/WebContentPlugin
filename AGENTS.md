@@ -4,16 +4,17 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
 
 ## Build
 
-- Build the plugin with VS 2022 MSBuild; `dotnet build` on `src/WebContent/WebContent.csproj` cannot resolve the `MilestoneSystems.VideoOS.Platform` PackageReference and dies with ~110 `CS0246` errors.
+- The plugin csproj is SDK-style (`<Project Sdk="Microsoft.NET.Sdk">`, `TargetFramework` net472) — `dotnet build` works directly; full MSBuild (VS 2022) also still works but nothing in this repo needs it anymore.
 
   ```powershell
-  msbuild src/WebContent/WebContent.csproj /t:Build /p:Configuration=Debug /p:Platform=x64
-  # msbuild path when not on PATH: C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe
+  dotnet build src/WebContent/WebContent.csproj -c Debug   # or -c Release
   ```
 
-- `PostBuildEvent` `sbom-tool` runs with `-D true` (stale `_manifest` self-overwrites) and `-bc "$(MSBuildProjectDirectory)"` (quoted absolute component path — build events run with CWD = output dir, so a relative `-bc .\` would scan the drop and detect zero packages; `$(ProjectDir)` ends in a backslash that breaks quoting). A sbom-tool failure now fails the build with MSB3073. Judge success by exit code plus files in `output\WebContent\` (9 files + `runtimes` folder).
-- Full installer: `.\build.ps1` restores dotnet tools, caches the WebView2 runtime into `.cache`, then `msbuild src/Setup/setup.wixproj /t:Rebuild` (needs msbuild on PATH; CI adds it via setup-msbuild).
-- WiX version lockstep (ticket #31): the `wix` CLI version in `.config/dotnet-tools.json`, the `WixToolset.Sdk/<version>` attribute on `src/Setup/setup.wixproj`, and every `WixToolset.*` extension `PackageReference` in that project must all be bumped together to the same version — moving only one breaks the installer build. WiX major bumps also need the `<AcceptEula>` value refreshed (v7: `wix7`), and the v7 CLI refuses every command until that EULA is accepted (MSBuild passes it from the project; ad hoc CLI usage needs `-acceptEula wix7`). Heat was removed in v7; the drop harvest in `src/Setup/files.wxs` uses the built-in `Files` element instead. Dependabot PRs that bump only some WiX surfaces must never be merged alone — close them and do a coordinated bump.
+- x64: the project itself is `Platform=Any CPU` with `<PlatformTarget>x64</PlatformTarget>` set unconditionally; `src/WebContent.sln` maps its x64 solution platform onto the project's Any CPU config (same remap as UxTests). Never set per-`Platform` config conditions in that csproj — `dotnet build` defaults to Any CPU.
+- The drop lives at `output\WebContent\` (`AppendTargetFrameworkToOutputPath=false` — the Setup harvest expects that exact path, no `net472` subfolder). Judge success by exit code plus files there (9 files + `runtimes` folder).
+- Post-build steps are real MSBuild targets, not cmd `PostBuildEvent`s: `CleanHostAssemblies` deletes host-owned `VideoOS.*` (and satellite folders) from the drop — `$(OutDir)` is relative in SDK-style while wildcard items come back absolute, both are anchored via a `DropDirAbsolute` property, keep that or `RemoveDir` wipes the whole drop. `RestoreDotNetTools` + `GenerateSbom` run sbom-tool; a failure fails the build. `SbomGenerationGuardTests` regex-pin the sbom invocation (quoted absolute `-bc "$(MSBuildProjectDirectory)"`, `-D true`, one line) — update the guards together with the target. The `-b` drop argument must be quoted without a trailing backslash (a trailing `\` before the closing quote corrupts the rest of the command line).
+- Full installer: `.\build.ps1` restores dotnet tools, caches the WebView2 runtime into `.cache`, then `dotnet build src/Setup/setup.wixproj -t:Rebuild` (WiX v7 wixproj builds under the dotnet CLI; no msbuild on PATH needed — the setup-msbuild CI step was removed with this).
+- WiX version lockstep (ticket #31): the `wix` CLI version in `.config/dotnet-tools.json`, the `WixToolset.Sdk/<version>` attribute on `src/Setup/setup.wixproj`, and every `WixToolset.*` extension `PackageReference` in that project must all be bumped together to the same version — moving only one breaks the installer build. WiX major bumps also need the `<AcceptEula>` value refreshed (v7: `wix7`), and the v7 CLI refuses every command until that EULA is accepted (`dotnet build` passes it from the project property; ad hoc CLI usage needs `-acceptEula wix7`). Heat was removed in v7; the drop harvest in `src/Setup/files.wxs` uses the built-in `Files` element instead. Dependabot PRs that bump only some WiX surfaces must never be merged alone — close them and do a coordinated bump.
 
 ## Test
 
