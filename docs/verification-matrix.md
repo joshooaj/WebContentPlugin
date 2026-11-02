@@ -43,6 +43,7 @@ is not evidence the plugin never ran.
 | Server-side deployment + rollout docs for proxied connections (#59) | #59 | `scripts/deploy-event-server-plugin.ps1` refuses a drop whose `plugin.def` lacks the `Service` environment before touching the server; stop-wait/stop, copy, per-file SHA-256 verification against the source, restart-wait, and the two rollout follow-ups (client restart, fetcher-ready marker) are printed by the script itself | See DP-1 below: the script validated live end-to-end against the Event Server machine (11 files hash-identical, `Proxy fetcher ready` after restart); README/log-path/version claims checked against the lab; fresh-both-machine blocked-egress smoke PASSED with both machines at the same hash-verified drop |
 | wss:// websockets tunnelled through a terminated TLS tunnel (Event Server dials a validated TLS leg, replays the rebuilt handshake, admits only 101) | #60 | `ProxyForwardPolicyTests` (the entry scheme IS the posture: an in-tunnel upgrade GET against an allowlisted https origin — or absolute wss:// against an https entry — becomes `WebSocketTunnel`, never 501; an http twin alone is 403 for the upgrade; the `WebSocketTunnelRefused` posture is deleted outright), `ProxyForwardConnectionTests` (in-tunnel upgrade opens the byte tunnel, the target's verbatim 101 rides back ON the terminated tunnel, then both directions pump decrypted frames over the tunnel stream; open failure renders an explicit 502 page on the tunnel and the tunnel keeps serving), `ProxyTunnelServerTests` (in-process `TlsWsTarget` with a self-signed SAN certificate: an https-scheme tunnel target gets a TLS leg authenticated against the target host before the handshake is replayed, 101-only admission, frames echo over both pumps; untrusted chain → explicit `TlsValidation` error naming the origin and the Event Server as the failing side; production resolver is null = SslStream full chain validation), `ProxyWebSocketHandshakeTests` (rebuilt handshake pins the https origin's Host for https-scheme tunnel targets) | See SC-6 below - **both live rows PASSED 2026-11-01** (runs `20261101-174151` + `20261101-174657`): with the probe certificate imported into the Event Server's trust store, a wss-echo page in a proxied Smart Client browser shows `WS-OK:<token>` while the wss server journals TLS-HANDSHAKE + WS-HANDSHAKE + WS-ECHO; the fail-closed row's target journals the TLS leg dialed + negotiated but never the upgrade - the Event Server refused the chain there |
 | MC workspace config tab shell (Settings \| Proxy \| Diagnostics \| Status; Status behind the SecurityActions edit-rights gate) | #74 | `WorkspaceTabShellGuardTests` (the XAML declares exactly the four tabs in shell order with stable AutomationIds; Status defaults `Collapsed` so the gate fails closed before any fill; EVERY pre-existing settings/proxy control still lives on the Settings tab under the same AutomationId the ux probes read; placeholder tabs contain zero write-capable input and carry a probe-assertable placeholder marker), `WorkspaceTabPolicy` decision table (Status renders only on an explicit `Granted` — `Denied`/`LookupFailed` hide the whole tab) | See MC-11 below - **admin half live row PASSED 2026-11-02** (run `20261102-012719`): four tabs render on the live MC with Status granted to the admin, walking the placeholder tabs never enables Save, and the Settings fields read back identically; the View-only denial half stays manual |
+| Proxy diagnostics substrate (block reports, session lifecycle, Event Server aggregation, status query) | #69 | `ProxyDiagnosticsAggregatorTests` (blocked ring dedup + accumulating counts + recency eviction at the 200-origin cap, new-entry-only transition signal; session open/heartbeat/close and the idle sweep; fetch/tunnel traffic counters and req/min; workspaces stay isolated), `ProxySessionRegistryTests` (client-side per-view registry: open/close, heartbeat payloads, bounded), `ProxyBlockReporterTests` (report carries the workspace identity + canonical origin; blank or workspace-less reports drop; a throwing send seam never reaches the browser flow), `ProxyDiagnosticsWireTests` (every diagnostics payload round-trips as one JSON string; an unset session is an explicit null member; a frame shaped by another build is refused, never half-bound), `ProxyForwardConnectionTests` (each client-visible refusal reaches the reporter — local 403, tunnel-open fault, dead fetch channel — while an ES-answered refusal is never re-reported, so counts do not double), `ProxyFetchContractGuardTests` (four new payloads stay plugin-namespace `[Serializable]` public-field types inside the whitelist; the new ids declared in `PluginDefinedMessageIds`) | See ES-2 below - **load half observed live 2026-11-02**: the restarted Event Server logs `Proxy fetcher ready (..., diagnostics=WebContent.Proxy.BlockReport/WebContent.Proxy.SessionEvent/WebContent.Proxy.StatusRequest)` on a drop hash-identical to the Smart Client machine's. The ingress markers (session open, block recorded) need a proxied Smart Client session, which only an interactive desktop can drive |
 
 ## Manual host checks
 
@@ -132,6 +133,37 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    silently on the requester, fetched bodies leak to unrelated hosts, and processes without
    WebContent.dll log `Unable to deserialize class:...ProxyFetchResponsePayload`. This was the
    #54 live-host failure: both clients timed out despite a healthy fetcher.)
+
+### ES-2 Event Server proxy diagnostics ingress (#69)
+
+1. Deploy both halves from one drop (`Invoke-psake -taskList Build, Deploy`) — the wire payloads are
+   strict about their member set, so a Smart Client plugin and an Event Server plugin from different
+   builds simply fail to decode each other's frames. Restart desktop clients afterwards: an Event
+   Server restart disposes every running client's `MessageCommunication`.
+2. Load marker in the Event Server's `logs\MIP.log`:
+   `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest, diagnostics=WebContent.Proxy.BlockReport/WebContent.Proxy.SessionEvent/WebContent.Proxy.StatusRequest)`.
+   The diagnostics clause only appears once the four new ids in `plugin.def` are accepted and all
+   three filters registered. **Observed 2026-11-02** on the deployed drop (`WebContent.dll` SHA-256
+   `21365D5DBE27…` hash-identical on both machines).
+3. Ingress markers, produced by any live proxied view:
+   - `Proxy diagnostics session open: workspace='<item id>' user='<platform identity>' machine='<client machine>'`
+     when a proxied view's loopback listener starts — the user comes from the platform endpoint
+     identity table, never from the client's own claim;
+   - one `Proxy block recorded: workspace='<item id>' origin='<canonical origin>' reason=<category>
+     client='<machine>'` per NEW blocked origin; the dedup refreshes that follow stay quiet so a
+     refusal storm cannot bury the log.
+   The row that produces them on demand:
+   `Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ScProxyErrorProbeTests.ProbeProxiedStartUrlOutsideAllowlistShows403Page' }`
+   — the probe makes an off-allowlist origin the workspace home, so the block is a real client-side
+   gate refusal, and it restores the workspace home address afterwards.
+4. **Not yet run (2026-11-02):** the agent session that shipped #69 cannot drive FlaUI — every
+   input call dies with `Win32Exception: Access is denied` on a non-interactive desktop — so the
+   step 3 markers are still unverified live. The status-query answer (a
+   `WebContent.Proxy.StatusRequest` answered with a snapshot) has no sender until the Management
+   Client Status page (#76) lands; its semantics (unknown workspace answers `Success=false` +
+   `BadRequest`, client-side deadline silence completes as `ServerUnavailable`) are pinned by the
+   unit suites only.
+
 
 ### MC-10 Management Client proxy-fetch harness (#53, hardened by #54)
 
