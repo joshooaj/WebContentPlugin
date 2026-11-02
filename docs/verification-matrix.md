@@ -882,8 +882,8 @@ those run dirs.
 
 The override row passed once more as an independent confirmation on the `90625f3`-hardened
 harness: run `20261102-115638` (drop `7015417E…DAEDA9` hash-verified on both machines via the
-psake `Deploy` task, no elevation) - MC grid saved `https://172.116...` no: MC grid saved
-`https://172.16.128.210:18127 accept-untrusted`, certificate in NO trust store, page
+psake `Deploy` task, no elevation) - the MC grid saved `https://172.16.128.210:18127
+accept-untrusted`, certificate in NO trust store, page
 `WS-OK:WSS-TOKEN-fmd8ql29fy8`, journal TLS-CONNECT -> TLS-HANDSHAKE ok -> WS-HANDSHAKE /echo ->
 WS-ECHO 21 bytes -> WS-CLOSE client. Housekeeping from that session: a failed probe orphans a
 `testhost` process that locks the UxTests dll - kill stale `testhost` processes before
