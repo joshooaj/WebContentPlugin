@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using WebContent.UxTests.Harness;
@@ -392,5 +393,195 @@ public class ReconTests
         ProcessKiller.KillClients("Client", "VideoOS.Administration");
         ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
         _output.WriteLine($"Done. Artifacts: {Artifacts.RunDirectory}");
+    }
+
+    [Fact]
+    [Trait("Category", "ux-recon")]
+    public void Probe_SmartClientStartupOnDisconnectedDesktop()
+    {
+        // #83 live probe run: Smart Client never reached the login dialog (#60 s) while MC
+        // worked fine on the same disconnected desktop session. Poll the process and its
+        // top-level windows for two minutes to see where the startup actually stalls.
+        var config = UxConfig.Load();
+        Artifacts.Init(config.ArtifactsRoot);
+        var path = Path.Combine(Artifacts.RunDirectory, "sc-startup-diag.txt");
+        void Step(string s) { try { File.AppendAllText(path, DateTime.Now.ToString("HH:mm:ss ") + s + Environment.NewLine); } catch { } }
+
+        Step("launch SC");
+        ProcessKiller.KillClients("Client");
+        ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+        Thread.Sleep(1500);
+        using var sc = ClientSession.Launch(config.SmartClientExe);
+        Step($"attached pid={sc.Process.Id} name={sc.Process.ProcessName}");
+
+        var deadline = DateTime.UtcNow.AddSeconds(120);
+        var seen = new HashSet<string>();
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                var exited = sc.Process.HasExited;
+                var kids = Process.GetProcesses().Where(p =>
+                {
+                    try { return p.ProcessName.StartsWith("SmartClient.WebContentData", StringComparison.OrdinalIgnoreCase) || p.ProcessName == "VideoOS.OAuth2TokenGenerator"; }
+                    catch { return false; }
+                }).Select(p => $"{p.ProcessName}:{p.Id}");
+                var wins = sc.Windows().Select(w =>
+                {
+                    string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
+                    return $"aid='{Safex(() => w.AutomationId)}' cls='{Safex(() => w.ClassName)}' name='{Safex(() => w.Name)}'";
+                });
+                foreach (var w in wins) seen.Add(w);
+                Step($"exited={exited} windows=[{string.Join(" | ", wins)}] kids=[{string.Join(",", kids)}]");
+                if (wins.Any(w => w.Contains("_mainApplicationWindow"))) { Step("MAIN WINDOW UP"); break; }
+            }
+            catch (Exception ex) { Step($"poll ERR {ex.GetType().Name}: {ex.Message}"); }
+            Thread.Sleep(5000);
+        }
+        Step("seen windows: " + string.Join(" ;; ", seen));
+
+        // Whatever blocked startup, dump the message box text (title + body + buttons) so the
+        // blocker is on the record, then dismiss it.
+        try
+        {
+            var box = sc.FindWindow(w => string.Equals(w.AutomationId, "_messageBoxWindow", StringComparison.OrdinalIgnoreCase));
+            if (box != null)
+            {
+                var texts = box.FindAllDescendants(cf => cf.ByControlType(ControlType.Text))
+                    .Select(t => "'" + t.Name + "'");
+                var buttons = box.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                    .Select(b => "'" + b.Name + "'");
+                Step("message box texts: " + string.Join(" ", texts));
+                Step("message box buttons: " + string.Join(" ", buttons));
+                foreach (var b in box.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)))
+                {
+                    try { b.Patterns.Invoke.Pattern.Invoke(); break; } catch { }
+                }
+            }
+            else Step("no message box window found at exit");
+        }
+        catch (Exception ex) { Step("message box dump ERR " + ex.GetType().Name + ": " + ex.Message); }
+
+        ProcessKiller.KillClients("Client");
+        ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+    }
+
+    [Fact]
+    [Trait("Category", "ux-recon")]
+    public void Probe_ManagementClientTreeSelectionWithoutInput()
+    {
+        // #83 live run hit FlaUI Mouse.SendInput Access Denied (disconnected desktop session):
+        // recon whether the Management Client phase can run on patterns only -
+        // LegacyIAccessible DoDefaultAction to expand nodes, SelectionItem.Select to pick the
+        // workspace, and the pane read to prove the selection landed.
+        var config = UxConfig.Load();
+        Artifacts.Init(config.ArtifactsRoot);
+        _output.WriteLine($"Artifacts: {Artifacts.RunDirectory}");
+
+        var stepPath = Path.Combine(Artifacts.RunDirectory, "mc-tree-selection-without-input.txt");
+        void Step(string s) { try { File.AppendAllText(stepPath, DateTime.Now.ToString("HH:mm:ss ") + s + Environment.NewLine); } catch { } }
+
+        Step("launch MC");
+        ProcessKiller.KillClients("VideoOS.Administration");
+        using var mc = ClientSession.Launch(config.AdminClientExe);
+        var mcLogin = LoginFlow.WaitForLoginWindow(mc);
+        Step("login window found; logging in");
+        LoginFlow.Login(mc, mcLogin, config);
+        Step("login sent");
+        LoginFlow.AcceptCertificateTrust(mc);
+        var mcMain = LoginFlow.WaitForAdminMain(mc);
+        Step("admin main up");
+        Thread.Sleep(3000);
+        mcMain = mc.Windows().First(w => (w.Name ?? string.Empty).Contains("Management Client"));
+        Step("window handle re-fetched");
+        ManagementClientUi.CloseStrayLoginDialogs(mc);
+        Step("stray dialogs swept");
+
+        var sb = new System.Text.StringBuilder();
+        var progressPath = Artifacts.PathOf("mc-tree-selection-without-input.txt");
+        void Log(string s)
+        {
+            sb.AppendLine(s);
+            _output.WriteLine(s);
+            try { File.AppendAllText(progressPath, DateTime.Now.ToString("HH:mm:ss ") + s + Environment.NewLine); } catch { }
+        }
+        List<AutomationElement> Rows() => mcMain.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem)).ToList();
+        AutomationElement Row(string name) => Rows().FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        string PatternsOf(AutomationElement el)
+        {
+            var parts = new List<string>();
+            try { if (el.Patterns.ExpandCollapse.IsSupported) parts.Add("ExpandCollapse:" + el.Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value); } catch { parts.Add("ExpandCollapse:ERR"); }
+            try { if (el.Patterns.SelectionItem.IsSupported) parts.Add("SelectionItem"); } catch { }
+            try
+            {
+                if (el.Patterns.LegacyIAccessible.IsSupported)
+                {
+                    var action = "?";
+                    try { action = el.Patterns.LegacyIAccessible.Pattern.DefaultAction.Value; } catch { }
+                    parts.Add("Legacy(action=" + action + ")");
+                }
+            }
+            catch { }
+            return string.Join(" ", parts);
+        }
+
+        void TryDefaultAction(string name, string context)
+        {
+            var row = Row(name);
+            if (row == null) { Log($"  {context}: row '{name}' NOT realized"); return; }
+            Log($"  {context}: row '{name}' {PatternsOf(row)}");
+            try
+            {
+                row.Patterns.LegacyIAccessible.Pattern.DoDefaultAction();
+                Thread.Sleep(1500);
+                Log($"  {context}: DoDefaultAction done; now {PatternsOf(row)}; rows now: " +
+                    string.Join(",", Rows().Select(r => "'" + r.Name + "'")));
+            }
+            catch (Exception ex) { Log($"  {context}: DoDefaultAction ERR {ex.GetType().Name}: {ex.Message}"); }
+        }
+
+        Step("initial rows read");
+        Log("initial rows: " + string.Join(",", Rows().Select(r => "'" + r.Name + "'")));
+
+        Step("TryDefaultAction plugin-node");
+        TryDefaultAction(config.PluginNodeName, "plugin-node");
+        Step("TryDefaultAction workspaces-node");
+        TryDefaultAction(ManagementClientUi.WorkspacesNodeName, "workspaces-node");
+        Step("nodes expanded");
+
+        var ws = Row(config.McWorkspaceName);
+        if (ws == null)
+        {
+            Log($"workspace row '{config.McWorkspaceName}' NOT realized - rows now: " +
+                string.Join(",", Rows().Select(r => "'" + r.Name + "'")));
+        }
+        else
+        {
+            Log($"workspace row: {PatternsOf(ws)}");
+            try
+            {
+                ws.Patterns.SelectionItem.Pattern.Select();
+                Thread.Sleep(1500);
+                Log("SelectionItem.Select ok");
+            }
+            catch (Exception ex)
+            {
+                Log($"Select ERR {ex.GetType().Name}: {ex.Message}");
+                try { ws.Patterns.LegacyIAccessible.Pattern.Select(9); Thread.Sleep(1500); Log("legacy Select ok"); }
+                catch (Exception ex2) { Log($"legacy Select ERR {ex2.GetType().Name}"); }
+            }
+
+            var nameBox = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("txtName"));
+            Log($"pane txtName: present={nameBox != null} value='{(nameBox != null && nameBox.Patterns.Value.IsSupported ? nameBox.Patterns.Value.Pattern.Value.Value : "?")}'");
+            var targets = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("txtProxyTargets"));
+            Log($"pane txtProxyTargets: present={targets != null} value='{(targets != null && targets.Patterns.Value.IsSupported ? targets.Patterns.Value.Pattern.Value.Value : "?")}'");
+        }
+
+        // WindowPrint (PrintWindow), not Window: CopyFromScreen throws "handle is invalid" /
+        // outright hangs on the disconnected session this recon targets.
+        Artifacts.WindowPrint(mcMain, "mc-tree-selection-without-input");
+        Artifacts.WriteText("mc-tree-selection-without-input.txt", sb.ToString());
+        ProcessKiller.KillClients("VideoOS.Administration");
     }
 }

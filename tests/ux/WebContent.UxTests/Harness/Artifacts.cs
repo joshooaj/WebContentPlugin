@@ -29,6 +29,54 @@ public static class Artifacts
         return file;
     }
 
+    /// <summary>
+    /// DWM-buffer capture (PrintWindow, PW_RENDERFULLCONTENT) instead of CopyFromScreen: a
+    /// disconnected desktop session has no screen surface, and CopyFromScreen HANGS there
+    /// (observed live during the #83 probe run). The per-window redirection bitmap still
+    /// exists, so PrintWindow renders. Runs on a background thread with a join timeout -
+    /// if the target process never answers the print message, the capture is abandoned
+    /// (null returned, note file written) instead of freezing the test.
+    /// </summary>
+    public static string WindowPrint(Window window, string name, int timeoutMilliseconds = 8000)
+    {
+        var file = PathOf(name + ".png");
+        System.Drawing.Bitmap bmp = null;
+        Exception error = null;
+        var hwnd = window.Properties.NativeWindowHandle.Value;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                GetWindowRect(hwnd, out var r);
+                var width = r.Right - r.Left;
+                var height = r.Bottom - r.Top;
+                if (width <= 0 || height <= 0) { error = new InvalidOperationException("window has no rect"); return; }
+                bmp = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                using var g = System.Drawing.Graphics.FromImage(bmp);
+                var hdc = g.GetHdc();
+                bool printed;
+                try { printed = PrintWindow(hwnd, hdc, 2); } finally { g.ReleaseHdc(); }
+                if (!printed) { error = new InvalidOperationException("PrintWindow returned false"); bmp.Dispose(); bmp = null; }
+            }
+            catch (Exception ex) { error = ex; }
+        })
+        { IsBackground = true };
+        thread.Start();
+        if (!thread.Join(timeoutMilliseconds))
+        {
+            File.WriteAllText(PathOf(name + "-capture-note.txt"), $"PrintWindow capture for '{name}' timed out after {timeoutMilliseconds} ms (no screen surface on a disconnected session).");
+            return null;
+        }
+        if (error != null || bmp == null)
+        {
+            File.WriteAllText(PathOf(name + "-capture-note.txt"), $"PrintWindow capture for '{name}' failed: {error?.GetType().Name}: {error?.Message}");
+            return null;
+        }
+        bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+        bmp.Dispose();
+        return file;
+    }
+
     public static string Element(AutomationElement element, string name)
     {
         var file = PathOf(name + ".png");
@@ -115,6 +163,9 @@ public static class Artifacts
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
