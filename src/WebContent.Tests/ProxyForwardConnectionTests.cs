@@ -264,6 +264,41 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public async Task ReportsTheRequestSizeCapRefusalAsTooLarge()
+        {
+            // #69: the size-cap refusal is decided here and the Event Server never sees the
+            // request, so the blocked origin has to be filed by the client.
+            var blocks = new RecordingBlockReporter();
+            var oversized = ProxyForwardConnection.MaxRequestBodyBytes + 1;
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes(
+                $"POST http://10.0.0.5:8080/upload HTTP/1.1\r\nContent-Length: {oversized}\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, Allowlist, query => Task.FromResult(new ProxyFetchResult { Success = true }), message => { }, null, null, blocks);
+            }
+
+            Assert.Equal(new[] { "TooLarge http://10.0.0.5:8080" }, blocks.Reports);
+        }
+
+        [Fact]
+        public async Task ChunkedBodyNoiseIsNeverAReportedBlock()
+        {
+            // The 411 posture is a protocol handshake problem, not a per-origin block: it must not
+            // land in the admin's blocked list.
+            var blocks = new RecordingBlockReporter();
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes(
+                "POST http://10.0.0.5:8080/x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, Allowlist, query => Task.FromResult(new ProxyFetchResult { Success = true }), message => { }, null, null, blocks);
+            }
+
+            Assert.Empty(blocks.Reports);
+        }
+
+        [Fact]
         public async Task RefusesChunkedRequestBodiesWith411WithoutTouchingTheFetcher()
         {
             // Browsers put a Content-Length on form/XHR bodies; a chunked request body has no

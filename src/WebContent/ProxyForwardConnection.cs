@@ -538,6 +538,14 @@ namespace WebContent
             var bodyOutcome = await TryResolveRequestBodyAsync(request, leftover, input, log);
             if (bodyOutcome.RefusalPage != null)
             {
+                if (bodyOutcome.BlockReason != null)
+                {
+                    // The request never left this machine, so this is one of the blocks only the
+                    // client can report (#69); the 411/400 body noise carries no reason and stays
+                    // out of the admin's blocked list.
+                    blocks?.Report(request.Uri, bodyOutcome.BlockReason);
+                }
+
                 await WriteAsync(output, bodyOutcome.RefusalPage);
                 return null;
             }
@@ -684,7 +692,7 @@ namespace WebContent
             {
                 var reason = $"The request body for '{request.RawTarget}' declares {declared} bytes, past the proxy's {MaxRequestBodyBytes} byte request cap.";
                 log(reason);
-                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(413, "Payload Too Large", reason));
+                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(413, "Payload Too Large", reason), ProxyBlockReasons.TooLarge);
             }
 
             if (declared == 0)
@@ -741,21 +749,26 @@ namespace WebContent
             internal readonly byte[] Remainder;
             internal readonly byte[] RefusalPage;
 
-            private RequestBodyOutcome(byte[] body, byte[] remainder, byte[] refusalPage)
+            /// <summary>Set only when the refusal is a per-origin block worth reporting (#69);
+            /// protocol noise (411/400) leaves it null.</summary>
+            internal readonly string BlockReason;
+
+            private RequestBodyOutcome(byte[] body, byte[] remainder, byte[] refusalPage, string blockReason)
             {
                 Body = body;
                 Remainder = remainder ?? new byte[0];
                 RefusalPage = refusalPage;
+                BlockReason = blockReason;
             }
 
             internal static RequestBodyOutcome Accept(byte[] body, byte[] remainder = null)
             {
-                return new RequestBodyOutcome(body, remainder, null);
+                return new RequestBodyOutcome(body, remainder, null, null);
             }
 
-            internal static RequestBodyOutcome Refuse(byte[] page)
+            internal static RequestBodyOutcome Refuse(byte[] page, string blockReason = null)
             {
-                return new RequestBodyOutcome(null, null, page);
+                return new RequestBodyOutcome(null, null, page, blockReason);
             }
         }
 
