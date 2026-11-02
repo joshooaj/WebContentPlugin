@@ -62,7 +62,19 @@ public class McWildcardAllowlistProbeTests
 
             ManagementClientUi.CollapseTreeToRoot(mcMain, timeoutSeconds: 60, allowExpanded: new[] { config.PluginNodeName });
             ManagementClientUi.EnsureExpanded(mcMain, config.PluginNodeName, ManagementClientUi.WorkspacesNodeName);
-            ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName);
+            try
+            {
+                ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName);
+            }
+            catch (InvalidOperationException first)
+            {
+                // Diagnostics before giving up (the #74 walk passed this morning - find out
+                // whether the child is renamed, gone, or just unrealized).
+                ManagementClientUi.DumpWorkspaceChildren(mcMain, log);
+                log.AppendLine($"first expansion pass failed ({first.Message}); one retry");
+                ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName);
+            }
+
             ManagementClientUi.SelectTreeItem(mcMain, config.McWorkspaceName);
 
             var targetsBox = ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 30);

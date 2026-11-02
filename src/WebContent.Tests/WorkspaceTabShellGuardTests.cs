@@ -114,6 +114,23 @@ namespace WebContent.Tests
             Assert.Equal("True", grid.Attribute("IsReadOnly")?.Value);
             Assert.Equal("False", grid.Attribute("CanUserAddRows")?.Value);
             Assert.Equal("False", grid.Attribute("CanUserDeleteRows")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserResizeRows")?.Value);
+
+            // Live finding (2026-11-02, MC-13 walk): a tri-state string on any WPF-boolean
+            // DataGrid attribute - "CanUserResizeRows=Disabled" was the offender - throws the
+            // BAML loader and takes the ENTIRE config page down (GenerateDetailUserControl
+            // fails; not one control renders). Every WPF DataGrid CanUser* property is a bool,
+            // so every one of them on every DataGrid of the page must carry exactly a bool.
+            foreach (var dataGrid in ConfigPageTabs().SelectMany(t => t.Descendants()).Where(e => e.Name.LocalName == "DataGrid"))
+            {
+                var triStateOffenders = dataGrid.Attributes()
+                    .Where(a => a.Name.LocalName.StartsWith("CanUser", System.StringComparison.Ordinal) &&
+                                a.Value != "True" && a.Value != "False")
+                    .Select(a => $"{a.Name.LocalName}={a.Value}")
+                    .ToArray();
+                Assert.True(triStateOffenders.Length == 0,
+                    $"{Name(dataGrid)} carries non-boolean value(s) on WPF-boolean attributes: {string.Join(", ", triStateOffenders)} - the BAML loader refuses the whole page.");
+            }
 
             foreach (var button in status.Descendants().Where(e => e.Name.LocalName == "Button"))
             {

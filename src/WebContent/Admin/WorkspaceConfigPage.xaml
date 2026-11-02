@@ -186,7 +186,7 @@
 
         <DataGrid Grid.Row="3" x:Name="dgStatusSessions" AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False"
-                  CanUserResizeRows="Disabled" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                  CanUserResizeRows="False" GridLinesVisibility="Horizontal" SelectionMode="Single"
                   HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
           <DataGrid.Columns>
             <DataGridTextColumn Header="XProtect user" Binding="{Binding UserName}" Width="160" />
