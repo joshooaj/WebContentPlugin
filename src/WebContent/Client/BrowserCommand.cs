@@ -111,27 +111,27 @@ namespace WebContent.Client
             CanExecuteChanged?.Invoke(this, e);
         }
 
+        private void LogUninitialized(BrowserAction action)
+        {
+            EnvironmentManager.Instance.Log(
+                true,
+                nameof(BrowserCommand),
+                $"Refused {action} on browser {_instance?.Id}: the view has no CoreWebView2 " +
+                "(initialization failed); the WebView recreates when the view is re-selected.");
+        }
+
         public bool CanExecute(object parameter)
         {
             if (!Enabled) return false;
 
-            switch (_action)
-            {
-                case BrowserAction.NavigateBack:
-                    return _instance?.WebView?.CanGoBack ?? false;
-                case BrowserAction.NavigateForward:
-                    return _instance?.WebView?.CanGoForward ?? false;
-                case BrowserAction.NavigateHome:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                case BrowserAction.NavigateTo:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                case BrowserAction.Refresh:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                case BrowserAction.Print:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                default:
-                    throw new InvalidOperationException($"BrowserAction not supported: {_action}");
-            }
+            var webView = _instance?.WebView;
+            // The wrapper's own CanGoBack/CanGoForward getters already answer false without a
+            // CoreWebView2; pass their values anyway so the admission rule is stated once.
+            return BrowserCommandAdmission.IsAvailable(
+                _action,
+                webView?.CoreWebView2 != null,
+                webView?.CanGoBack ?? false,
+                webView?.CanGoForward ?? false);
         }
 
         public void Execute(object parameter)
@@ -142,10 +142,12 @@ namespace WebContent.Client
                 switch (_action)
                 {
                     case BrowserAction.NavigateBack:
-                        _instance?.WebView?.GoBack();
+                        if (_instance?.WebView?.CoreWebView2 != null) _instance.WebView.GoBack();
+                        else LogUninitialized(_action);
                         break;
                     case BrowserAction.NavigateForward:
-                        _instance?.WebView?.GoForward();
+                        if (_instance?.WebView?.CoreWebView2 != null) _instance.WebView.GoForward();
+                        else LogUninitialized(_action);
                         break;
                     case BrowserAction.NavigateHome:
                         if (parameter is string address && _instance != null)
@@ -156,7 +158,11 @@ namespace WebContent.Client
                     case BrowserAction.NavigateTo:
                         break;
                     case BrowserAction.Refresh:
-                        _instance?.WebView?.Reload();
+                        // Reload() throws InvalidOperationException (VerifyCoreWebView2) when the
+                        // init failed — the crash the live user hit. Never call it without a
+                        // CoreWebView2; NeedsRecreation then recreates the WebView on next select.
+                        if (_instance?.WebView?.CoreWebView2 != null) _instance.WebView.Reload();
+                        else LogUninitialized(_action);
                         break;
                     case BrowserAction.Print:
                         _instance?.WebView?.CoreWebView2?.ShowPrintUI();

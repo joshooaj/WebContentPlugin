@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <Compile Include="..\WebContent\Client\AddressBarInteraction.cs" Link="AddressBarInteraction.cs" />
+    <Compile Include="..\WebContent\Client\BrowserCommandAdmission.cs" Link="BrowserCommandAdmission.cs" />
+    <Compile Include="..\WebContent\Enums.cs" Link="Enums.cs" />
     <Compile Include="..\WebContent\Client\BrowserProfileKey.cs" Link="BrowserProfileKey.cs" />
     <Compile Include="..\WebContent\Client\BrowserRegistry.cs" Link="BrowserRegistry.cs" />
     <Compile Include="..\WebContent\Client\CallbackOwnership.cs" Link="CallbackOwnership.cs" />
