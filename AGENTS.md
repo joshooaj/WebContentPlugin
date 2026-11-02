@@ -15,7 +15,7 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
   Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ProbeProxied' }  # filtered UI probes
   ```
 
-  All native commands run inside psake `Exec`, so a non-zero exit code fails the task — check `$psake.build_success` (or the exit code), not just the console. `Lint` is expected to fail right now: the repo carries a pre-existing `dotnet format` backlog (whitespace/final-newline/imports-ordering across ~40 files under `src/WebContent`), surfaced deliberately by the `Exec` wrapper. A red `Lint` is not a regression to chase when touching unrelated code; don't chain it onto deploy runs until the backlog is settled.
+  All native commands run inside psake `Exec`, so a non-zero exit code fails the task — check `$psake.build_success` (or the exit code), not just the console. `Lint` is green since the `chore: run dotnet format` commit; keep it green (run `dotnet format` and land reformatting as its own commit).
 - The plugin csproj is SDK-style (`<Project Sdk="Microsoft.NET.Sdk">`, `TargetFramework` net472) — raw `dotnet build` also works directly; full MSBuild (VS 2022) also still works but nothing in this repo needs it anymore. The psake `Build` task builds with the default (Debug) config; pass `-c Release` manually for release drops.
 
   ```powershell
