@@ -407,3 +407,5 @@ FodyWeavers.xsd
 .env
 tests/ux/uxconfig.json
 artifacts/
+
+.secretstore

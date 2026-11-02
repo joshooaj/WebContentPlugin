@@ -1,10 +1,20 @@
 # WebContentPlugin
 
-Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent` targets .NET Framework 4.7.2 in legacy csproj style; `src/WebContent.Tests` targets net10.0.
+Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent` targets .NET Framework 4.7.2 (SDK-style csproj); `src/WebContent.Tests` targets net10.0.
 
 ## Build
 
-- The plugin csproj is SDK-style (`<Project Sdk="Microsoft.NET.Sdk">`, `TargetFramework` net472) — `dotnet build` works directly; full MSBuild (VS 2022) also still works but nothing in this repo needs it anymore.
+- Task runner is `psakefile.ps1` (psake module — `Install-Module psake`). Tasks: `ToolRestore` (`dotnet tool restore`), `Build` (depends on ToolRestore), `Lint` (`dotnet format --verify-no-changes`), `DeployLocally`, `DeployToVms`; `Deploy` = DeployLocally + DeployToVms.
+
+  ```powershell
+  Invoke-psake -taskList Build, Deploy          # build + deploy to local machine and the VMS server
+  Invoke-psake -taskList Build, DeployLocally   # local-only (when the Event Server plugin is unaffected)
+  Invoke-psake -taskList Build, DeployToVms     # VMS server only
+  Invoke-psake -taskList Lint                   # dotnet format --verify-no-changes
+  ```
+
+  All native commands run inside psake `Exec`, so a non-zero exit code fails the task — check `$psake.build_success` (or the exit code), not just the console. `Lint` is expected to fail right now: the repo carries a pre-existing `dotnet format` backlog (whitespace/final-newline/imports-ordering across ~40 files under `src/WebContent`), surfaced deliberately by the `Exec` wrapper. A red `Lint` is not a regression to chase when touching unrelated code; don't chain it onto deploy runs until the backlog is settled.
+- The plugin csproj is SDK-style (`<Project Sdk="Microsoft.NET.Sdk">`, `TargetFramework` net472) — raw `dotnet build` also works directly; full MSBuild (VS 2022) also still works but nothing in this repo needs it anymore. The psake `Build` task builds with the default (Debug) config; pass `-c Release` manually for release drops.
 
   ```powershell
   dotnet build src/WebContent/WebContent.csproj -c Debug   # or -c Release
@@ -23,12 +33,12 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
 
 ## Deploy for live-host testing
 
-1. Kill plugin hosts first, or the copy fails on locked DLLs: `Stop-Process -Name client,VideoOS.Administration` (escalate to `-Force` for survivors).
-2. Copy `output\WebContent\*` to `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin` — the `INSTALLFOLDER` from `src/Setup/setup.wxs`. The `VideoOS` root is deliberate: both `Milestone\MIPPlugins` and `VideoOS\MIPPlugins` are valid MIP roots (OEM compatibility).
-3. Elevate the copy: `Start-Process -Verb runas -FilePath pwsh -ArgumentList '-NoProfile','-Command','<copy>'`. Leave off `-Wait` under a shell timeout; the UAC prompt is interactive, so launch and poll the destination.
-4. Verify by file hash, not timestamp: `Copy-Item` preserves the source `LastWriteTime`, so a good copy can still look stale.
-5. The Event Server machine (the proxy fetcher's home) is deployed the same way but remotely: `New-PSSession -ComputerName vms.joshooaj.com -Credential <jhadmin creds from .env>`, `Stop-Service MilestoneEventServerService` (its stop is slow — wait for `Stopped` before copying or the dll is still locked), `Copy-Item -ToSession`, `Start-Service`. WinRM works with those credentials (bare negotiate/Kerberos does not). An ES restart disposes every running client's `MessageCommunication` — desktop clients must be restarted afterwards or every `TransmitMessage` dies with `Call to TransmitMessage after call to Dispose?`.
-6. Logs (verified on BEAST): Smart Client plugin `EnvironmentManager.Log` output lands in `%ProgramData%\Milestone\XProtect Smart Client\MIPLog.txt` (top level, plus rolling `MIPLogs\MIPLog.N.txt` — there is no Smart Client `Logs\` folder there); Management Client logs to `Logs\MIP.log` under its own ProgramData folder; the Event Server writes its MIP log to `%ProgramData%\Milestone\XProtect Event Server\logs\MIP.log` (rolled archives under `logs\MIPLogs\`; Event Server tray icon → "Show MIP logs"). Caveat: at least one Smart Client install has been observed loading the plugin view into a separate `VideoOS.OAuth2TokenGenerator.exe` process rather than `Client.exe` — if a session's plugin entries are missing from `MIPLog.txt` but the view visibly runs, hunt for the actual hosting process before concluding the plugin never loaded. `MIP.log`/`MIPLog.txt` can be absent mid-session or when client logging is disabled, so missing logs are no proof the plugin never ran.
+Use the psake deploy tasks (see Build); they encode the procedure below.
+
+1. Local machine: `Invoke-psake -taskList Build, DeployLocally` — kills plugin hosts (`Client`, `VideoOS.Administration`), wipes and recreates `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin` (the `INSTALLFOLDER` from `src/Setup/setup.wxs`), copies the drop. No elevation needed: the current user has full control on that folder (deliberate ACL grant on this machine — `C:\Program Files\VideoOS\MIPPlugins` is the MIP root; both `Milestone\MIPPlugins` and `VideoOS\MIPPlugins` are valid roots, OEM compatibility). If a copy ever fails on access denied, re-check the ACL before reaching for `Start-Process -Verb runas`; if hosts survive the Stop-Process, escalate to `-Force`.
+2. Verify by file hash, not timestamp: `Copy-Item` preserves the source `LastWriteTime`, so a good copy can still look stale.
+3. The Event Server machine (the proxy fetcher's home): `Invoke-psake -taskList Build, DeployToVms` — needs `.env` (`VMS_ADDRESS`, `VMS_CREDENTIAL`, …) and `.secretstore` (Clixml-protected password unlocking the SecretStore that holds the credential named `$env:VMS_CREDENTIAL`); both are gitignored. `Deploy-MipPlugin` in `scripts/helpers.ps1` copies the drop to a remote temp folder, kills the listed processes, stops `MilestoneEventServerService`, retries the destination wipe for up to a minute (the service stop is slow — the retry window absorbs the still-locked dll), copies into place, and restarts only the services it stopped. WinRM works with those credentials (bare negotiate/Kerberos does not). An ES restart disposes every running client's `MessageCommunication` — desktop clients must be restarted afterwards or every `TransmitMessage` dies with `Call to TransmitMessage after call to Dispose?`. `scripts/deploy-event-server-plugin.ps1` predates the psake flow and is superseded by `DeployToVms`.
+4. Logs (verified on BEAST): Smart Client plugin `EnvironmentManager.Log` output lands in `%ProgramData%\Milestone\XProtect Smart Client\MIPLog.txt` (top level, plus rolling `MIPLogs\MIPLog.N.txt` — there is no Smart Client `Logs\` folder there); Management Client logs to `Logs\MIP.log` under its own ProgramData folder; the Event Server writes its MIP log to `%ProgramData%\Milestone\XProtect Event Server\logs\MIP.log` (rolled archives under `logs\MIPLogs\`; Event Server tray icon → "Show MIP logs"). Caveat: at least one Smart Client install has been observed loading the plugin view into a separate `VideoOS.OAuth2TokenGenerator.exe` process rather than `Client.exe` — if a session's plugin entries are missing from `MIPLog.txt` but the view visibly runs, hunt for the actual hosting process before concluding the plugin never loaded. `MIP.log`/`MIPLog.txt` can be absent mid-session or when client logging is disabled, so missing logs are no proof the plugin never ran.
 
 ## Agent skills
 
