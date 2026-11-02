@@ -90,7 +90,9 @@ namespace WebContent.Client
         /// <summary>
         /// Ticket #52: flattens the admin proxy allowlist to the canonical, comma-separated
         /// origin list the view item consumes. Invalid entries (bad scheme/host/port) are
-        /// dropped; duplicates collapse.
+        /// dropped; duplicates collapse. #73: the flattening goes through the entry's
+        /// <c>EffectivePattern</c>, so wildcard pattern entries seed as their canonical
+        /// wildcard form and legacy host records seed exactly as before.
         /// </summary>
         private static string BuildProxyTargetsProperty(List<ProxyTargetConfiguration> targets)
         {
@@ -108,7 +110,7 @@ namespace WebContent.Client
                     continue;
                 }
 
-                if (ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin) &&
+                if (ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.EffectivePattern, target.Port, out var origin) &&
                     seenOrigins.Add(origin))
                 {
                     canonical.Add(origin);

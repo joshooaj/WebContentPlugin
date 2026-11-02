@@ -88,6 +88,26 @@ namespace WebContent.Client
 
         private readonly bool _designerMode;
         private BrowserInstance _browser;
+
+        /// <summary>
+        /// #73: the VMS's own host name for the wildcard SSRF floor - the Management Server /
+        /// API Gateway host the platform itself knows from <c>EnvironmentManager</c>. Wildcard
+        /// allowlist entries never match it; explicit exact entries still may. A null/absent
+        /// value (offline, designer) just leaves the matcher's syntactic floor (IPs, localhost).
+        /// </summary>
+        private static string[] VmsFloorHosts()
+        {
+            try
+            {
+                var host = EnvironmentManager.Instance?.MasterSite?.ServerId?.Uri?.Host;
+                return string.IsNullOrWhiteSpace(host) ? null : new[] { host };
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         public BrowserInstance Browser
         {
             get
@@ -109,7 +129,8 @@ namespace WebContent.Client
                         settings?.ProxyTargetsProperty,
                         settings?.WorkspaceItemId,
                         settings?.DefinitionFingerprint,
-                        out proxyProfile);
+                        out proxyProfile,
+                        VmsFloorHosts());
 
                     _browser = BrowserManager.GetBrowser(
                         Id,
@@ -129,7 +150,8 @@ namespace WebContent.Client
                         settings.ProxyTargetsProperty,
                         settings.WorkspaceItemId,
                         settings.DefinitionFingerprint,
-                        out proxyProfile);
+                        out proxyProfile,
+                        VmsFloorHosts());
 
                     if (BrowserManager.ApplyProxyProfile(_browser, proxyProfile))
                     {

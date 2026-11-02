@@ -46,6 +46,7 @@ namespace WebContent.Client
         /// </summary>
         private readonly ProxyBlockTally _tally;
         private IReadOnlyList<string> _canonicalTargets;
+        private IReadOnlyList<string> _vmsFloorHosts;
         private TcpListener _listener;
         private volatile bool _stopping;
 
@@ -57,9 +58,11 @@ namespace WebContent.Client
             IReadOnlyList<string> canonicalTargets,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
             ProxyViewSessionContext session = null,
-            ProxyBlockTally tally = null)
+            ProxyBlockTally tally = null,
+            IEnumerable<string> vmsFloorHosts = null)
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
+            _vmsFloorHosts = vmsFloorHosts == null ? new string[0] : (IReadOnlyList<string>)new List<string>(vmsFloorHosts);
             _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));
             _session = session ?? new ProxyViewSessionContext
             {
@@ -82,10 +85,12 @@ namespace WebContent.Client
             _tls = new ProxyLoopbackTls(RequestLeafAsync, message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
         }
 
-        /// <summary>Swap the allowlist gate live (an admin target edit needs no browser restart).</summary>
-        internal void UpdateTargets(IReadOnlyList<string> canonicalTargets)
+        /// <summary>Swap the allowlist gate live (an admin target edit needs no browser restart).
+        /// #73: the wildcard floor travels with the entries - both come from the profile.</summary>
+        internal void UpdateTargets(IReadOnlyList<string> canonicalTargets, IEnumerable<string> vmsFloorHosts = null)
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
+            _vmsFloorHosts = vmsFloorHosts == null ? new string[0] : (IReadOnlyList<string>)new List<string>(vmsFloorHosts);
         }
 
         /// <summary>Bind 127.0.0.1:0 and start accepting. The assigned port is available after.</summary>
@@ -246,7 +251,8 @@ namespace WebContent.Client
                             message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), $"Proxy listener on port {Port}: {message}"),
                             _tls.AcceptTunnelAsync,
                             OpenTunnelAsync,
-                            _tally);
+                            _tally,
+                            _vmsFloorHosts);
                     }
                 }
                 catch (Exception exception)

@@ -80,6 +80,10 @@ namespace WebContent
         /// 403, refused tunnel, TLS termination failure, and the mapped failure codes coming back
         /// on the fetch path — is filed with the reporter before the browser sees its error page.
         /// Null reporter (tests, non-proxied wiring) changes nothing about the traffic itself.
+        ///
+        /// #73: the canonical entries may be wildcard patterns; <c>vmsFloorHosts</c> carries the
+        /// VMS's own host names for the matcher's SSRF floor. Both ride the one shared
+        /// <see cref="ProxyPolicy"/> matcher inside <see cref="ProxyForwardPolicy"/>.
         /// </summary>
         internal static async Task HandleAsync(
             Stream input,
@@ -89,7 +93,8 @@ namespace WebContent
             Action<string> log,
             Func<Stream, byte[], Uri, Task<Stream>> unwrapTunnelTls,
             Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel,
-            IProxyBlockReporter blocks)
+            IProxyBlockReporter blocks,
+            System.Collections.Generic.IEnumerable<string> vmsFloorHosts = null)
         {
             var head = await ReadRequestHeadAsync(input);
             if (head == null)
@@ -99,7 +104,7 @@ namespace WebContent
                 return;
             }
 
-            var disposition = ProxyForwardPolicy.Decide(canonicalTargets, head.Text, out var request, out var rejectReason);
+            var disposition = ProxyForwardPolicy.Decide(canonicalTargets, head.Text, null, vmsFloorHosts, out var request, out var rejectReason);
             switch (disposition)
             {
                 case ProxyForwardDisposition.BadRequest:
@@ -154,7 +159,7 @@ namespace WebContent
 
                     try
                     {
-                        await ServeTunnelRequestsAsync(tunnel, canonicalTargets, request.Uri, fetch, log, openTunnel, blocks);
+                        await ServeTunnelRequestsAsync(tunnel, canonicalTargets, request.Uri, fetch, log, openTunnel, blocks, vmsFloorHosts);
                     }
                     finally
                     {
@@ -335,7 +340,8 @@ namespace WebContent
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
             Action<string> log,
             Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel,
-            IProxyBlockReporter blocks)
+            IProxyBlockReporter blocks,
+            System.Collections.Generic.IEnumerable<string> vmsFloorHosts)
         {
             var pending = new byte[0];
             while (true)
@@ -346,7 +352,7 @@ namespace WebContent
                     return;
                 }
 
-                var disposition = ProxyForwardPolicy.Decide(canonicalTargets, head.Text, tunnelOrigin, out var request, out var rejectReason);
+                var disposition = ProxyForwardPolicy.Decide(canonicalTargets, head.Text, tunnelOrigin, vmsFloorHosts, out var request, out var rejectReason);
                 switch (disposition)
                 {
                     case ProxyForwardDisposition.Forward:

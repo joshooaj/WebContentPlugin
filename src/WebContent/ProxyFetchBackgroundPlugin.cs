@@ -107,10 +107,12 @@ namespace WebContent
 
                 // Ticket #54 server-side hardening: the fetcher only reaches origins some proxied
                 // workspace actually allowlists, so the server network cannot be driven at
-                // arbitrary targets by a crafted request.
+                // arbitrary targets by a crafted request. #73: the same plugin supplies the VMS's
+                // own host names so the shared matcher floors every wildcard entry here too.
                 _allowlist = new ProxyServerAllowlist(
                     ResolveWorkspacePropertySnapshots,
-                    message => EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), message));
+                    message => EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), message),
+                    ResolveVmsFloorHosts);
 
                 // ADR-0003: the same plugin answers leaf-mint requests for the loopback TLS
                 // termination; the same allowlist union gates minting exactly like fetching.
@@ -1191,6 +1193,18 @@ namespace WebContent
             }
 
             return snapshots;
+        }
+
+        /// <summary>
+        /// #73: the VMS's own host names for the wildcard SSRF floor - the Management Server /
+        /// API Gateway host the platform knows from <c>EnvironmentManager</c> (the very server
+        /// this fetcher runs beside / on). Wildcard allowlist entries never match a host listed
+        /// here; explicit exact entries still may.
+        /// </summary>
+        private static System.Collections.Generic.IEnumerable<string> ResolveVmsFloorHosts()
+        {
+            var host = EnvironmentManager.Instance?.MasterSite?.ServerId?.Uri?.Host;
+            return string.IsNullOrWhiteSpace(host) ? new string[0] : new[] { host };
         }
 
         private void TransmitFailure(string correlationId, FQID requester, string errorCode, string message)

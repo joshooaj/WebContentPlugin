@@ -80,7 +80,7 @@ namespace WebContent
             out ProxyForwardedRequest request,
             out string rejectReason)
         {
-            return Decide(canonicalTargets, requestHead, null, out request, out rejectReason);
+            return Decide(canonicalTargets, requestHead, null, null, out request, out rejectReason);
         }
 
         /// <summary>
@@ -92,6 +92,24 @@ namespace WebContent
             IEnumerable<string> canonicalTargets,
             string requestHead,
             Uri tunnelOrigin,
+            out ProxyForwardedRequest request,
+            out string rejectReason)
+        {
+            return Decide(canonicalTargets, requestHead, tunnelOrigin, null, out request, out rejectReason);
+        }
+
+        /// <summary>
+        /// #73: the full decision form - the workspace's canonical allowlist entries (exact
+        /// origins or wildcard patterns) plus the VMS host names the wildcard SSRF floor is
+        /// applied against. Every origin comparison below is the one shared
+        /// <see cref="ProxyPolicy.IsRequestAllowed"/> matcher; this gate keeps no comparison
+        /// logic of its own.
+        /// </summary>
+        internal static ProxyForwardDisposition Decide(
+            IEnumerable<string> canonicalTargets,
+            string requestHead,
+            Uri tunnelOrigin,
+            IEnumerable<string> vmsFloorHosts,
             out ProxyForwardedRequest request,
             out string rejectReason)
         {
@@ -111,7 +129,7 @@ namespace WebContent
                 // #56: an allowlisted https origin gets the tunnel TERMINATED at this listener
                 // (ephemeral local certificate, ADR-0002); anything else is refused with the same
                 // origin posture as a plain request, and the browser is never let go direct.
-                if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri))
+                if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri, vmsFloorHosts))
                 {
                     // #57 (live repro): plain ws:// reaches the browser proxy as CONNECT too, so
                     // an origin allowlisted as its http twin gets the tunnel accepted - but only
@@ -120,7 +138,7 @@ namespace WebContent
                     // https entries terminate as MITM TLS, http entries may only ride a verified
                     // ws:// byte tunnel.
                     var httpTwin = new UriBuilder(request.Uri) { Scheme = Uri.UriSchemeHttp }.Uri;
-                    if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, httpTwin))
+                    if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, httpTwin, vmsFloorHosts))
                     {
                         rejectReason = $"The CONNECT target '{ProxyPolicy.CanonicalOrigin(request.Uri)}' is not an allowlisted https proxy origin (nor an http twin for a ws:// CONNECT tunnel); the tunnel is refused and the browser is never taken direct.";
                         return ProxyForwardDisposition.OriginNotAllowed;
@@ -150,7 +168,7 @@ namespace WebContent
                     return ProxyForwardDisposition.BadRequest;
                 }
 
-                if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri))
+                if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri, vmsFloorHosts))
                 {
                     rejectReason = $"The websocket origin '{ProxyPolicy.CanonicalOrigin(request.Uri)}' is not in the workspace proxy allowlist; the tunnel is refused and the browser is never taken direct.";
                     return ProxyForwardDisposition.OriginNotAllowed;
@@ -159,7 +177,7 @@ namespace WebContent
                 return ProxyForwardDisposition.WebSocketTunnel;
             }
 
-            if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri))
+            if (!ProxyPolicy.IsRequestAllowed(canonicalTargets, request.Uri, vmsFloorHosts))
             {
                 rejectReason = $"The request origin '{ProxyPolicy.CanonicalOrigin(request.Uri)}' is not in the workspace proxy allowlist.";
                 return ProxyForwardDisposition.OriginNotAllowed;

@@ -319,21 +319,23 @@ namespace WebContent.Admin
 
         /// <summary>
         /// Ticket #52: parses the admin's one-origin-per-line proxy targets into canonical
-        /// scheme/host/port records. Since #56 a line may carry the accept-untrusted-certificate
-        /// flag token, stored on the entry itself. An invalid line rejects the save whatever the
-        /// proxy toggle state (same posture as the home address), duplicates and other overlapping
-        /// entries collapse onto one record (any flagged duplicate flags the origin), and an
-        /// enabled proxy with no targets at all is rejected so the toggle can never mean "allow
-        /// nothing" by accident. A disabled proxy keeps the targets parsed and stored anyway -
-        /// turning the proxy off must not erase the allowlist the next admin will need (MC-9 in
-        /// the verification matrix).
+        /// records. Since #56 a line may carry the accept-untrusted-certificate flag token,
+        /// stored on the entry itself. Since #73 a line's host may be a wildcard pattern
+        /// ("*.tail" or the lone "*"), and saved records carry the structured <c>pattern</c>
+        /// member instead of the legacy <c>host</c>. An invalid line rejects the save whatever
+        /// the proxy toggle state (same posture as the home address), duplicates and other
+        /// overlapping entries collapse onto one record (any flagged duplicate flags the entry),
+        /// and an enabled proxy with no targets at all is rejected so the toggle can never mean
+        /// "allow nothing" by accident. A disabled proxy keeps the targets parsed and stored
+        /// anyway - turning the proxy off must not erase the allowlist the next admin will need
+        /// (MC-9 in the verification matrix).
         /// </summary>
         private static bool TryBuildProxyTargets(string itemName, FQID itemFqid, string targetsText, bool proxyEnabled, out List<ProxyTargetConfiguration> targets)
         {
             targets = new List<ProxyTargetConfiguration>();
-            var origins = new List<string>();
-            var seenOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var untrustedOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var canonicalEntries = new List<string>();
+            var seenEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var untrustedEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var rawLine in (targetsText ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             {
@@ -343,33 +345,41 @@ namespace WebContent.Admin
                     continue;
                 }
 
-                if (!ProxyPolicy.TryParseTargetEntry(line, out var origin, out var acceptUntrusted))
+                if (!ProxyPolicy.TryParseTargetEntry(line, out var entry, out var acceptUntrusted))
                 {
                     EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): invalid proxy target '{line}'.");
                     MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, line), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
 
-                if (seenOrigins.Add(origin))
+                if (seenEntries.Add(entry))
                 {
-                    origins.Add(origin);
+                    canonicalEntries.Add(entry);
                 }
 
                 if (acceptUntrusted)
                 {
-                    untrustedOrigins.Add(origin);
+                    untrustedEntries.Add(entry);
                 }
             }
 
-            foreach (var origin in origins)
+            foreach (var entry in canonicalEntries)
             {
-                var parsedOrigin = new Uri(origin);
+                // #73: the split is the shared canonical-entry parser, and the record it writes
+                // is the new structured shape - scheme + pattern + port, no legacy host member.
+                if (!ProxyPolicy.TrySplitCanonicalEntry(entry, out var scheme, out var pattern, out var port))
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): canonical proxy target '{entry}' failed to re-split.");
+                    MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, entry), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+
                 targets.Add(new ProxyTargetConfiguration
                 {
-                    Scheme = parsedOrigin.Scheme,
-                    Host = parsedOrigin.Host,
-                    Port = parsedOrigin.Port,
-                    AcceptUntrusted = untrustedOrigins.Contains(origin),
+                    Scheme = scheme,
+                    Pattern = pattern,
+                    Port = port,
+                    AcceptUntrusted = untrustedEntries.Contains(entry),
                 });
             }
 
@@ -385,7 +395,9 @@ namespace WebContent.Admin
 
         /// <summary>
         /// Renders stored proxy target records back as canonical one-per-line text for the admin
-        /// page; invalid stored records are dropped rather than shown.
+        /// page; invalid stored records are dropped rather than shown. #73: both stored shapes
+        /// (legacy host, new pattern) render through the same canonical path, so an old
+        /// workspace re-opens with its entries intact and wildcard entries read back verbatim.
         /// </summary>
         private static string DescribeProxyTargets(List<ProxyTargetConfiguration> targets)
         {
@@ -397,9 +409,9 @@ namespace WebContent.Admin
             var lines = new List<string>();
             foreach (var target in targets)
             {
-                if (target != null && ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin))
+                if (target != null && ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.EffectivePattern, target.Port, out var entry))
                 {
-                    lines.Add(ProxyPolicy.DescribeTargetEntry(origin, target.AcceptUntrusted));
+                    lines.Add(ProxyPolicy.DescribeTargetEntry(entry, target.AcceptUntrusted));
                 }
             }
 

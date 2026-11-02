@@ -9,20 +9,27 @@ namespace WebContent
     /// can no longer be driven at arbitrary targets of the server network. The workspace snapshot
     /// is re-resolved through a caller-supplied seam (the MIP configuration API in production)
     /// and kept across transient resolution failures; before the first successful resolve the
-    /// gate is closed.
+    /// gate is closed. Since #73 the union carries structured pattern entries and every decision
+    /// goes through the one shared <see cref="ProxyPolicy"/> matcher - including the wildcard
+    /// SSRF floor, fed with the VMS's own host names through a second seam. This gate is also
+    /// the minting gate the leaf issuer (<see cref="ProxyLeafIssuer"/>) consults, so fetch and
+    /// mint stay one policy.
     /// </summary>
     internal sealed class ProxyServerAllowlist
     {
         private static readonly TimeSpan DefaultRefreshInterval = TimeSpan.FromSeconds(60);
 
         private readonly Func<IEnumerable<Dictionary<string, string>>> _snapshotResolver;
+        private readonly Func<IEnumerable<string>> _vmsFloorHostsResolver;
         private readonly Action<string> _log;
         private readonly object _sync = new object();
         private Snapshot _snapshot; // null until the first successful resolve
+        private IReadOnlyList<string> _floorHosts = new string[0];
         private DateTime _nextRefreshUtc = DateTime.MinValue;
 
-        /// <summary>One refresh's union: allowlisted origins, and the flagged subset whose
-        /// entries carry the #56 per-target accept-untrusted-certificate override.</summary>
+        /// <summary>One refresh's union: allowlisted canonical entries (exact origins or #73
+        /// wildcard patterns), and the flagged subset whose entries carry the #56 per-target
+        /// accept-untrusted-certificate override.</summary>
         private sealed class Snapshot
         {
             internal readonly HashSet<string> Origins;
@@ -36,14 +43,28 @@ namespace WebContent
         }
 
         internal ProxyServerAllowlist(Func<IEnumerable<Dictionary<string, string>>> snapshotResolver, Action<string> log)
+            : this(snapshotResolver, log, null)
+        {
+        }
+
+        /// <param name="vmsFloorHostsResolver">#73: supplies the VMS's own host names (Management
+        /// Server / API Gateway) that wildcard entries must never match. A resolver failure
+        /// keeps the last known floor rather than silently widening every wildcard.</param>
+        internal ProxyServerAllowlist(
+            Func<IEnumerable<Dictionary<string, string>>> snapshotResolver,
+            Action<string> log,
+            Func<IEnumerable<string>> vmsFloorHostsResolver)
         {
             _snapshotResolver = snapshotResolver ?? throw new ArgumentNullException(nameof(snapshotResolver));
+            _vmsFloorHostsResolver = vmsFloorHostsResolver;
             _log = log ?? throw new ArgumentNullException(nameof(log));
         }
 
         /// <summary>
-        /// True when the target origin is allowlisted by at least one proxied workspace. Refuses
-        /// with an actionable reason when the gate is closed or the origin misses every list.
+        /// True when the target origin is allowlisted by at least one proxied workspace - through
+        /// the shared #73 matcher, so an exact entry matches exactly and a wildcard entry matches
+        /// with the SSRF floor applied. Refuses with an actionable reason when the gate is closed
+        /// or the origin misses every list.
         /// </summary>
         internal bool IsAllowed(Uri target, out string refuseReason)
         {
@@ -57,13 +78,13 @@ namespace WebContent
                     return false;
                 }
 
-                var origin = ProxyPolicy.CanonicalOrigin(target);
-                if (_snapshot.Origins.Contains(origin))
+                if (ProxyPolicy.IsRequestAllowed(_snapshot.Origins, target, _floorHosts))
                 {
                     refuseReason = null;
                     return true;
                 }
 
+                var origin = ProxyPolicy.CanonicalOrigin(target);
                 refuseReason = $"The origin '{origin}' is not in the proxy allowlist of any proxied workspace.";
                 return false;
             }
@@ -73,7 +94,9 @@ namespace WebContent
         /// Ticket #56: True only when the allowlist entry for THIS origin carries the admin's
         /// accept-untrusted-certificate flag in at least one proxied workspace. An override for
         /// one target never reaches a neighbouring origin, and while the gate is closed (never
-        /// resolved) no override exists — validation is the fail-closed default.
+        /// resolved) no override exists — validation is the fail-closed default. #73: the entry
+        /// may be a wildcard, and the same floor applies - a flagged wildcard never relaxes
+        /// validation for a floored host.
         /// </summary>
         internal bool AcceptsUntrustedCertificate(Uri target)
         {
@@ -82,7 +105,7 @@ namespace WebContent
             lock (_sync)
             {
                 return _snapshot != null &&
-                       _snapshot.UntrustedOrigins.Contains(ProxyPolicy.CanonicalOrigin(target));
+                       ProxyPolicy.IsRequestAllowed(_snapshot.UntrustedOrigins, target, _floorHosts);
             }
         }
 
@@ -112,6 +135,29 @@ namespace WebContent
                 return;
             }
 
+            // #73: the wildcard floor. A resolver failure keeps the previous floor - widening
+            // wildcards on a transient fault would be the one direction this must never flap.
+            if (_vmsFloorHostsResolver != null)
+            {
+                try
+                {
+                    var hosts = new List<string>();
+                    foreach (var host in _vmsFloorHostsResolver() ?? new string[0])
+                    {
+                        if (!string.IsNullOrWhiteSpace(host))
+                        {
+                            hosts.Add(host.Trim().ToLowerInvariant());
+                        }
+                    }
+
+                    _floorHosts = hosts;
+                }
+                catch (Exception exception)
+                {
+                    _log($"Proxy allowlist VMS host floor refresh failed: {exception.Message}");
+                }
+            }
+
             lock (_sync)
             {
                 _snapshot = resolved;
@@ -138,8 +184,10 @@ namespace WebContent
 
                 foreach (var target in settings.ProxyTargets)
                 {
+                    // #73: EffectivePattern is the one reader seam - legacy host records and new
+                    // pattern records canonicalize through the identical path.
                     if (target != null &&
-                        ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.Host, target.Port, out var origin))
+                        ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.EffectivePattern, target.Port, out var origin))
                     {
                         origins.Add(origin);
                         if (target.AcceptUntrusted)

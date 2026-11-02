@@ -268,8 +268,21 @@ namespace WebContent
         [DataMember(Name = "scheme")]
         public string Scheme { get; set; }
 
-        [DataMember(Name = "host")]
+        /// <summary>
+        /// Legacy (#52) exact-host member. Since #73 writers emit <see cref="Pattern"/> instead,
+        /// but readers accept this shape forever - stored workspaces are never migrated
+        /// write-back, and mixed versions must keep loading.
+        /// </summary>
+        [DataMember(Name = "host", EmitDefaultValue = false)]
         public string Host { get; set; }
+
+        /// <summary>
+        /// #73: the structured host pattern - an exact lower-case host, a leftmost-label wildcard
+        /// ("*.foo.bar.com"), or the lone full-host hatch ("*"). The new stored shape; readers
+        /// prefer it over <see cref="Host"/> when both are somehow present.
+        /// </summary>
+        [DataMember(Name = "pattern", EmitDefaultValue = false)]
+        public string Pattern { get; set; }
 
         [DataMember(Name = "port")]
         public int Port { get; set; }
@@ -281,5 +294,12 @@ namespace WebContent
         /// </summary>
         [DataMember(Name = "acceptUntrusted")]
         public bool AcceptUntrusted { get; set; }
+
+        /// <summary>
+        /// The host part to canonicalize: the #73 pattern when the record carries one, else the
+        /// legacy exact host. This is the one reader seam every gate and seeder goes through,
+        /// which is what keeps old and new stored shapes equivalent.
+        /// </summary>
+        internal string EffectivePattern => !string.IsNullOrWhiteSpace(Pattern) ? Pattern : Host;
     }
 }

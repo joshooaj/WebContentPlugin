@@ -66,7 +66,8 @@ namespace WebContent.Client
                         WorkspaceFingerprint = proxyProfile.WorkspaceFingerprint,
                         ClientMachine = Environment.MachineName,
                     },
-                    blocks);
+                    blocks,
+                    proxyProfile.VmsFloorHosts);
                 listener.Start();
                 proxyArguments = ProxyBrowserArguments.For(listener.Port);
                 proxyUserDataFolder = ProxiedUserDataFolder(id);
@@ -135,7 +136,7 @@ namespace WebContent.Client
             {
                 if (browser.ProxyBrowserArguments != null)
                 {
-                    browser.ProxyListener?.UpdateTargets(proxyProfile.CanonicalTargets);
+                    browser.ProxyListener?.UpdateTargets(proxyProfile.CanonicalTargets, proxyProfile.VmsFloorHosts);
                     return false;
                 }
 
@@ -154,7 +155,8 @@ namespace WebContent.Client
                         WorkspaceItemId = proxyProfile.WorkspaceItemId,
                         ClientMachine = Environment.MachineName,
                     },
-                    tally);
+                    tally,
+                    proxyProfile.VmsFloorHosts);
                 listener.Start();
                 browser.ProxyListener = listener;
                 browser.ProxyBrowserArguments = ProxyBrowserArguments.For(listener.Port);
