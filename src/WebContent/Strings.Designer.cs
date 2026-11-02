@@ -581,5 +581,41 @@ namespace WebContent {
                 return ResourceManager.GetString("StatusNoItemContext", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to 1 resource blocked.
+        /// </summary>
+        internal static string BlockedResourcesIndicatorOne {
+            get {
+                return ResourceManager.GetString("BlockedResourcesIndicatorOne", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} resources blocked.
+        /// </summary>
+        internal static string BlockedResourcesIndicatorMany {
+            get {
+                return ResourceManager.GetString("BlockedResourcesIndicatorMany", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy refused page resources during this page load. Click to list them..
+        /// </summary>
+        internal static string BlockedResourcesToolTip {
+            get {
+                return ResourceManager.GetString("BlockedResourcesToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Blocked page resources (this page load):.
+        /// </summary>
+        internal static string BlockedResourcesHeader {
+            get {
+                return ResourceManager.GetString("BlockedResourcesHeader", resourceCulture);
+            }
+        }
     }
 }

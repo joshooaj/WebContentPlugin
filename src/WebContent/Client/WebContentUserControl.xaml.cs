@@ -29,6 +29,16 @@ namespace WebContent.Client
         private readonly AddressBarInteraction _addressBarInteraction = new AddressBarInteraction();
         private WebContentViewModel _viewModel;
         private bool _isClosed;
+
+        /// <summary>
+        /// #83: the blocked-resource tally of the browser behind this control (per view
+        /// instance). The tally fires its Changed event from the listener's socket threads;
+        /// the indicator work is marshalled to this control's dispatcher.
+        /// </summary>
+        private ProxyBlockTally _blockTally;
+        private bool _blockedPanelOpen;
+        private int _blockRefreshQueued;
+
         public override bool ShowToolbar => false;
         public override bool Selectable => false;
         public WebContentUserControl()
@@ -59,6 +69,10 @@ namespace WebContent.Client
             LocalizeToolbar();
             addressBar.TextChanged += OnAddressBarTextChanged;
             _viewModel = DataContext as WebContentViewModel;
+            if (_viewModel != null)
+            {
+                _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+            }
         }
 
         // x:Static resolves static members by reflection at BAML load time and only sees
@@ -71,6 +85,7 @@ namespace WebContent.Client
             NavHome.ToolTip = Strings.AddressBarHomeToolTip;
             NavPrint.ToolTip = Strings.AddressBarPrintToolTip;
             addressBar.PlaceholderText = Strings.AddressBarPlaceholder;
+            blockedIndicator.ToolTip = Strings.BlockedResourcesToolTip;
         }
 
         private void OnAddressBarTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
@@ -105,6 +120,7 @@ namespace WebContent.Client
 
                 _viewModel.Init();
                 RegisterActiveControl(browser.Id);
+                BindBlockTally(browser);
 
                 if (browser.WebView == null)
                 {
@@ -159,6 +175,11 @@ namespace WebContent.Client
             try
             {
                 _isClosed = true;
+                UnbindBlockTally();
+                if (_viewModel != null)
+                {
+                    _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+                }
                 var browser = _viewModel?.Browser;
                 var browserId = browser?.Id ?? Guid.Empty;
                 var allowBackground = _viewModel?.ViewItemManager?.Settings.AllowBackgroundBrowser ?? false;
@@ -277,6 +298,190 @@ namespace WebContent.Client
                 addressWarning.Visibility = Visibility.Collapsed;
             }
         }
+
+        #region Blocked resources (#83)
+
+        /// <summary>
+        /// Attach this control to the browser's blocked-resource tally. The tally is owned by
+        /// the browser instance, so it survives listener rewires and WebView recreation; only a
+        /// different browser (or none) needs a re-subscription.
+        /// </summary>
+        private void BindBlockTally(BrowserInstance browser)
+        {
+            var tally = browser?.ProxyBlocks;
+            if (!ReferenceEquals(_blockTally, tally))
+            {
+                UnbindBlockTally();
+                _blockTally = tally;
+                if (_blockTally != null)
+                {
+                    _blockTally.Changed += BlockTally_Changed;
+                }
+            }
+
+            UpdateBlockedIndicator();
+        }
+
+        private void UnbindBlockTally()
+        {
+            if (_blockTally != null)
+            {
+                _blockTally.Changed -= BlockTally_Changed;
+                _blockTally = null;
+            }
+        }
+
+        private void BlockTally_Changed()
+        {
+            // Fires on listener socket threads; coalesce bursts into one dispatcher pass.
+            if (_isClosed)
+            {
+                return;
+            }
+
+            if (System.Threading.Interlocked.Exchange(ref _blockRefreshQueued, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    System.Threading.Interlocked.Exchange(ref _blockRefreshQueued, 0);
+                    if (!_isClosed)
+                    {
+                        UpdateBlockedIndicator();
+                    }
+                }), DispatcherPriority.Background);
+            }
+            catch (Exception)
+            {
+                // Dispatcher shutdown mid-teardown: the control is going away anyway.
+            }
+        }
+
+        private void ViewModel_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(WebContentViewModel.IsSetupState))
+            {
+                UpdateBlockedIndicator();
+            }
+        }
+
+        /// <summary>
+        /// Setup-mode only: a refusal count above zero shows "N resources blocked" in the
+        /// toolbar; zero blocks, or any runtime-mode state, hides it entirely (ordinary users
+        /// see nothing beyond the top-level error pages).
+        /// </summary>
+        private void UpdateBlockedIndicator()
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            var total = _blockTally?.TotalBlocks ?? 0;
+            if (_blockTally != null && _viewModel?.IsSetupState == true && total > 0)
+            {
+                blockedIndicatorText.Text = total == 1
+                    ? Strings.BlockedResourcesIndicatorOne
+                    : string.Format(System.Globalization.CultureInfo.InvariantCulture, Strings.BlockedResourcesIndicatorMany, total);
+                blockedIndicator.Visibility = Visibility.Visible;
+
+                if (_blockedPanelOpen)
+                {
+                    RebuildBlockedResourceRows(_blockTally);
+                }
+            }
+            else
+            {
+                blockedIndicator.Visibility = Visibility.Collapsed;
+                blockedResourcesPanel.Visibility = Visibility.Collapsed;
+                _blockedPanelOpen = false;
+            }
+        }
+
+        private void blockedIndicator_Click(object sender, RoutedEventArgs e)
+        {
+            // No Focus() calls: the indicator must not pull keyboard focus out of the browser
+            // beyond ordinary toolbar chrome (Smart Client focus etiquette) - in setup mode the
+            // browser is hidden anyway, and selection/copy in the list works without it.
+            _blockedPanelOpen = !_blockedPanelOpen;
+            if (_blockedPanelOpen && _blockTally != null)
+            {
+                RebuildBlockedResourceRows(_blockTally);
+                blockedResourcesPanel.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                blockedResourcesPanel.Visibility = Visibility.Collapsed;
+                _blockedPanelOpen = _blockedPanelOpen && _blockTally != null;
+            }
+        }
+
+        private void RebuildBlockedResourceRows(ProxyBlockTally tally)
+        {
+            blockedResourcesRows.Children.Clear();
+            blockedResourcesRows.Children.Add(new System.Windows.Controls.TextBlock
+            {
+                Text = Strings.BlockedResourcesHeader,
+                Foreground = System.Windows.Media.Brushes.White,
+                FontWeight = System.Windows.FontWeights.SemiBold,
+                Margin = new Thickness(2, 0, 2, 4),
+            });
+
+            foreach (var entry in tally.Snapshot())
+            {
+                var row = new System.Windows.Controls.Grid { Margin = new Thickness(0, 1, 0, 1) };
+                row.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = GridLength.Auto });
+
+                // Read-only TextBox, not a TextBlock: the canonical origin stays selectable and
+                // copyable for an admin pasting it into the allowlist editor.
+                var origin = new System.Windows.Controls.TextBox
+                {
+                    Text = entry.Origin,
+                    IsReadOnly = true,
+                    BorderThickness = new Thickness(0),
+                    Background = System.Windows.Media.Brushes.Transparent,
+                    Foreground = System.Windows.Media.Brushes.White,
+                    FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    IsTabStop = true,
+                };
+                System.Windows.Automation.AutomationProperties.SetAutomationId(origin, "blockedResourceOrigin");
+                System.Windows.Automation.AutomationProperties.SetHelpText(origin, entry.Origin);
+
+                var reason = new System.Windows.Controls.TextBlock
+                {
+                    Text = entry.ReasonLabel,
+                    Foreground = System.Windows.Media.Brushes.LightGray,
+                    Margin = new Thickness(8, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                System.Windows.Automation.AutomationProperties.SetAutomationId(reason, "blockedResourceReason");
+
+                var count = new System.Windows.Controls.TextBlock
+                {
+                    Text = entry.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    Foreground = System.Windows.Media.Brushes.White,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                System.Windows.Automation.AutomationProperties.SetAutomationId(count, "blockedResourceCount");
+
+                System.Windows.Controls.Grid.SetColumn(origin, 0);
+                System.Windows.Controls.Grid.SetColumn(reason, 1);
+                System.Windows.Controls.Grid.SetColumn(count, 2);
+                row.Children.Add(origin);
+                row.Children.Add(reason);
+                row.Children.Add(count);
+                blockedResourcesRows.Children.Add(row);
+            }
+        }
+
+        #endregion
 
         private void ViewItemWpfUserControl_MouseDown(object sender, MouseButtonEventArgs e)
         {

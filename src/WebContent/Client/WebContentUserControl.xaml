@@ -43,9 +43,19 @@
                         <platformUiControls:VideoOSIconBuiltInSource Icon="Print"/>
                     </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
                 </platformUiControls:VideoOSButtonTransparentSmall>
+                <!-- #83: setup-mode blocked-resources indicator. Collapsed while the tally is
+                     zero or the client is in runtime mode; click opens the per-page-load list. -->
+                <platformUiControls:VideoOSButtonTransparentSmall Name="blockedIndicator" DockPanel.Dock="Right" Visibility="Collapsed" Click="blockedIndicator_Click" Margin="2">
+                    <TextBlock Name="blockedIndicatorText" VerticalAlignment="Center" Margin="2 0" />
+                </platformUiControls:VideoOSButtonTransparentSmall>
                 <platformUiControls:VideoOSTextBoxSmall Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" Margin="0 2 2 2" IsEnabled="{Binding IsAddressEnabled}" />
             </DockPanel>
             <platformUiControls:VideoOSInlineMessageSmall Name="addressWarning" Appearance="Error" Visibility="Collapsed" MinLines="1" MaxLines="2" Margin="0 0 0 2" />
+            <!-- #83: per-view-instance list of what the loopback listener refused this page load:
+                 canonical origin (selectable for copying), refusal category, hit count. -->
+            <Border Name="blockedResourcesPanel" Visibility="Collapsed" Margin="0 0 0 2" Padding="4" BorderThickness="1" BorderBrush="Gray" Background="#33000000">
+                <StackPanel Name="blockedResourcesRows" />
+            </Border>
         </StackPanel>
         <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown">
             <TextBlock Name="FloatingPlaceholder" Visibility="{Binding IsWorkspaceFloating, Converter={StaticResource BooleanToVisibilityConverter}}"

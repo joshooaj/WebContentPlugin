@@ -294,4 +294,16 @@
   <data name="StatusNoItemContext" xml:space="preserve">
     <value>No workspace item context: this page cannot ask the Event Server for a status snapshot.</value>
   </data>
+  <data name="BlockedResourcesIndicatorOne" xml:space="preserve">
+    <value>1 resource blocked</value>
+  </data>
+  <data name="BlockedResourcesIndicatorMany" xml:space="preserve">
+    <value>{0} resources blocked</value>
+  </data>
+  <data name="BlockedResourcesToolTip" xml:space="preserve">
+    <value>The proxy refused page resources during this page load. Click to list them.</value>
+  </data>
+  <data name="BlockedResourcesHeader" xml:space="preserve">
+    <value>Blocked page resources (this page load):</value>
+  </data>
 </root>

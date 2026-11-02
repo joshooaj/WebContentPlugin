@@ -35,6 +35,15 @@ namespace WebContent.Client
             get => (ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal) == WorkSpaceState.Normal ? true : false;
         }
 
+        /// <summary>
+        /// #83: whether the client currently sits in setup mode. Raised by ApplyWorkspaceState on
+        /// every workspace-state transition; the blocked-resources indicator only renders true here.
+        /// </summary>
+        public bool IsSetupState
+        {
+            get => (ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal) == WorkSpaceState.Setup;
+        }
+
         private Visibility _toolbarVisibility = Visibility.Visible;
         public Visibility ToolbarVisibility
         {
@@ -459,6 +468,7 @@ namespace WebContent.Client
         private void ApplyWorkspaceState(WorkSpaceState state)
         {
             OnPropertyChanged(nameof(IsAddressEnabled));
+            OnPropertyChanged(nameof(IsSetupState));
             switch (state)
             {
                 case WorkSpaceState.Normal:
