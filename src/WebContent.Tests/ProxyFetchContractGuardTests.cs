@@ -30,6 +30,12 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyLeafRequestPayload))]
         [InlineData(typeof(ProxyLeafResponsePayload))]
         [InlineData(typeof(ProxyTunnelPayload))]
+        [InlineData(typeof(ProxyBlockReportPayload))]
+        [InlineData(typeof(ProxySessionEventPayload))]
+        [InlineData(typeof(ProxyStatusRequestPayload))]
+        [InlineData(typeof(ProxyStatusResponsePayload))]
+        [InlineData(typeof(ProxySessionStatusEntry))]
+        [InlineData(typeof(ProxyBlockEntry))]
         public void EveryPayloadFieldStaysInsideTheMessageWhitelist(Type payloadType)
         {
             foreach (var field in payloadType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -46,6 +52,10 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyLeafRequestPayload))]
         [InlineData(typeof(ProxyLeafResponsePayload))]
         [InlineData(typeof(ProxyTunnelPayload))]
+        [InlineData(typeof(ProxyBlockReportPayload))]
+        [InlineData(typeof(ProxySessionEventPayload))]
+        [InlineData(typeof(ProxyStatusRequestPayload))]
+        [InlineData(typeof(ProxyStatusResponsePayload))]
         public void PayloadsLiveInThePluginNamespaceTheWhitelistGrants(Type payloadType)
         {
             // The whitelist escape for plug-in types is namespace-based; a payload living under a
@@ -62,6 +72,13 @@ namespace WebContent.Tests
             Assert.EndsWith("Response", ProxyMessageIds.FetchResponseId, StringComparison.Ordinal);
             Assert.EndsWith("Request", ProxyMessageIds.LeafRequestId, StringComparison.Ordinal);
             Assert.EndsWith("Response", ProxyMessageIds.LeafResponseId, StringComparison.Ordinal);
+
+            // #69 diagnostics ids: one-way report/event plus the request/response pair - none may
+            // carry the "Command" suffix a Normal-security receiver silently ignores.
+            Assert.Equal("WebContent.Proxy.BlockReport", ProxyMessageIds.BlockReportId);
+            Assert.Equal("WebContent.Proxy.SessionEvent", ProxyMessageIds.SessionEventId);
+            Assert.EndsWith("Request", ProxyMessageIds.StatusRequestId, StringComparison.Ordinal);
+            Assert.EndsWith("Response", ProxyMessageIds.StatusResponseId, StringComparison.Ordinal);
         }
 
         private static bool IsWhitelistSafe(Type type, Assembly pluginAssembly)

@@ -252,6 +252,15 @@ namespace WebContent.Client
             WebContentConfiguration.GetString(GetProperty, string.Empty, WorkspaceViewItemSync.FingerprintKey);
 
         /// <summary>
+        /// The id of the workspace this browser view lives on (the seed key the workspace plugin
+        /// publishes under <see cref="WorkspaceViewItemSync.WorkspaceIdKey"/>). Proxy diagnostics
+        /// (ticket #69) attribute block reports and sessions to it; empty for standalone items.
+        /// Read-only: written by the seeding path, never by the plugin runtime.
+        /// </summary>
+        public string WorkspaceItemId =>
+            WebContentConfiguration.GetString(GetProperty, string.Empty, WorkspaceViewItemSync.WorkspaceIdKey);
+
+        /// <summary>
         /// Updates the session-scoped last-visited URL for this workspace tab. No-op for
         /// standalone items (no definition fingerprint).
         /// </summary>

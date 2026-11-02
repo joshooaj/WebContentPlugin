@@ -98,6 +98,8 @@ namespace WebContent.Client
                     ProxyWorkspaceProfile.TryCreate(
                         settings != null && settings.ProxyEnabled,
                         settings?.ProxyTargetsProperty,
+                        settings?.WorkspaceItemId,
+                        settings?.DefinitionFingerprint,
                         out proxyProfile);
 
                     _browser = BrowserManager.GetBrowser(
@@ -116,6 +118,8 @@ namespace WebContent.Client
                     ProxyWorkspaceProfile.TryCreate(
                         settings.ProxyEnabled,
                         settings.ProxyTargetsProperty,
+                        settings.WorkspaceItemId,
+                        settings.DefinitionFingerprint,
                         out proxyProfile);
 
                     if (BrowserManager.ApplyProxyProfile(_browser, proxyProfile))

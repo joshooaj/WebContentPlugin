@@ -174,6 +174,75 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public async Task ReportsLocal403RefusalsToTheBlockReporter()
+        {
+            // #69: the client-side gate refusal is exactly the block the Event Server never sees
+            // - the reporter must get the canonical origin and the NotAllowed category.
+            var blocks = new RecordingBlockReporter();
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes("GET http://elsewhere.test/page HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input, output, Allowlist, query => Task.FromResult(new ProxyFetchResult { Success = true }), message => { }, null, null, blocks);
+            }
+
+            Assert.Equal(new[] { "NotAllowed http://elsewhere.test" }, blocks.Reports);
+        }
+
+        [Fact]
+        public async Task ReportsWebsocketTunnelOpenFailuresAsTunnelRefused()
+        {
+            // A tunnel open that throws never reached the Event Server - client-side fault, one
+            // TunnelRefused block for the upgrade origin.
+            var blocks = new RecordingBlockReporter();
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes(
+                "GET ws://elsewhere.test:8080/ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: k\r\nSec-WebSocket-Version: 13\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input,
+                    output,
+                    new[] { "http://elsewhere.test:8080" },
+                    query => Task.FromResult(new ProxyFetchResult { Success = true }),
+                    message => { },
+                    null,
+                    request => throw new InvalidOperationException("messaging channel died"),
+                    blocks);
+            }
+
+            Assert.Equal(new[] { "TunnelRefused http://elsewhere.test:8080" }, blocks.Reports);
+        }
+
+        [Fact]
+        public async Task DoesNotReReportTunnelRefusalsTheEventServerAlreadyRecorded()
+        {
+            // The ES answered this open with an allowlist failure frame - it files that block
+            // itself; the client staying quiet is what keeps the ring counts honest.
+            var blocks = new RecordingBlockReporter();
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes(
+                "GET ws://elsewhere.test:8080/ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: k\r\nSec-WebSocket-Version: 13\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input,
+                    output,
+                    new[] { "http://elsewhere.test:8080" },
+                    query => Task.FromResult(new ProxyFetchResult { Success = true }),
+                    message => { },
+                    null,
+                    request => Task.FromResult(new ProxyTunnelOpenOutcome
+                    {
+                        Success = false,
+                        ErrorCode = ProxyFetchErrorCodes.NotAllowed,
+                        ErrorMessage = "refused by the VMS server",
+                    }),
+                    blocks);
+            }
+
+            Assert.Empty(blocks.Reports);
+        }
+
+        [Fact]
         public async Task RefusesOversizedRequestBodyByDeclarationWithoutTouchingTheFetcher()
         {
             // A declared Content-Length past the proxy's request-body cap is refused before any
@@ -1157,6 +1226,17 @@ namespace WebContent.Tests
             }
 
             return count;
+        }
+
+        /// <summary>Collects what the connection reports for #69 as "reason origin" strings.</summary>
+        private sealed class RecordingBlockReporter : IProxyBlockReporter
+        {
+            public List<string> Reports { get; } = new List<string>();
+
+            public void Report(Uri origin, string reason)
+            {
+                Reports.Add($"{reason} {ProxyPolicy.CanonicalOrigin(origin)}");
+            }
         }
     }
 }

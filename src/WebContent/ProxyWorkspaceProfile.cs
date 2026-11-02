@@ -14,7 +14,15 @@ namespace WebContent
         /// <summary>Canonical origins the loopback listener may forward to; may be empty.</summary>
         internal IReadOnlyList<string> CanonicalTargets { get; private set; }
 
-        internal static bool TryCreate(bool proxyEnabled, string canonicalTargetsProperty, out ProxyWorkspaceProfile profile)
+        /// <summary>The workspace view item this profile was resolved for (#69 diagnostics
+        /// attribution); empty for designer/standalone paths that have no workspace item.</summary>
+        internal string WorkspaceItemId { get; private set; }
+
+        /// <summary>Fingerprint of the admin definition that seeded the view (#69 freshness
+        /// context on diagnostics payloads); empty for standalone items.</summary>
+        internal string WorkspaceFingerprint { get; private set; }
+
+        internal static bool TryCreate(bool proxyEnabled, string canonicalTargetsProperty, string workspaceItemId, string workspaceFingerprint, out ProxyWorkspaceProfile profile)
         {
             profile = null;
             if (!proxyEnabled)
@@ -34,7 +42,7 @@ namespace WebContent
 
             // An enabled proxy always fronts the browser: an empty usable list refuses everything,
             // which keeps the "never direct" promise for corrupt or half-configured definitions.
-            profile = new ProxyWorkspaceProfile { CanonicalTargets = origins };
+            profile = new ProxyWorkspaceProfile { CanonicalTargets = origins, WorkspaceItemId = workspaceItemId ?? string.Empty, WorkspaceFingerprint = workspaceFingerprint ?? string.Empty };
             return true;
         }
     }

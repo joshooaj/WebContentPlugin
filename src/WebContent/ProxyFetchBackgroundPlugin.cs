@@ -36,10 +36,36 @@ namespace WebContent
         private object _tunnelOpenFilterRegistration;
         private object _tunnelDataFrameFilterRegistration;
         private object _tunnelCloseFrameFilterRegistration;
+        private object _blockReportFilterRegistration;
+        private object _sessionEventFilterRegistration;
+        private object _statusRequestFilterRegistration;
+        private object _onlineTableFilterRegistration;
+        private object _newEndPointFilterRegistration;
         private SemaphoreSlim _fetchSlots;
         private ProxyServerAllowlist _allowlist;
         private ProxyLeafIssuer _leafIssuer;
         private ProxyTunnelServer _tunnels;
+
+        /// <summary>
+        /// Ticket #69: the diagnostics substrate - per-workspace blocked-origin rings and live
+        /// session tables, in memory only (an Event Server restart resets it by design). Fed by
+        /// client block reports and session events plus the fetch/tunnel paths' own accounting;
+        /// read by the unicast workspace status snapshots. Every path swallows faults:
+        /// diagnostics must never take proxy traffic down with it.
+        /// </summary>
+        private ProxyDiagnosticsAggregator _diagnostics;
+        private Timer _sessionSweeper;
+        private static readonly TimeSpan SessionIdleBackstop = TimeSpan.FromMinutes(3);
+        private static readonly TimeSpan SessionSweepPeriod = TimeSpan.FromSeconds(30);
+
+        /// <summary>
+        /// #69: messaging endpoint FQID id → XProtect login name, mirrored from the platform's own
+        /// endpoint identity table (WhoAreOnlineResponse + NewEndPointIndication). Session users
+        /// come from here - the messaging sender identity the platform stamped - never from a
+        /// client-sent claim.
+        /// </summary>
+        private readonly object _identitySync = new object();
+        private readonly Dictionary<string, string> _endpointUsers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// ADR-0003: the deployment CA is loaded/created lazily on the first leaf request and
@@ -104,7 +130,9 @@ namespace WebContent
                 // handshake is seconds long), so the receive thread stays free.
                 _tunnels = new ProxyTunnelServer(
                     ProxyTunnelLimits.Default(),
-                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message),
+                    null,
+                    (sessionId, clientBytes, targetBytes) => RecordTunnelTrafficSafe(sessionId, clientBytes, targetBytes));
                 _tunnelOpenFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
                     OnProxyTunnelOpen,
                     new CommunicationIdFilter(ProxyMessageIds.TunnelOpenRequestId));
@@ -115,10 +143,49 @@ namespace WebContent
                     OnProxyTunnelCloseFrame,
                     new CommunicationIdFilter(ProxyMessageIds.TunnelCloseToTargetId));
 
+                // Ticket #69: the diagnostics substrate. One-way block reports and session events
+                // arrive fire-and-forget; the status query is answered unicast like every other
+                // proxy response. The sweep timer backstops Smart Clients that die without a
+                // SessionClose.
+                _diagnostics = new ProxyDiagnosticsAggregator();
+                _blockReportFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxyBlockReport,
+                    new CommunicationIdFilter(ProxyMessageIds.BlockReportId));
+                _sessionEventFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxySessionEvent,
+                    new CommunicationIdFilter(ProxyMessageIds.SessionEventId));
+                _statusRequestFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxyStatusRequest,
+                    new CommunicationIdFilter(ProxyMessageIds.StatusRequestId));
+
+                // #69 user attribution: mirror the platform's endpoint identity table so a session's
+                // XProtect login name comes from the messaging sender identity the platform itself
+                // stamped. The initial WhoAreOnlineRequest fills the table for already-connected
+                // clients; NewEndPointIndication covers logins from here on.
+                _onlineTableFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnWhoAreOnlineResponse,
+                    new CommunicationIdFilter(MessageCommunication.WhoAreOnlineResponse));
+                _newEndPointFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnNewEndPointIndication,
+                    new CommunicationIdFilter(MessageCommunication.NewEndPointIndication));
+                try
+                {
+                    _messageCommunication.TransmitMessage(new Message(MessageCommunication.WhoAreOnlineRequest), null, null, null);
+                }
+                catch (Exception identityException)
+                {
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(ProxyFetchBackgroundPlugin),
+                        $"Proxy diagnostics online-user query not sent (session user names will fill in as endpoints change): {identityException.Message}");
+                }
+
+                _sessionSweeper = new Timer(_ => SweepSessionsSafely(), null, SessionSweepPeriod, SessionSweepPeriod);
+
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(ProxyFetchBackgroundPlugin),
-                    $"Proxy fetcher ready (concurrency={MaxConcurrentFetches}, request id={ProxyMessageIds.FetchRequestId}).");
+                    $"Proxy fetcher ready (concurrency={MaxConcurrentFetches}, request id={ProxyMessageIds.FetchRequestId}, diagnostics={ProxyMessageIds.BlockReportId}/{ProxyMessageIds.SessionEventId}/{ProxyMessageIds.StatusRequestId}).");
             }
             catch (Exception exception)
             {
@@ -167,7 +234,7 @@ namespace WebContent
 
             if (_messageCommunication != null)
             {
-                foreach (var registration in new[] { _tunnelOpenFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration })
+                foreach (var registration in new[] { _tunnelOpenFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _blockReportFilterRegistration, _sessionEventFilterRegistration, _statusRequestFilterRegistration, _onlineTableFilterRegistration, _newEndPointFilterRegistration })
                 {
                     if (registration == null)
                     {
@@ -180,7 +247,7 @@ namespace WebContent
                     }
                     catch (Exception exception)
                     {
-                        EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy tunnel filter detach failed: {exception.Message}");
+                        EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy filter detach failed: {exception.Message}");
                     }
                 }
             }
@@ -188,6 +255,22 @@ namespace WebContent
             _tunnelOpenFilterRegistration = null;
             _tunnelDataFrameFilterRegistration = null;
             _tunnelCloseFrameFilterRegistration = null;
+            _blockReportFilterRegistration = null;
+            _sessionEventFilterRegistration = null;
+            _statusRequestFilterRegistration = null;
+            _onlineTableFilterRegistration = null;
+            _newEndPointFilterRegistration = null;
+
+            // #69: stop sweeping and drop the in-memory diagnostics tables (by design they never
+            // outlive the service process).
+            var sweeper = _sessionSweeper;
+            _sessionSweeper = null;
+            sweeper?.Dispose();
+            _diagnostics = null;
+            lock (_identitySync)
+            {
+                _endpointUsers.Clear();
+            }
 
             _messageCommunication = null;
 
@@ -281,6 +364,24 @@ namespace WebContent
             if (_allowlist == null || !_allowlist.IsAllowed(target, out allowReason))
             {
                 LogRefused(payload, allowReason);
+
+                // #69: the server-side gate refusal is a per-origin block - recorded where it is
+                // decided (no client report needed for a decision the Event Server made itself).
+                var gateDiagnostics = _diagnostics;
+                if (gateDiagnostics != null && !string.IsNullOrEmpty(payload.SessionId))
+                {
+                    try
+                    {
+                        var gateNow = DateTime.UtcNow;
+                        gateDiagnostics.RecordFetchTraffic(payload.SessionId, body == null ? 0 : body.Length, 0, gateNow);
+                        gateDiagnostics.RecordBlockForSession(payload.SessionId, ProxyPolicy.CanonicalOrigin(target), ProxyBlockReasons.NotAllowed, gateNow);
+                    }
+                    catch (Exception diagnosticsException)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy gate refusal not recorded: {diagnosticsException.Message}");
+                    }
+                }
+
                 TransmitFailure(payload.CorrelationId, requester, ProxyFetchErrorCodes.NotAllowed, allowReason);
                 return null;
             }
@@ -346,6 +447,28 @@ namespace WebContent
                         $"Proxy fetch failed (code={result.ErrorCode}, target={ProxyPolicy.CanonicalOrigin(target)}): {result.ErrorMessage}");
                 }
 
+                // #69: every served request counts toward its session's live status; per-origin
+                // failure codes also land in the workspace's blocked ring (component faults like
+                // Error map to nothing and are not per-origin blocks).
+                var diagnostics = _diagnostics;
+                if (diagnostics != null && !string.IsNullOrEmpty(payload.SessionId))
+                {
+                    try
+                    {
+                        var now = DateTime.UtcNow;
+                        diagnostics.RecordFetchTraffic(payload.SessionId, query.Body == null ? 0 : query.Body.Length, result.Success ? result.BodyLength : 0, now);
+                        string reason;
+                        if (!result.Success && ProxyBlockReasons.TryMapErrorCode(result.ErrorCode, out reason))
+                        {
+                            diagnostics.RecordBlockForSession(payload.SessionId, ProxyPolicy.CanonicalOrigin(target), reason, now);
+                        }
+                    }
+                    catch (Exception diagnosticsException)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy fetch traffic not recorded: {diagnosticsException.Message}");
+                    }
+                }
+
                 if (requesterFqid == null)
                 {
                     // Nowhere to answer: broadcasting fetched page bodies to every messaging
@@ -369,6 +492,21 @@ namespace WebContent
                     true,
                     nameof(ProxyFetchBackgroundPlugin),
                     $"Proxy fetch aborted (target={(target == null ? "unknown" : ProxyPolicy.CanonicalOrigin(target))}): {exception.Message}");
+
+                // #69: an aborted fetch still counted as one request for its session; the generic
+                // Error fault is not a per-origin block, so no ring entry.
+                var aborted = _diagnostics;
+                if (aborted != null && !string.IsNullOrEmpty(payload.SessionId))
+                {
+                    try
+                    {
+                        aborted.RecordFetchTraffic(payload.SessionId, query.Body == null ? 0 : query.Body.Length, 0, DateTime.UtcNow);
+                    }
+                    catch (Exception diagnosticsException)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy fetch traffic not recorded: {diagnosticsException.Message}");
+                    }
+                }
 
                 try
                 {
@@ -516,6 +654,7 @@ namespace WebContent
                     true,
                     nameof(ProxyFetchBackgroundPlugin),
                     $"Tunnel open {payload.CorrelationId} refused: {(allowReason ?? "the tunnel target was not an absolute http(s) origin")}.");
+                RecordTunnelOpenAttempt(payload.SessionId, target, ProxyFetchErrorCodes.NotAllowed);
                 TransmitTunnelOpenAck(communication, requester, payload.CorrelationId, new ProxyTunnelOpenOutcome
                 {
                     Success = false,
@@ -571,6 +710,10 @@ namespace WebContent
                     };
                 }
 
+                // #69: the open attempt counts as one request for the session; a target-side
+                // failure (unreachable, TLS refusal, non-101 answer) is a per-origin block.
+                RecordTunnelOpenAttempt(payload.SessionId, target, outcome.Success ? null : outcome.ErrorCode);
+
                 TransmitTunnelOpenAck(communication, requester, payload.CorrelationId, outcome);
             });
 
@@ -597,6 +740,365 @@ namespace WebContent
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// #69: one client-decided proxy block. The workspace must be a configured workspace item on
+        /// this server (a stale view item or a crafted payload has nowhere to be filed), and the
+        /// reason must be one of the six wire categories. Dedup and ring eviction live in the
+        /// aggregator; successes stay quiet - a refusal storm must not spam the MIP log.
+        /// </summary>
+        private object OnProxyBlockReport(Message message, FQID destination, FQID source)
+        {
+            var report = ProxyFetchWireCodec.BlockReportFromWire(message?.Data);
+            if (report == null || string.IsNullOrEmpty(report.Origin) || string.IsNullOrEmpty(report.Reason))
+            {
+                return null;
+            }
+
+            var diagnostics = _diagnostics;
+            if (diagnostics == null || !IsKnownBlockReason(report.Reason) || !IsKnownWorkspaceItemId(report.WorkspaceItemId))
+            {
+                return null;
+            }
+
+            try
+            {
+                diagnostics.RecordBlock(report.WorkspaceItemId, report.Origin, report.Reason, report.Count, DateTime.UtcNow);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy block report not recorded: {exception.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// #69: one session-lifecycle event. Open registers the session under its (validated)
+        /// workspace with the user resolved from the platform's endpoint identity table - never
+        /// from a client-sent claim; Heartbeat keeps it off the idle backstop; Close retires it.
+        /// </summary>
+        private object OnProxySessionEvent(Message message, FQID destination, FQID source)
+        {
+            var payload = ProxyFetchWireCodec.SessionEventFromWire(message?.Data);
+            if (payload == null || string.IsNullOrEmpty(payload.SessionId) || string.IsNullOrEmpty(payload.Kind))
+            {
+                return null;
+            }
+
+            var diagnostics = _diagnostics;
+            if (diagnostics == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var now = DateTime.UtcNow;
+                switch (payload.Kind)
+                {
+                    case ProxySessionEventKinds.Open:
+                        if (!IsKnownWorkspaceItemId(payload.WorkspaceItemId))
+                        {
+                            EnvironmentManager.Instance.Log(
+                                true,
+                                nameof(ProxyFetchBackgroundPlugin),
+                                $"Proxy session open for unknown workspace '{payload.WorkspaceItemId}' dropped.");
+                            return null;
+                        }
+
+                        diagnostics.OpenSession(payload.SessionId, payload.WorkspaceItemId, ResolveEndpointUser(message), payload.ClientMachine, now);
+                        break;
+
+                    case ProxySessionEventKinds.Heartbeat:
+                        diagnostics.HeartbeatSession(payload.SessionId, now);
+                        break;
+
+                    case ProxySessionEventKinds.Close:
+                        diagnostics.CloseSession(payload.SessionId, now);
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy session event ({payload.Kind}) not recorded: {exception.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// #69: the pull of one workspace's live proxy state. Answered unicast to the requester
+        /// endpoint like every other proxy response (a broadcast snapshot would leak one customer's
+        /// browsing pattern to every subscriber). An unknown workspace answers as a failure, not an
+        /// empty snapshot, so the MC page can tell "gone" from "quiet".
+        /// </summary>
+        private object OnProxyStatusRequest(Message message, FQID destination, FQID source)
+        {
+            var payload = ProxyFetchWireCodec.StatusRequestFromWire(message?.Data);
+            if (payload == null || string.IsNullOrEmpty(payload.CorrelationId))
+            {
+                return null;
+            }
+
+            var requester = ResolveRequester(source, message);
+            ProxyStatusResponsePayload response;
+            var diagnostics = _diagnostics;
+            if (diagnostics == null)
+            {
+                response = new ProxyStatusResponsePayload
+                {
+                    CorrelationId = payload.CorrelationId,
+                    WorkspaceItemId = payload.WorkspaceItemId,
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Error,
+                    ErrorMessage = "The proxy fetcher is not ready.",
+                };
+            }
+            else if (!IsKnownWorkspaceItemId(payload.WorkspaceItemId))
+            {
+                response = new ProxyStatusResponsePayload
+                {
+                    CorrelationId = payload.CorrelationId,
+                    WorkspaceItemId = payload.WorkspaceItemId,
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.BadRequest,
+                    ErrorMessage = "The workspace item id is not a configured workspace on this server.",
+                };
+            }
+            else
+            {
+                response = diagnostics.Snapshot(payload.WorkspaceItemId, DateTime.UtcNow);
+                response.CorrelationId = payload.CorrelationId;
+            }
+
+            var communication = _messageCommunication;
+            if (communication == null || requester == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(ProxyMessageIds.StatusResponseId, ProxyFetchWireCodec.ToWire(response)),
+                    requester,
+                    null,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy status response {payload.CorrelationId} not sent: {exception.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// #69: traffic from the tunnel server's per-chunk seam. Fire-and-swallow: accounting must
+        /// never break a byte pump.
+        /// </summary>
+        private void RecordTunnelTrafficSafe(string sessionId, long clientBytes, long targetBytes)
+        {
+            var diagnostics = _diagnostics;
+            if (diagnostics == null || string.IsNullOrEmpty(sessionId))
+            {
+                return;
+            }
+
+            try
+            {
+                diagnostics.RecordTunnelTraffic(sessionId, clientBytes, targetBytes, DateTime.UtcNow);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy tunnel traffic not recorded: {exception.Message}");
+            }
+        }
+
+        /// <summary>
+        /// #69: count one tunnel-open attempt toward its session (+1 request) and file a block when
+        /// the failure is a per-origin category (the gate refusal, an unreachable target, a refused
+        /// handshake). Successes and component faults (Error) count but never block.
+        /// </summary>
+        private void RecordTunnelOpenAttempt(string sessionId, Uri target, string errorCode)
+        {
+            var diagnostics = _diagnostics;
+            if (diagnostics == null || string.IsNullOrEmpty(sessionId))
+            {
+                return;
+            }
+
+            try
+            {
+                var now = DateTime.UtcNow;
+                diagnostics.RecordFetchTraffic(sessionId, 0, 0, now);
+                string reason;
+                if (target != null && !string.IsNullOrEmpty(errorCode) && ProxyBlockReasons.TryMapErrorCode(errorCode, out reason))
+                {
+                    diagnostics.RecordBlockForSession(sessionId, ProxyPolicy.CanonicalOrigin(target), reason, now);
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy tunnel open not recorded: {exception.Message}");
+            }
+        }
+
+        private void SweepSessionsSafely()
+        {
+            try
+            {
+                var diagnostics = _diagnostics;
+                if (diagnostics == null)
+                {
+                    return;
+                }
+
+                var reclaimed = diagnostics.SweepIdleSessions(SessionIdleBackstop, DateTime.UtcNow);
+                if (reclaimed.Count > 0)
+                {
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(ProxyFetchBackgroundPlugin),
+                        $"Proxy diagnostics: {reclaimed.Count} session(s) idle past {SessionIdleBackstop.TotalMinutes:0} minutes reclaimed (a Smart Client died without a session close).");
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy diagnostics sweep faulted: {exception.Message}");
+            }
+        }
+
+        /// <summary>
+        /// #69: the XProtect login name of the endpoint that sent this message, from the platform's
+        /// own endpoint identity table. Null for endpoints the table does not name yet.
+        /// </summary>
+        private object OnWhoAreOnlineResponse(Message message, FQID destination, FQID source)
+        {
+            FeedEndpointIdentities(message == null ? null : message.Data);
+            return null;
+        }
+
+        private object OnNewEndPointIndication(Message message, FQID destination, FQID source)
+        {
+            FeedEndpointIdentities(message == null ? null : message.Data);
+            return null;
+        }
+
+        private void FeedEndpointIdentities(object data)
+        {
+            try
+            {
+                if (data == null)
+                {
+                    return;
+                }
+
+                var single = data as EndPointIdentityData;
+                if (single != null)
+                {
+                    UpsertEndpointUser(single);
+                    return;
+                }
+
+                var collection = data as System.Collections.IEnumerable;
+                if (collection == null)
+                {
+                    return;
+                }
+
+                foreach (var item in collection)
+                {
+                    var identity = item as EndPointIdentityData;
+                    if (identity != null)
+                    {
+                        UpsertEndpointUser(identity);
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy endpoint identity table update failed: {exception.Message}");
+            }
+        }
+
+        private void UpsertEndpointUser(EndPointIdentityData identity)
+        {
+            var fqid = identity.EndPointFQID;
+            if (fqid == null || string.IsNullOrEmpty(identity.IdentityName))
+            {
+                return;
+            }
+
+            lock (_identitySync)
+            {
+                _endpointUsers[fqid.ObjectId.ToString()] = identity.IdentityName;
+            }
+        }
+
+        private string ResolveEndpointUser(Message message)
+        {
+            var endpoint = message == null ? null : message.ExternalMessageSourceEndPoint;
+            if (endpoint == null)
+            {
+                return null;
+            }
+
+            lock (_identitySync)
+            {
+                string name;
+                return _endpointUsers.TryGetValue(endpoint.ObjectId.ToString(), out name) ? name : null;
+            }
+        }
+
+        private static bool IsKnownBlockReason(string reason)
+        {
+            return reason == ProxyBlockReasons.NotAllowed
+                || reason == ProxyBlockReasons.TooLarge
+                || reason == ProxyBlockReasons.CertUntrusted
+                || reason == ProxyBlockReasons.Unreachable
+                || reason == ProxyBlockReasons.Timeout
+                || reason == ProxyBlockReasons.TunnelRefused;
+        }
+
+        /// <summary>
+        /// #69: is this a workspace item this server actually owns? The same Configuration lookup
+        /// the allowlist union uses; a failed lookup fails closed (the report or query is dropped) -
+        /// unlike the allowlist there is nothing last-known-good to keep serving.
+        /// </summary>
+        private bool IsKnownWorkspaceItemId(string workspaceItemId)
+        {
+            Guid id;
+            if (string.IsNullOrEmpty(workspaceItemId) || !Guid.TryParse(workspaceItemId, out id) || id == Guid.Empty)
+            {
+                return false;
+            }
+
+            try
+            {
+                List<Item> workspaces;
+                Exception error;
+                if (!Admin.WorkspaceItemManager.TryGetWorkspaces(out workspaces, out error))
+                {
+                    return false;
+                }
+
+                foreach (var workspace in workspaces)
+                {
+                    if (workspace != null && workspace.FQID != null && workspace.FQID.ObjectId.ToString() == workspaceItemId)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy diagnostics workspace lookup failed: {exception.Message}");
+            }
+
+            return false;
         }
 
         private static void TransmitTunnelOpenAck(MessageCommunication communication, FQID requester, string tunnelId, ProxyTunnelOpenOutcome outcome)

@@ -37,6 +37,19 @@ namespace WebContent
         private static readonly DataContractJsonSerializer TunnelSerializer =
             new DataContractJsonSerializer(typeof(ProxyTunnelPayload));
 
+        // Ticket #69: diagnostics payloads — same JSON-string-on-the-wire discipline.
+        private static readonly DataContractJsonSerializer BlockReportSerializer =
+            new DataContractJsonSerializer(typeof(ProxyBlockReportPayload));
+
+        private static readonly DataContractJsonSerializer SessionEventSerializer =
+            new DataContractJsonSerializer(typeof(ProxySessionEventPayload));
+
+        private static readonly DataContractJsonSerializer StatusRequestSerializer =
+            new DataContractJsonSerializer(typeof(ProxyStatusRequestPayload));
+
+        private static readonly DataContractJsonSerializer StatusResponseSerializer =
+            new DataContractJsonSerializer(typeof(ProxyStatusResponsePayload));
+
         /// <summary>Encode a request payload for Message.Data.</summary>
         internal static string ToWire(ProxyFetchRequestPayload payload)
         {
@@ -126,6 +139,74 @@ namespace WebContent
             }
 
             return Deserialize<ProxyTunnelPayload>(json, TunnelSerializer);
+        }
+
+        /// <summary>Encode a block report (#69) for Message.Data.</summary>
+        internal static string ToWire(ProxyBlockReportPayload report)
+        {
+            return Serialize(report, BlockReportSerializer);
+        }
+
+        internal static ProxyBlockReportPayload BlockReportFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyBlockReportPayload>(json, BlockReportSerializer);
+        }
+
+        /// <summary>Encode a session-lifecycle event (#69) for Message.Data.</summary>
+        internal static string ToWire(ProxySessionEventPayload sessionEvent)
+        {
+            return Serialize(sessionEvent, SessionEventSerializer);
+        }
+
+        internal static ProxySessionEventPayload SessionEventFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxySessionEventPayload>(json, SessionEventSerializer);
+        }
+
+        /// <summary>Encode a workspace status query (#69) for Message.Data.</summary>
+        internal static string ToWire(ProxyStatusRequestPayload request)
+        {
+            return Serialize(request, StatusRequestSerializer);
+        }
+
+        internal static ProxyStatusRequestPayload StatusRequestFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyStatusRequestPayload>(json, StatusRequestSerializer);
+        }
+
+        /// <summary>Encode a workspace status snapshot (#69) for Message.Data.</summary>
+        internal static string ToWire(ProxyStatusResponsePayload response)
+        {
+            return Serialize(response, StatusResponseSerializer);
+        }
+
+        internal static ProxyStatusResponsePayload StatusResponseFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyStatusResponsePayload>(json, StatusResponseSerializer);
         }
 
         private static string Serialize(object payload, DataContractJsonSerializer serializer)

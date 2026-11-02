@@ -28,16 +28,45 @@ namespace WebContent.Client
     {
         private readonly Func<ProxyFetchQuery, Task<ProxyFetchResult>> _fetch;
         private readonly ProxyLoopbackTls _tls;
+
+        /// <summary>
+        /// Ticket #69: the one browser-view session this listener fronts. Its id rides every fetch
+        /// and tunnel this browser issues, and the Event Server groups block reports, traffic, and
+        /// live status under it; opened on Start, closed on Stop.
+        /// </summary>
+        private readonly ProxyViewSessionContext _session;
+        private readonly ProxyBlockReporter _blocks;
         private IReadOnlyList<string> _canonicalTargets;
         private TcpListener _listener;
         private volatile bool _stopping;
 
         internal int Port { get; private set; }
 
-        internal LoopbackProxyListener(IReadOnlyList<string> canonicalTargets, Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch)
+        internal ProxyViewSessionContext Session => _session;
+
+        internal LoopbackProxyListener(
+            IReadOnlyList<string> canonicalTargets,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
+            ProxyViewSessionContext session = null)
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
             _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));
+            _session = session ?? new ProxyViewSessionContext
+            {
+                SessionId = Guid.NewGuid().ToString("N"),
+                ClientMachine = Environment.MachineName,
+            };
+            _blocks = new ProxyBlockReporter(
+                _session,
+                payload =>
+                {
+                    var client = ProxyFetchClient.Active;
+                    if (client != null)
+                    {
+                        client.SendBlockReport(payload);
+                    }
+                },
+                message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
             _tls = new ProxyLoopbackTls(RequestLeafAsync, message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
         }
 
@@ -54,6 +83,22 @@ namespace WebContent.Client
             _listener.Start();
             Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
             _ = Task.Run(AcceptLoopAsync);
+
+            // #69: announce the session (best effort - an unconnected channel surfaces later as
+            // ServerUnavailable fetches, and the Event Server's idle backstop never sees this session).
+            ProxySessionRegistry.Active.Open(_session);
+            var client = ProxyFetchClient.Active;
+            if (client != null)
+            {
+                client.SendSessionEvent(new ProxySessionEventPayload
+                {
+                    SessionId = _session.SessionId,
+                    Kind = ProxySessionEventKinds.Open,
+                    WorkspaceItemId = _session.WorkspaceItemId,
+                    WorkspaceFingerprint = _session.WorkspaceFingerprint,
+                    ClientMachine = _session.ClientMachine,
+                });
+            }
         }
 
         internal void Stop()
@@ -66,6 +111,21 @@ namespace WebContent.Client
             catch (Exception exception)
             {
                 EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), $"Proxy listener on port {Port} stopped with: {exception.Message}");
+            }
+
+            // #69: close the session (send before unregistering; while the channel lives the
+            // Event Server prunes its aggregates immediately instead of waiting for the sweep).
+            ProxySessionRegistry.Active.Close(_session.SessionId);
+            var client = ProxyFetchClient.Active;
+            if (client != null)
+            {
+                client.SendSessionEvent(new ProxySessionEventPayload
+                {
+                    SessionId = _session.SessionId,
+                    Kind = ProxySessionEventKinds.Close,
+                    WorkspaceItemId = _session.WorkspaceItemId,
+                    WorkspaceFingerprint = _session.WorkspaceFingerprint,
+                });
             }
 
             // Leaf certificates and their local key containers die with the listener; the
@@ -98,8 +158,12 @@ namespace WebContent.Client
         /// use. Without a live client the upgrade fails as a plain 502 - never smuggled into
         /// the HTTP fetch path.
         /// </summary>
-        private static Task<ProxyTunnelOpenOutcome> OpenTunnelAsync(ProxyForwardedRequest request)
+        private Task<ProxyTunnelOpenOutcome> OpenTunnelAsync(ProxyForwardedRequest request)
         {
+            // #69: stamp the session so the Event Server attributes the tunnel's traffic; the
+            // field rides to the open payload in ProxyFetchClient.OpenTunnelAsync.
+            request.SessionId = _session.SessionId;
+
             var client = ProxyFetchClient.Active;
             if (client == null)
             {
@@ -112,6 +176,16 @@ namespace WebContent.Client
             }
 
             return client.OpenTunnelAsync(request);
+        }
+
+        /// <summary>
+        /// #69: stamp the session on every fetch query before it crosses the messaging seam, so
+        /// the Event Server counts the served request toward this session's live status.
+        /// </summary>
+        private Task<ProxyFetchResult> FetchWithSession(ProxyFetchQuery query)
+        {
+            query.SessionId = _session.SessionId;
+            return _fetch(query);
         }
 
         private async Task AcceptLoopAsync()
@@ -152,10 +226,11 @@ namespace WebContent.Client
                             stream,
                             stream,
                             _canonicalTargets,
-                            _fetch,
+                            FetchWithSession,
                             message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), $"Proxy listener on port {Port}: {message}"),
                             _tls.AcceptTunnelAsync,
-                            OpenTunnelAsync);
+                            OpenTunnelAsync,
+                            _blocks);
                     }
                 }
                 catch (Exception exception)

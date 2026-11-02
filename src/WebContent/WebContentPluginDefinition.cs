@@ -87,6 +87,13 @@ namespace WebContent
             ProxyMessageIds.TunnelDataFromTargetId,
             ProxyMessageIds.TunnelCloseToTargetId,
             ProxyMessageIds.TunnelCloseFromTargetId,
+
+            // #69: diagnostics substrate - one-way block reports and session events, plus the
+            // workspace status query/answer pair.
+            ProxyMessageIds.BlockReportId,
+            ProxyMessageIds.SessionEventId,
+            ProxyMessageIds.StatusRequestId,
+            ProxyMessageIds.StatusResponseId,
         };
 
         public override List<WorkSpacePlugin> WorkSpacePlugins

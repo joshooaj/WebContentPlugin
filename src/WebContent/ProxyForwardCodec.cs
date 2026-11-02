@@ -27,6 +27,13 @@ namespace WebContent
 
         /// <summary>Request headers, first value per name, original casing preserved.</summary>
         internal Dictionary<string, string> Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Ticket #69: the browser-view session that issued this request, stamped by the listener
+        /// before the request crosses the fetch/tunnel seams; relayed on the tunnel-open payload so
+        /// the Event Server attributes tunnel traffic to the right session. Null on unrouted paths.
+        /// </summary>
+        internal string SessionId;
     }
 
     /// <summary>

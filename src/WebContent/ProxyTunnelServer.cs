@@ -39,6 +39,12 @@ namespace WebContent
         private sealed class Session
         {
             internal string Id;
+
+            /// <summary>#69: the browser-view session this tunnel belongs to (from the open
+            /// payload); traffic is attributed to that session's live status. Null on pre-#69
+            /// clients, where the traffic callback simply skips.</summary>
+            internal string SessionId;
+
             internal TcpClient Socket;
             internal Stream Stream;
             internal Func<ProxyTunnelPayload, Task> ToClient;
@@ -61,6 +67,13 @@ namespace WebContent
         /// </summary>
         private readonly Func<Uri, RemoteCertificateValidationCallback> _tlsValidationResolver;
 
+        /// <summary>
+        /// #69: per-chunk traffic seam - (sessionId, browser→target bytes, target→browser bytes).
+        /// The Event Server plugin wires this to the diagnostics aggregator; the server itself
+        /// keeps no diagnostics state. Null (tests, unattributed clients) simply means no accounting.
+        /// </summary>
+        private readonly Action<string, long, long> _traffic;
+
         private readonly object _sync = new object();
         private readonly Dictionary<string, Session> _sessions = new Dictionary<string, Session>(StringComparer.Ordinal);
         private Timer _reaper;
@@ -68,11 +81,13 @@ namespace WebContent
         internal ProxyTunnelServer(
             ProxyTunnelLimits limits,
             Action<string> log,
-            Func<Uri, RemoteCertificateValidationCallback> tlsValidationResolver = null)
+            Func<Uri, RemoteCertificateValidationCallback> tlsValidationResolver = null,
+            Action<string, long, long> traffic = null)
         {
             _limits = limits ?? ProxyTunnelLimits.Default();
             _log = log ?? (message => { });
             _tlsValidationResolver = tlsValidationResolver;
+            _traffic = traffic;
             var period = TimeSpan.FromMilliseconds(Math.Max(1000, Math.Min(30_000, _limits.IdleTimeoutMs / 2)));
             _reaper = new Timer(_ => ReapSafely(), null, period, period);
         }
@@ -213,6 +228,7 @@ namespace WebContent
                 var session = new Session
                 {
                     Id = open.CorrelationId,
+                    SessionId = open.SessionId,
                     Socket = socket,
                     Stream = stream,
                     ToClient = toClient,
@@ -311,6 +327,7 @@ namespace WebContent
             }
 
             session.LastActivityUtc = DateTime.UtcNow;
+            _traffic?.Invoke(session.SessionId, bytes.Length, 0);
             lock (_sync)
             {
                 if (session.Closed)
@@ -495,8 +512,9 @@ namespace WebContent
             }
         }
 
-        private static async Task SendDataAsync(Session session, byte[] bytes)
+        private async Task SendDataAsync(Session session, byte[] bytes)
         {
+            _traffic?.Invoke(session.SessionId, 0, bytes.Length);
             await session.ToClient(new ProxyTunnelPayload
             {
                 CorrelationId = session.Id,

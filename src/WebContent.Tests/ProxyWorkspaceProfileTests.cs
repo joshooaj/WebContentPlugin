@@ -16,21 +16,21 @@ namespace WebContent.Tests
         [Fact]
         public void DisabledProxyCreatesNoProfile()
         {
-            Assert.False(ProxyWorkspaceProfile.TryCreate(false, "http://10.0.0.5:8080", out var profile));
+            Assert.False(ProxyWorkspaceProfile.TryCreate(false, "http://10.0.0.5:8080", null, null, out var profile));
             Assert.Null(profile);
         }
 
         [Fact]
         public void EnabledProxyCarriesCanonicalTargetsAsTheListenerAllowlist()
         {
-            Assert.True(ProxyWorkspaceProfile.TryCreate(true, "http://10.0.0.5:8080,https://portal.test:8443", out var profile));
+            Assert.True(ProxyWorkspaceProfile.TryCreate(true, "http://10.0.0.5:8080,https://portal.test:8443", null, null, out var profile));
             Assert.Equal(new[] { "http://10.0.0.5:8080", "https://portal.test:8443" }, profile.CanonicalTargets);
         }
 
         [Fact]
         public void DuplicateAndOverlappingEntriesCollapseOntoOneOrigin()
         {
-            Assert.True(ProxyWorkspaceProfile.TryCreate(true, "http://10.0.0.5:8080,http://10.0.0.5:8080/, HTTP://10.0.0.5:8080", out var profile));
+            Assert.True(ProxyWorkspaceProfile.TryCreate(true, "http://10.0.0.5:8080,http://10.0.0.5:8080/, HTTP://10.0.0.5:8080", null, null, out var profile));
             Assert.Equal(new[] { "http://10.0.0.5:8080" }, profile.CanonicalTargets);
         }
 
@@ -40,8 +40,22 @@ namespace WebContent.Tests
             // Never direct: an enabled proxy with a blank or junk target list still routes the
             // browser through the listener, which then refuses every request. (A bare host is a
             // legitimate #52 shorthand, so the junk entry must be truly un-parseable.)
-            Assert.True(ProxyWorkspaceProfile.TryCreate(true, ", ,not host at all,", out var profile));
+            Assert.True(ProxyWorkspaceProfile.TryCreate(true, ", ,not host at all,", null, null, out var profile));
             Assert.Empty(profile.CanonicalTargets);
+        }
+
+        [Fact]
+        public void WorkspaceItemIdRidesTheProfileForDiagnosticsAttribution()
+        {
+            // #69: the listener's session context is built from the profile, so the workspace id
+            // the seeding path published must survive into it; a standalone item keeps empty.
+            Assert.True(ProxyWorkspaceProfile.TryCreate(true, "http://10.0.0.5:8080", "c2c1b7f2-1111-2222-3333-444455556666", "fp-2026", out var profile));
+            Assert.Equal("c2c1b7f2-1111-2222-3333-444455556666", profile.WorkspaceItemId);
+            Assert.Equal("fp-2026", profile.WorkspaceFingerprint);
+
+            Assert.True(ProxyWorkspaceProfile.TryCreate(true, "http://10.0.0.5:8080", null, null, out var standalone));
+            Assert.Equal(string.Empty, standalone.WorkspaceItemId);
+            Assert.Equal(string.Empty, standalone.WorkspaceFingerprint);
         }
     }
 }

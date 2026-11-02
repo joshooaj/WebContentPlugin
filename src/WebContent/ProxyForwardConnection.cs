@@ -72,6 +72,25 @@ namespace WebContent
             Func<Stream, byte[], Uri, Task<Stream>> unwrapTunnelTls,
             Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel)
         {
+            await HandleAsync(input, output, canonicalTargets, fetch, log, unwrapTunnelTls, openTunnel, null);
+        }
+
+        /// <summary>
+        /// Optional diagnostics seam (#69): every refusal this flow decides client-side — local
+        /// 403, refused tunnel, TLS termination failure, and the mapped failure codes coming back
+        /// on the fetch path — is filed with the reporter before the browser sees its error page.
+        /// Null reporter (tests, non-proxied wiring) changes nothing about the traffic itself.
+        /// </summary>
+        internal static async Task HandleAsync(
+            Stream input,
+            Stream output,
+            System.Collections.Generic.IEnumerable<string> canonicalTargets,
+            Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
+            Action<string> log,
+            Func<Stream, byte[], Uri, Task<Stream>> unwrapTunnelTls,
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel,
+            IProxyBlockReporter blocks)
+        {
             var head = await ReadRequestHeadAsync(input);
             if (head == null)
             {
@@ -90,6 +109,7 @@ namespace WebContent
 
                 case ProxyForwardDisposition.OriginNotAllowed:
                     log(rejectReason);
+                    blocks?.Report(request?.Uri, ProxyBlockReasons.NotAllowed);
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", rejectReason));
                     return;
 
@@ -105,6 +125,7 @@ namespace WebContent
                         // tunnel is refused outright - never blind-tunnelled, never taken direct.
                         var reason = $"The CONNECT to '{request.RawTarget}' cannot be terminated by this proxy; https targets are fetched by the VMS server over tunnels this listener terminates.";
                         log(reason);
+                        blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                         await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", reason));
                         return;
                     }
@@ -120,18 +141,20 @@ namespace WebContent
                     catch (Exception exception)
                     {
                         log($"Proxy TLS termination for '{request.RawTarget}' failed: {exception.Message}");
+                        blocks?.Report(request.Uri, ProxyBlockReasons.CertUntrusted);
                         return;
                     }
 
                     if (tunnel == null)
                     {
                         log($"Proxy TLS termination for '{request.RawTarget}' produced no tunnel; the connection is closed.");
+                        blocks?.Report(request.Uri, ProxyBlockReasons.CertUntrusted);
                         return;
                     }
 
                     try
                     {
-                        await ServeTunnelRequestsAsync(tunnel, canonicalTargets, request.Uri, fetch, log, openTunnel);
+                        await ServeTunnelRequestsAsync(tunnel, canonicalTargets, request.Uri, fetch, log, openTunnel, blocks);
                     }
                     finally
                     {
@@ -147,6 +170,7 @@ namespace WebContent
                     {
                         var connectWiring = $"The CONNECT to '{request.RawTarget}' cannot be tunnelled by this listener; ws:// targets ride CONNECT-style byte tunnels the VMS server opens.";
                         log(connectWiring);
+                        blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                         await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", connectWiring));
                         return;
                     }
@@ -186,6 +210,7 @@ namespace WebContent
                     catch (Exception exception)
                     {
                         log($"Proxy websocket CONNECT tunnel open for '{request.RawTarget}' threw: {exception.Message}");
+                        blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                         return;
                     }
 
@@ -195,6 +220,7 @@ namespace WebContent
                             ? "The Event Server tunnel opener returned no outcome."
                             : connectOutcome.ErrorMessage;
                         log($"Proxy websocket CONNECT tunnel to '{request.RawTarget}' refused (code={connectOutcome?.ErrorCode}): {connectFailure}");
+                        ReportTunnelOpenFailure(blocks, request, connectOutcome);
                         return;
                     }
 
@@ -210,8 +236,9 @@ namespace WebContent
                 case ProxyForwardDisposition.WebSocketTunnel:
                     if (openTunnel == null)
                     {
-                        var tunnelWiring = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws:// targets ride CONNECT-style tunnels the VMS server opens.";
+                        var tunnelWiring = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws:// targets ride CONNECT-style byte tunnels the VMS server opens.";
                         log(tunnelWiring);
+                        blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                         await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", tunnelWiring));
                         return;
                     }
@@ -224,6 +251,7 @@ namespace WebContent
                     catch (Exception exception)
                     {
                         log($"Proxy websocket tunnel open for '{request.RawTarget}' threw: {exception.Message}");
+                        blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                         await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy tunnel failed to open: {exception.Message}"));
                         return;
                     }
@@ -234,6 +262,7 @@ namespace WebContent
                             ? "The Event Server tunnel opener returned no outcome."
                             : outcome.ErrorMessage;
                         log($"Proxy websocket tunnel to '{request.RawTarget}' refused (code={outcome?.ErrorCode}): {openFailure}");
+                        ReportTunnelOpenFailure(blocks, request, outcome);
                         await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", openFailure));
                         return;
                     }
@@ -243,7 +272,52 @@ namespace WebContent
                     return;
             }
 
-            await ServeForwardedRequestAsync(request, head.Leftover, input, output, fetch, log);
+            await ServeForwardedRequestAsync(request, head.Leftover, input, output, fetch, log, blocks);
+        }
+
+        /// <summary>
+        /// #69: translate a tunnel-open failure into a client-side block reason. Codes the Event
+        /// Server itself answered with (an allowlist refusal, a target dial or handshake failure)
+        /// are recorded server-side where they happened - re-reporting them from the client would
+        /// double-count. Codes the client produced on its own (no outcome at all, the open deadline
+        /// expiring on a silent channel) are invisible to the Event Server and surface as
+        /// <see cref="ProxyBlockReasons.TunnelRefused"/>.
+        /// </summary>
+        private static string MapTunnelOpenBlockReason(ProxyTunnelOpenOutcome outcome)
+        {
+            if (outcome == null)
+            {
+                return ProxyBlockReasons.TunnelRefused;
+            }
+
+            switch (outcome.ErrorCode)
+            {
+                case ProxyFetchErrorCodes.NotAllowed:
+                case ProxyFetchErrorCodes.Unreachable:
+                case ProxyFetchErrorCodes.Timeout:
+                case ProxyFetchErrorCodes.TooLarge:
+                case ProxyFetchErrorCodes.TlsValidation:
+                case ProxyFetchErrorCodes.BadRequest:
+                case ProxyFetchErrorCodes.Error:
+                    return null;
+
+                default:
+                    return ProxyBlockReasons.TunnelRefused;
+            }
+        }
+
+        /// <summary>
+        /// File the tunnel-open failure with the client-side reporter only when the failure is one
+        /// the Event Server cannot have recorded itself; an ES-answered refusal is already in its
+        /// ring, and reporting it again would double the count the admin sees.
+        /// </summary>
+        private static void ReportTunnelOpenFailure(IProxyBlockReporter blocks, ProxyForwardedRequest request, ProxyTunnelOpenOutcome outcome)
+        {
+            var reason = MapTunnelOpenBlockReason(outcome);
+            if (reason != null)
+            {
+                blocks?.Report(request.Uri, reason);
+            }
         }
 
         /// <summary>
@@ -260,7 +334,8 @@ namespace WebContent
             Uri tunnelOrigin,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
             Action<string> log,
-            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel)
+            Func<ProxyForwardedRequest, Task<ProxyTunnelOpenOutcome>> openTunnel,
+            IProxyBlockReporter blocks)
         {
             var pending = new byte[0];
             while (true)
@@ -302,6 +377,7 @@ namespace WebContent
                         {
                             upgradeFailure = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws(s):// targets ride CONNECT-style byte tunnels the VMS server opens.";
                             log(upgradeFailure);
+                            blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                         }
                         else
                         {
@@ -316,6 +392,7 @@ namespace WebContent
                                 // no-outcome wording.
                                 log($"Proxy in-tunnel websocket open for '{request.RawTarget}' threw: {exception.Message}");
                                 upgradeFailure = $"The VMS proxy tunnel failed to open: {exception.Message}";
+                                blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                             }
 
                             if (upgradeFailure == null && (upgradeOutcome == null || !upgradeOutcome.Success))
@@ -327,6 +404,7 @@ namespace WebContent
                                     ? "The Event Server tunnel opener returned no outcome."
                                     : upgradeOutcome.ErrorMessage;
                                 log($"Proxy in-tunnel websocket tunnel to '{request.RawTarget}' refused (code={upgradeOutcome?.ErrorCode}): {upgradeFailure}");
+                                ReportTunnelOpenFailure(blocks, request, upgradeOutcome);
                             }
                         }
 
@@ -345,12 +423,13 @@ namespace WebContent
                         // OriginNotAllowed inside a tunnel means the inner target drifted off the
                         // accepted origin (codec already blocks that) - refuse and keep the tunnel.
                         log(rejectReason ?? $"In-tunnel request '{request?.RawTarget}' refused.");
+                        blocks?.Report(request?.Uri, ProxyBlockReasons.NotAllowed);
                         await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", rejectReason ?? "The in-tunnel request was refused."));
                         pending = head.Leftover;
                         continue;
                 }
 
-                var remainder = await ServeForwardedRequestAsync(request, head.Leftover, tunnel, tunnel, fetch, log);
+                var remainder = await ServeForwardedRequestAsync(request, head.Leftover, tunnel, tunnel, fetch, log, blocks);
                 if (remainder == null)
                 {
                     return;
@@ -452,7 +531,8 @@ namespace WebContent
             Stream input,
             Stream output,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
-            Action<string> log)
+            Action<string> log,
+            IProxyBlockReporter blocks)
         {
             // #55: the request body must reach the fetcher for login POSTs and XHR writes to work.
             var bodyOutcome = await TryResolveRequestBodyAsync(request, leftover, input, log);
@@ -478,6 +558,7 @@ namespace WebContent
             catch (Exception exception)
             {
                 log($"Proxy fetch for {request.Uri} threw: {exception.Message}");
+                blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
                 await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy fetcher failed: {exception.Message}"));
                 return null;
             }
@@ -493,6 +574,13 @@ namespace WebContent
             // itself, or the target behind it. A proxied workspace never falls back to a direct
             // connection, so an unexplained page would be a dead end for the admin.
             var message = result == null ? "The VMS proxy fetcher returned no outcome." : result.ErrorMessage;
+            if (result == null)
+            {
+                // The seam itself produced nothing - the request never reached the Event Server, so
+                // no server-side record exists either (#69).
+                blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
+            }
+
             switch (result == null ? null : result.ErrorCode)
             {
                 case ProxyFetchErrorCodes.ServerUnavailable:

@@ -35,10 +35,18 @@ namespace WebContent
         private object _tunnelOpenResponseFilterRegistration;
         private object _tunnelDataFrameFilterRegistration;
         private object _tunnelCloseFrameFilterRegistration;
+        private object _statusResponseFilterRegistration;
         private ProxyFetchCorrelation _correlation;
         private ProxyLeafCorrelation _leafCorrelation;
         private ProxyTunnelCorrelation _tunnels;
+        private ProxyStatusCorrelation _statusCorrelation;
         private Timer _tunnelReaper;
+
+        /// <summary>#69: keeps live proxied-view sessions visible to the Event Server between its
+        /// idle backstops; also the beat that lets an Event Server restart re-adopt them.</summary>
+        private Timer _sessionHeartbeat;
+        private static readonly TimeSpan HeartbeatPeriod = TimeSpan.FromSeconds(30);
+
         private readonly ProxyTunnelLimits _tunnelLimits = ProxyTunnelLimits.Default();
         private bool _trace;
 
@@ -99,6 +107,15 @@ namespace WebContent
                 var sweepPeriod = TimeSpan.FromMilliseconds(Math.Max(1000, Math.Min(30_000, _tunnelLimits.IdleTimeoutMs / 2)));
                 _tunnelReaper = new Timer(_ => SweepTunnels(), null, sweepPeriod, sweepPeriod);
 
+                // #69: diagnostics substrate. One-way block reports and session events are plain
+                // transmits; the workspace status query answers like every other proxy response -
+                // unicast, single frame, correlated, deadline-completed as ServerUnavailable.
+                _statusCorrelation = new ProxyStatusCorrelation();
+                _statusResponseFilterRegistration = _communication.RegisterCommunicationFilter(
+                    OnStatusResponse,
+                    new CommunicationIdFilter(ProxyMessageIds.StatusResponseId));
+                _sessionHeartbeat = new Timer(_ => HeartbeatSessions(), null, HeartbeatPeriod, HeartbeatPeriod);
+
                 // Diagnostic (trace only): our own requests are filter-routed back to the sender's
                 // endpoint queue. Inspecting that echo tests whether THIS process deserializes our
                 // payload types at all: an intact echo isolates payload stripping to the response
@@ -125,7 +142,7 @@ namespace WebContent
             var communication = _communication;
             if (communication != null)
             {
-                foreach (var registration in new[] { _responseFilterRegistration, _leafResponseFilterRegistration, _echoFilterRegistration, _tunnelOpenResponseFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration })
+                foreach (var registration in new[] { _responseFilterRegistration, _leafResponseFilterRegistration, _echoFilterRegistration, _tunnelOpenResponseFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _statusResponseFilterRegistration })
                 {
                     if (registration == null)
                     {
@@ -149,6 +166,13 @@ namespace WebContent
             _tunnelOpenResponseFilterRegistration = null;
             _tunnelDataFrameFilterRegistration = null;
             _tunnelCloseFrameFilterRegistration = null;
+            _statusResponseFilterRegistration = null;
+
+            // #69: stop beating; the registry itself survives - a re-Setup resumes heartbeats for
+            // sessions whose listeners are still alive, and the Event Server idle-sweeps the rest.
+            var heartbeat = _sessionHeartbeat;
+            _sessionHeartbeat = null;
+            heartbeat?.Dispose();
 
             // #57: every live tunnel ends with an explicit close so the Event Server releases
             // its target sockets now, not at the ES-side idle sweep; then the sweep stops.
@@ -169,6 +193,7 @@ namespace WebContent
             _communication = null;
             _correlation = null;
             _leafCorrelation = null;
+            _statusCorrelation = null;
 
             // Deliberately no MessageCommunicationManager.Stop: the messaging session is
             // process-wide and may be shared by other plugins (no MIP sample ever stops it).
@@ -232,6 +257,7 @@ namespace WebContent
                         {
                             CorrelationId = correlationId,
                             Url = target.AbsoluteUri,
+                            SessionId = query.SessionId,
                             Method = string.IsNullOrWhiteSpace(query.Method) ? null : query.Method.Trim().ToUpperInvariant(),
                             Headers = query.Headers != null && query.Headers.Count > 0 ? query.Headers : null,
                             BodyBase64 = query.Body != null && query.Body.Length > 0 ? Convert.ToBase64String(query.Body) : null,
@@ -304,6 +330,159 @@ namespace WebContent
         }
 
         /// <summary>
+        /// Ticket #69: fire one block report at the Event Server (via <see cref="ProxyBlockReporter"/>).
+        /// Fire-and-forget by contract: a failed transmit is logged and swallowed - the diagnostics
+        /// channel dying must never disturb the browser flow that triggered the report.
+        /// </summary>
+        internal void SendBlockReport(ProxyBlockReportPayload payload)
+        {
+            var communication = _communication;
+            if (communication == null || payload == null)
+            {
+                return;
+            }
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(ProxyMessageIds.BlockReportId, ProxyFetchWireCodec.ToWire(payload)),
+                    null,
+                    null,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy block report not sent: {exception.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Ticket #69: fire one session-lifecycle event (Open/Close from the listener; Heartbeat
+        /// from the timer below). Same swallow-and-log posture as the block report.
+        /// </summary>
+        internal void SendSessionEvent(ProxySessionEventPayload payload)
+        {
+            var communication = _communication;
+            if (communication == null || payload == null)
+            {
+                return;
+            }
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(ProxyMessageIds.SessionEventId, ProxyFetchWireCodec.ToWire(payload)),
+                    null,
+                    null,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy session event ({payload.Kind}) not sent: {exception.Message}");
+            }
+        }
+
+        /// <summary>
+        /// #69 heartbeat tick: one SessionEvent(Heartbeat) per live proxied-view session. A down
+        /// channel simply drops this tick - the Event Server's idle backstop prunes what a
+        /// reconnect never refreshes, and the next successful tick re-adopts everything still open.
+        /// </summary>
+        private void HeartbeatSessions()
+        {
+            if (_communication == null)
+            {
+                return;
+            }
+
+            foreach (var payload in ProxySessionRegistry.Active.HeartbeatPayloads(DateTime.UtcNow))
+            {
+                SendSessionEvent(payload);
+            }
+        }
+
+        /// <summary>
+        /// Ticket #69: pull one workspace's live proxy status from the Event Server (the MC
+        /// diagnostics page's query path, #76). Never throws: an unconnected channel or an
+        /// unanswered query completes as a ServerUnavailable failure the page renders distinctly.
+        /// </summary>
+        internal Task<ProxyStatusResponsePayload> RequestWorkspaceStatusAsync(string workspaceItemId, TimeSpan? deadline = null)
+        {
+            var communication = _communication;
+            var correlation = _statusCorrelation;
+            if (communication == null || correlation == null)
+            {
+                return Task.FromResult(new ProxyStatusResponsePayload
+                {
+                    Success = false,
+                    WorkspaceItemId = workspaceItemId,
+                    ErrorCode = ProxyFetchErrorCodes.ServerUnavailable,
+                    ErrorMessage = "The Smart Client has no proxy messaging channel to the VMS Event Server.",
+                });
+            }
+
+            var correlationId = Guid.NewGuid().ToString("N");
+            var completion = correlation.Begin(correlationId, deadline ?? DefaultDeadline);
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(
+                        ProxyMessageIds.StatusRequestId,
+                        ProxyFetchWireCodec.ToWire(new ProxyStatusRequestPayload
+                        {
+                            CorrelationId = correlationId,
+                            WorkspaceItemId = workspaceItemId,
+                        })),
+                    null,
+                    null,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                correlation.Feed(new ProxyStatusResponsePayload
+                {
+                    CorrelationId = correlationId,
+                    Success = false,
+                    WorkspaceItemId = workspaceItemId,
+                    ErrorCode = ProxyFetchErrorCodes.ServerUnavailable,
+                    ErrorMessage = $"The proxy status query could not be sent: {exception.Message}",
+                });
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy status request not sent: {exception.Message}");
+            }
+
+            return completion;
+        }
+
+        private object OnStatusResponse(Message message, FQID destination, FQID source)
+        {
+            try
+            {
+                if (message == null || message.Data == null)
+                {
+                    return null;
+                }
+
+                var payload = ProxyFetchWireCodec.StatusResponseFromWire(message.Data);
+                if (payload == null)
+                {
+                    return null;
+                }
+
+                var correlation = _statusCorrelation;
+                if (correlation != null)
+                {
+                    correlation.Feed(payload);
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy status response frame failed: {exception.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Ticket #57: open one websocket tunnel for a decided upgrade request. The Event Server
         /// connects to the target, replays the handshake, and answers with its verbatim 101; the
         /// returned handle then pumps raw tunnel bytes in both directions through messaging.
@@ -339,6 +518,7 @@ namespace WebContent
                 TransmitTunnel(ProxyMessageIds.TunnelOpenRequestId, new ProxyTunnelPayload
                 {
                     CorrelationId = tunnelId,
+                    SessionId = request.SessionId,
                     Url = target.AbsoluteUri,
                     Headers = ProxyWebSocketHandshake.ToTunnelWireHeaders(request),
                 });

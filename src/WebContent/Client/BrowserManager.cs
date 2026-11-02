@@ -48,7 +48,19 @@ namespace WebContent.Client
             string proxyUserDataFolder = null;
             if (proxyProfile != null)
             {
-                listener = new LoopbackProxyListener(proxyProfile.CanonicalTargets, FetchThroughMessaging);
+                // #69: one diagnostics session per proxied browser, attributed to the workspace item
+                // the profile was resolved for. Block reports, session lifecycle, and traffic
+                // attribution all hang off its id; the Event Server backstops it with an idle sweep.
+                listener = new LoopbackProxyListener(
+                    proxyProfile.CanonicalTargets,
+                    FetchThroughMessaging,
+                    new ProxyViewSessionContext
+                    {
+                        SessionId = Guid.NewGuid().ToString("N"),
+                        WorkspaceItemId = proxyProfile.WorkspaceItemId,
+                        WorkspaceFingerprint = proxyProfile.WorkspaceFingerprint,
+                        ClientMachine = Environment.MachineName,
+                    });
                 listener.Start();
                 proxyArguments = ProxyBrowserArguments.For(listener.Port);
                 proxyUserDataFolder = ProxiedUserDataFolder(id);
@@ -120,7 +132,15 @@ namespace WebContent.Client
                     return false;
                 }
 
-                var listener = new LoopbackProxyListener(proxyProfile.CanonicalTargets, FetchThroughMessaging);
+                var listener = new LoopbackProxyListener(
+                    proxyProfile.CanonicalTargets,
+                    FetchThroughMessaging,
+                    new ProxyViewSessionContext
+                    {
+                        SessionId = Guid.NewGuid().ToString("N"),
+                        WorkspaceItemId = proxyProfile.WorkspaceItemId,
+                        ClientMachine = Environment.MachineName,
+                    });
                 listener.Start();
                 browser.ProxyListener = listener;
                 browser.ProxyBrowserArguments = ProxyBrowserArguments.For(listener.Port);

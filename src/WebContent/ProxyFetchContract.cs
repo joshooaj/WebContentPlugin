@@ -39,6 +39,17 @@ namespace WebContent
         internal const string TunnelDataFromTargetId = "WebContent.Proxy.TunnelDataFromTarget";
         internal const string TunnelCloseToTargetId = "WebContent.Proxy.TunnelCloseToTarget";
         internal const string TunnelCloseFromTargetId = "WebContent.Proxy.TunnelCloseFromTarget";
+
+        /// <summary>
+        /// Ticket #69: the diagnostics substrate. Block reports and session lifecycle events are
+        /// fire-and-forget one-way messages (no response id); the status query is a request/
+        /// response pair unicasted like every other proxy response. Blocks decided client-side
+        /// never reach the fetcher path, so the client reports them itself.
+        /// </summary>
+        internal const string BlockReportId = "WebContent.Proxy.BlockReport";
+        internal const string SessionEventId = "WebContent.Proxy.SessionEvent";
+        internal const string StatusRequestId = "WebContent.Proxy.StatusRequest";
+        internal const string StatusResponseId = "WebContent.Proxy.StatusResponse";
     }
 
     /// <summary>
@@ -155,6 +166,14 @@ namespace WebContent
         public string CorrelationId;
         public string Url;
 
+        /// <summary>
+        /// Ticket #69: the browser-view session that issued this fetch, so the Event Server can
+        /// attribute the traffic it already serves to that session's live-status counters. Null
+        /// from pre-#69 senders (and for unattributed requests) — an absent session never
+        /// refuses the fetch itself.
+        /// </summary>
+        public string SessionId;
+
         /// <summary>Uppercase HTTP method (POST/PUT/DELETE/OPTIONS/...); null or blank is GET.</summary>
         public string Method;
 
@@ -224,6 +243,13 @@ namespace WebContent
 
         /// <summary>Request body bytes; null when the request carried no body.</summary>
         internal byte[] Body;
+
+        /// <summary>
+        /// Ticket #69: the browser-view session that issued this request, stamped by the listener;
+        /// copied onto the wire payload so the Event Server counts the fetch toward that session's
+        /// live status. Null for unattributed requests.
+        /// </summary>
+        internal string SessionId;
     }
 
     /// <summary>
@@ -339,6 +365,12 @@ namespace WebContent
         /// <summary>The tunnel id; one Guid for the whole life of one tunnel.</summary>
         public string CorrelationId;
 
+        /// <summary>
+        /// Ticket #69: the browser-view session that opened this tunnel, so its bytes count toward
+        /// that session's live-status traffic. Null from pre-#69 senders; never gates the tunnel.
+        /// </summary>
+        public string SessionId;
+
         /// <summary>Server-pushed frames: Data or Close (see <see cref="ProxyTunnelFrameKinds"/>).</summary>
         public string Kind;
 
@@ -447,5 +479,189 @@ namespace WebContent
         internal int StatusCode;
         internal string ErrorCode;
         internal string ErrorMessage;
+    }
+
+    /// <summary>
+    /// Ticket #69: the machine-readable kinds of the session-lifecycle message. One id covers the
+    /// whole lifecycle; the kind field decides which. Sessions are per proxied browser-view
+    /// instance, client-generated, and backstopped by an Event Server idle timeout.
+    /// </summary>
+    internal static class ProxySessionEventKinds
+    {
+        internal const string Open = "Open";
+        internal const string Heartbeat = "Heartbeat";
+        internal const string Close = "Close";
+    }
+
+    /// <summary>
+    /// Ticket #69: the cause categories of a client-side proxy block, shared by the block report,
+    /// the Event Server ring buffer, and (tickets #83/#84/#66) the surfaces that render them.
+    /// <see cref="TryMapErrorCode"/> funnels the wire failure codes into the same categories so
+    /// the ES-decided failures (size cap, TLS chain, unreachable target) land beside the ones the
+    /// loopback listener decided itself. Codes that are not per-origin blocks — ServerUnavailable
+    /// (component outage), BadRequest, Error — map to nothing and are never reported.
+    /// </summary>
+    internal static class ProxyBlockReasons
+    {
+        internal const string NotAllowed = "NotAllowed";
+        internal const string TooLarge = "TooLarge";
+        internal const string CertUntrusted = "CertUntrusted";
+        internal const string Unreachable = "Unreachable";
+        internal const string Timeout = "Timeout";
+        internal const string TunnelRefused = "TunnelRefused";
+
+        internal static bool TryMapErrorCode(string errorCode, out string reason)
+        {
+            switch (errorCode)
+            {
+                case ProxyFetchErrorCodes.NotAllowed:
+                    reason = NotAllowed;
+                    return true;
+                case ProxyFetchErrorCodes.TooLarge:
+                    reason = TooLarge;
+                    return true;
+                case ProxyFetchErrorCodes.TlsValidation:
+                case ProxyFetchErrorCodes.NoAuthority:
+                    reason = CertUntrusted;
+                    return true;
+                case ProxyFetchErrorCodes.Unreachable:
+                    reason = Unreachable;
+                    return true;
+                case ProxyFetchErrorCodes.Timeout:
+                    reason = Timeout;
+                    return true;
+                case ProxyFetchErrorCodes.HandshakeRefused:
+                    reason = TunnelRefused;
+                    return true;
+                default:
+                    reason = null;
+                    return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ticket #69: one fire-and-forget block report (client → Event Server). The listener/
+    /// forwarder emits it where refusals are decided client-side — before the Event Server ever
+    /// sees the request — and for ES-decided failures read off the wire failure codes. Low
+    /// frequency by nature; every field is a whitelisted primitive. ClientMachine is self-
+    /// reported display context; the acting user comes from the messaging sender identity the
+    /// Event Server resolves itself, never from the payload.
+    /// </summary>
+    [Serializable]
+    public class ProxyBlockReportPayload
+    {
+        /// <summary>Workspace item id (Guid string) the blocked view belongs to.</summary>
+        public string WorkspaceItemId;
+
+        /// <summary>Fingerprint of the admin definition that seeded the view (freshness context).</summary>
+        public string WorkspaceFingerprint;
+
+        /// <summary>The blocked origin in ProxyPolicy canonical form ("scheme://host[:port]").</summary>
+        public string Origin;
+
+        /// <summary>One of <see cref="ProxyBlockReasons"/>.</summary>
+        public string Reason;
+
+        /// <summary>Occurrence count this report stands for; 0 or 1 means one.</summary>
+        public int Count;
+
+        /// <summary>Machine name of the client that decided the block (display only).</summary>
+        public string ClientMachine;
+    }
+
+    /// <summary>
+    /// Ticket #69: one session-lifecycle event (client → Event Server): Open when a proxied
+    /// browser-view instance starts, Heartbeat while it lives, Close on dispose. The Event
+    /// Server attributes fetch/tunnel traffic carrying the same SessionId to this session and
+    /// backstops missed Closes with its own idle timeout.
+    /// </summary>
+    [Serializable]
+    public class ProxySessionEventPayload
+    {
+        /// <summary>Client-generated session id (Guid string), one per proxied view instance.</summary>
+        public string SessionId;
+
+        /// <summary>One of <see cref="ProxySessionEventKinds"/>.</summary>
+        public string Kind;
+
+        public string WorkspaceItemId;
+        public string WorkspaceFingerprint;
+
+        /// <summary>Machine name of the hosting Smart Client (display only; sent on Open).</summary>
+        public string ClientMachine;
+    }
+
+    /// <summary>
+    /// Ticket #69: the Management Client's pull of one workspace's live proxy state. Answered
+    /// unicasted to the requester endpoint like every other proxy response; the polling cadence
+    /// lives in the MC page (#76), not here.
+    /// </summary>
+    [Serializable]
+    public class ProxyStatusRequestPayload
+    {
+        public string CorrelationId;
+
+        /// <summary>Workspace item id (Guid string) to snapshot.</summary>
+        public string WorkspaceItemId;
+    }
+
+    /// <summary>
+    /// Ticket #69: one workspace's live-proxy snapshot — open sessions with the traffic the
+    /// Event Server already sees on the correlation channel, plus the recently-blocked list.
+    /// In-memory only: everything resets on an Event Server restart.
+    /// </summary>
+    [Serializable]
+    public class ProxyStatusResponsePayload
+    {
+        public string CorrelationId;
+        public bool Success;
+
+        /// <summary>Workspace item id the snapshot describes (echoed from the request).</summary>
+        public string WorkspaceItemId;
+
+        public List<ProxySessionStatusEntry> Sessions;
+        public List<ProxyBlockEntry> Blocked;
+
+        // Failure fields.
+        public string ErrorCode;
+        public string ErrorMessage;
+    }
+
+    /// <summary>
+    /// Ticket #69: one live proxy session as the Event Server sees it. UserName is the XProtect
+    /// login name resolved from the messaging sender endpoint identity — never a client claim.
+    /// RequestsPerMinute is computed over the session's open-to-now window (minimum one minute
+    /// so a just-opened session never shows an inflated rate).
+    /// </summary>
+    [Serializable]
+    public class ProxySessionStatusEntry
+    {
+        public string SessionId;
+        public string UserName;
+        public string ClientMachine;
+        public DateTime OpenedUtc;
+        public DateTime LastActivityUtc;
+        public long Requests;
+        public double RequestsPerMinute;
+
+        /// <summary>Bytes browser → targets (fetch bodies relayed + tunnel client frames).</summary>
+        public long BytesSent;
+
+        /// <summary>Bytes targets → browser (fetched bodies + tunnel target frames).</summary>
+        public long BytesReceived;
+    }
+
+    /// <summary>
+    /// Ticket #69: one dedup'd entry of a workspace's recently-blocked ring buffer: how often
+    /// the origin was refused for this reason and when it was last seen.
+    /// </summary>
+    [Serializable]
+    public class ProxyBlockEntry
+    {
+        public string Origin;
+        public string Reason;
+        public long Count;
+        public DateTime LastSeenUtc;
     }
 }
