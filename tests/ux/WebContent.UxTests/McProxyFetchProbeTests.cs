@@ -38,6 +38,9 @@ public class McProxyFetchProbeTests
         ManagementClientUi.EnsureExpanded(mcMain, ManagementClientUi.WorkspacesNodeName, WorkspaceName);
         ManagementClientUi.SelectTreeItem(mcMain, WorkspaceName);
 
+        // #81 moved the whole proxy section - routing toggle, allowlist grid, fetch harness -
+        // onto the Proxy tab, so this probe selects the tab before reaching for any proxy control.
+        AllowlistGridUi.OpenProxyTab(mcMain);
         var urlBox = ManagementClientUi.ExpectControl(mcMain, "txtProxyTestUrl", 30);
         Artifacts.Window(mcMain, "proxy-probe-page");
 
@@ -45,8 +48,7 @@ public class McProxyFetchProbeTests
         string proxyToggle = chk != null && chk.Patterns.Toggle.IsSupported
             ? chk.Patterns.Toggle.Pattern.ToggleState.Value.ToString()
             : "unknown";
-        var targets = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("txtProxyTargets"));
-        var targetsText = targets == null ? "(no txtProxyTargets control)" : ReadValue(targets);
+        var targetsText = string.Join(" | ", AllowlistGridUi.ReadEntries(mcMain));
 
         var log = new System.Text.StringBuilder();
         log.AppendLine($"workspace='{WorkspaceName}' proxyEnabledToggle={proxyToggle} targets={targetsText}");
@@ -99,10 +101,4 @@ public class McProxyFetchProbeTests
 
     private static string ResultText(Window mcMain) =>
         mcMain.FindFirstDescendant(cf => cf.ByAutomationId("lblProxyTestResult"))?.Name ?? string.Empty;
-
-    private static string ReadValue(AutomationElement element)
-    {
-        try { return element.Patterns.Value.IsSupported ? element.Patterns.Value.Pattern.Value.Value : element.Name; }
-        catch { return element.Name; }
-    }
 }

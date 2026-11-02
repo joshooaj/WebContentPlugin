@@ -11,13 +11,15 @@ namespace WebContent.UxTests;
 
 /// <summary>
 /// Ticket #74 probe: the Management Client workspace config page renders as the four-tab shell
-/// (Settings | Proxy | Diagnostics | Status), the Settings tab keeps every existing control on
-/// the default tab (no navigation needed - the proxy-provisioning probes must stay intact), and
-/// walking the placeholder (Proxy/Diagnostics) and read-only (Status, live since #76) tabs never
-/// dirties the pane: Save must stay disabled through the whole walk ("no config writes from
-/// placeholder tabs"). The Status tab is expected visible because the probe user is a full
-/// administrator (holds Manage); the view-only denial half of the role gate is pinned by MC-11
-/// in the verification matrix. Read-only: never clicks Save.
+/// (Settings | Proxy | Diagnostics | Status), the Settings tab keeps every settings control on
+/// the default tab (no navigation needed - the home-address probes must stay intact), and walking
+/// the live Proxy grid (#81), the placeholder Diagnostics tab and the read-only Status tab (#76)
+/// never dirties the pane: Save must stay disabled through the whole walk ("no config writes
+/// from the shell"). Since #81 the proxy section lives ONLY on the Proxy tab, which the probe
+/// asserts by looking for a realized proxy control while Settings is selected. The Status tab is
+/// expected visible because the probe user is a full administrator (holds Manage); the view-only
+/// denial half of the role gate is pinned by MC-11 in the verification matrix.
+/// Read-only: never clicks Save.
 /// </summary>
 public class McWorkspaceTabsProbeTests
 {
@@ -51,14 +53,13 @@ public class McWorkspaceTabsProbeTests
             ManagementClientUi.SelectTreeItem(mcMain, config.McWorkspaceName);
 
             // 1. Default tab is Settings and every existing control is reachable WITHOUT any
-            //    tab navigation (the shape ProxyTargetProvisioning and the home-address harness rely on).
+            //    tab navigation (the shape the home-address harness relies on). Since #81 the
+            //    whole proxy section lives on the Proxy tab, so the Settings tab must NOT carry
+            //    proxy controls any more - asserted, not just left unmentioned.
             var nameBox = ManagementClientUi.ExpectControl(mcMain, "txtName", 30);
             ManagementClientUi.ExpectControl(mcMain, "txtHomeAddress", 5);
-            ManagementClientUi.ExpectControl(mcMain, "chkProxyEnabled", 5);
-            var targetsBox = ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 5);
             var nameBefore = ReadValue(nameBox);
-            var targetsBefore = ReadValue(targetsBox);
-            log.AppendLine($"settings tab live: txtName reads '{nameBefore}', txtProxyTargets reads '{targetsBefore}'");
+            log.AppendLine($"settings tab live: txtName reads '{nameBefore}'");
 
             // 2. Four-tab shell rendered; Status present because this user is a full admin.
             foreach (var aid in new[] { "tabSettings", "tabProxy", "tabDiagnostics", "tabStatus" })
@@ -69,11 +70,13 @@ public class McWorkspaceTabsProbeTests
             log.AppendLine("tabs rendered: tabSettings tabProxy tabDiagnostics tabStatus");
             Artifacts.Window(mcMain, "mc-tabs-settings");
 
-            // 3. Each placeholder tab selects (UIA SelectionItem, no mouse needed) and renders
-            //    its marker TextBlock; screenshot per tab.
+            // 3. Each tab selects (UIA SelectionItem, no mouse needed) and renders its content;
+            //    screenshot per tab. The Proxy tab is live since #81 (structured allowlist grid);
+            //    Diagnostics (#84) is the last placeholder left.
             SelectTabByAutomationId(mcMain, "tabProxy");
-            ManagementClientUi.ExpectControl(mcMain, "txtProxyTabPlaceholder", 10);
-            log.AppendLine("proxy tab placeholder rendered");
+            ManagementClientUi.ExpectControl(mcMain, "dgProxyTargets", 10);
+            ManagementClientUi.ExpectControl(mcMain, "btnProxyTargetAdd", 5);
+            log.AppendLine("proxy tab live surface rendered - structured allowlist grid present");
             Artifacts.Window(mcMain, "mc-tabs-proxy");
 
             SelectTabByAutomationId(mcMain, "tabDiagnostics");
@@ -95,15 +98,21 @@ public class McWorkspaceTabsProbeTests
             Assert.False(ManagementClientUi.WaitForSaveEnabled(mcMain, 4));
             log.AppendLine("Save stayed disabled through the whole tab walk");
 
-            // 5. Back on Settings, the fields still read the same values (fill untouched). The
-            //    elements are RE-FOUND: a WPF TabControl unloads the non-selected tab's content,
-            //    so the pre-walk element handles are stale by now.
+            // 5. Back on Settings, the fields still read the same values (fill untouched), and
+            //    the Proxy tab's grid still renders the same rows after the walk. The elements
+            //    are RE-FOUND: a WPF TabControl unloads the non-selected tab's content, so the
+            //    pre-walk element handles are stale by now.
             SelectTabByAutomationId(mcMain, "tabSettings");
             var nameAfter = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtName", 10));
-            var targetsAfter = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 10));
             Assert.Equal(nameBefore, nameAfter);
-            Assert.Equal(targetsBefore, targetsAfter);
-            log.AppendLine($"settings round-trip intact: txtName '{nameAfter}', txtProxyTargets '{targetsAfter}'");
+
+            var strayProxyControl = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("chkProxyEnabled"));
+            Assert.True(strayProxyControl == null,
+                "the Settings tab realized a proxy control - the proxy section lives on the Proxy tab (#81).");
+
+            AllowlistGridUi.OpenProxyTab(mcMain);
+            var entriesAfter = AllowlistGridUi.ReadEntries(mcMain);
+            log.AppendLine($"round-trip intact: txtName '{nameAfter}', allowlist rows '{string.Join(" | ", entriesAfter)}'");
 
             Artifacts.Window(mcMain, "mc-tabs-final");
         }

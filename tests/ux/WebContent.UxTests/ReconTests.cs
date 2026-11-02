@@ -574,8 +574,10 @@ public class ReconTests
 
             var nameBox = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("txtName"));
             Log($"pane txtName: present={nameBox != null} value='{(nameBox != null && nameBox.Patterns.Value.IsSupported ? nameBox.Patterns.Value.Pattern.Value.Value : "?")}'");
-            var targets = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("txtProxyTargets"));
-            Log($"pane txtProxyTargets: present={targets != null} value='{(targets != null && targets.Patterns.Value.IsSupported ? targets.Patterns.Value.Pattern.Value.Value : "?")}'");
+            var proxyTab = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("tabProxy"));
+            Log($"pane tabProxy: present={proxyTab != null}");
+            var grid = mcMain.FindFirstDescendant(cf => cf.ByAutomationId("dgProxyTargets"));
+            Log($"pane dgProxyTargets: present={grid != null} (the #81 grid is Proxy-tab content, so it is unrealized until that tab is selected)");
         }
 
         // WindowPrint (PrintWindow), not Window: CopyFromScreen throws "handle is invalid" /

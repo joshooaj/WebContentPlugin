@@ -16,10 +16,11 @@ namespace WebContent.UxTests;
 /// (http://neverssl.com/) is refused NotAllowed - apex-never-matched live, not just pinned.
 /// Phase B swaps in the full-host hatch "http://*": a normal host still fetches while the
 /// literal-IP target (http://10.20.30.40/) refuses NotAllowed INSTANTLY - the SSRF floor refusing
-/// before any socket opens (a missing floor would answer Unreachable after seconds). The MC
-/// readback of each wildcard line between saves proves the structured 'pattern' storage shape
-/// round-trips through the live admin page. Every phase restores the workspace's original
-/// allowlist verbatim before the probe exits.
+/// before any socket opens (a missing floor would answer Unreachable after seconds). The grid
+/// readback of each wildcard line after every save (taken from a reloaded pane, #81's harness)
+/// proves the structured 'pattern' storage shape round-trips through the live admin page, and
+/// phase B doubles as the live row for #81's full-host-wildcard warning banner. Every phase
+/// restores the workspace's original allowlist verbatim before the probe exits.
 /// </summary>
 public class McWildcardAllowlistProbeTests
 {
@@ -77,25 +78,24 @@ public class McWildcardAllowlistProbeTests
 
             ManagementClientUi.SelectTreeItem(mcMain, config.McWorkspaceName);
 
-            var targetsBox = ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 30);
-            foreach (var line in (ReadValue(targetsBox) ?? string.Empty)
-                         .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                originalLines.Add(line.Trim());
-            }
+            // #81: the allowlist is the structured grid on the Proxy tab - rows read back in the
+            // same "scheme://host[:port] [accept-untrusted]" shape the old text box wrote.
+            AllowlistGridUi.OpenProxyTab(mcMain);
+            originalLines.AddRange(AllowlistGridUi.ReadEntries(mcMain));
 
             log.AppendLine($"original allowlist: '{string.Join(" | ", originalLines)}'");
 
             // ---- Phase A: the leftmost-label wildcard ------------------------------
             var phaseALines = WithoutProbeLines(originalLines);
             phaseALines.Add(WildcardLine);
-            SaveTargets(mc, mcMain, config.McWorkspaceName, phaseALines, log);
+            AllowlistGridUi.SetEntriesAndSave(mc, mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName, phaseALines, log);
 
-            // Readback: the admin page re-renders the wildcard from the STORED structured
-            // record - the 'pattern' shape round-tripping through the live shell.
-            var readbackA = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 15));
-            Assert.True(Split(readbackA).Any(l => l.Trim() == WildcardLine),
-                $"after the phase A save the admin page never re-rendered '{WildcardLine}' from the stored record: '{readbackA}'");
+            // Readback: the grid re-renders the wildcard from the STORED structured record
+            // (SetEntriesAndSave reads the pane back after re-selecting the item) - the 'pattern'
+            // shape round-tripping through the live shell.
+            var readbackA = AllowlistGridUi.ReadEntries(mcMain);
+            Assert.True(readbackA.Any(l => l.Trim() == WildcardLine),
+                $"after the phase A save the admin page never re-rendered '{WildcardLine}' from the stored record: '{string.Join(" | ", readbackA)}'");
             log.AppendLine($"phase A readback carries '{WildcardLine}' verbatim (structured pattern shape round-tripped)");
 
             // The gate snapshot is up to 60 s stale after the save - wait for admission.
@@ -121,11 +121,11 @@ public class McWildcardAllowlistProbeTests
             // ---- Phase B: the full-host hatch with the SSRF floor -------------------
             var phaseBLines = WithoutProbeLines(originalLines);
             phaseBLines.Add(HatchLine);
-            SaveTargets(mc, mcMain, config.McWorkspaceName, phaseBLines, log);
+            AllowlistGridUi.SetEntriesAndSave(mc, mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName, phaseBLines, log);
 
-            var readbackB = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 15));
-            Assert.True(Split(readbackB).Any(l => l.Trim() == HatchLine),
-                $"after the phase B save the admin page never re-rendered '{HatchLine}' from the stored record: '{readbackB}'");
+            var readbackB = AllowlistGridUi.ReadEntries(mcMain);
+            Assert.True(readbackB.Any(l => l.Trim() == HatchLine),
+                $"after the phase B save the admin page never re-rendered '{HatchLine}' from the stored record: '{string.Join(" | ", readbackB)}'");
             log.AppendLine($"phase B readback carries '{HatchLine}' verbatim");
 
             var hatchResult = FetchUntil(mcMain, ApexUrl,
@@ -158,6 +158,11 @@ public class McWildcardAllowlistProbeTests
             Assert.Contains("NotAllowed", vmsFloorResult, StringComparison.Ordinal);
             Assert.DoesNotContain("Unreachable", vmsFloorResult, StringComparison.Ordinal);
 
+            // #81 rides along: the hatch row is the full-host escape hatch, so the Proxy tab's
+            // warning banner must be up while it is in the grid.
+            Assert.True(AllowlistGridUi.WarningBannerVisible(mcMain),
+                $"phase B: with '{HatchLine}' saved in the grid, the full-host-wildcard warning banner never appeared.");
+
             try { Artifacts.Window(mcMain, "mc-wildcard-phase-b"); }
             catch (Exception screenshotFailure) { log.AppendLine($"phase B screenshot skipped: {screenshotFailure.Message}"); }
 
@@ -165,11 +170,13 @@ public class McWildcardAllowlistProbeTests
             // (self-healing: a dead earlier run's leftover wildcard/hatch/neverssl lines are
             // cleaned here, so "original" never re-bakes a stale probe entry.)
             var restoreLines = WithoutProbeLines(originalLines);
-            SaveTargets(mc, mcMain, config.McWorkspaceName, restoreLines, log);
-            var restored = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 15));
-            Assert.True(SameLines(restoreLines, restored),
-                $"restore failed: allowlist reads '{restored}', expected '{string.Join(" | ", restoreLines)}'");
-            log.AppendLine("allowlist restored (probe lines removed, verified readback)");
+            AllowlistGridUi.SetEntriesAndSave(mc, mcMain, ManagementClientUi.WorkspacesNodeName, config.McWorkspaceName, restoreLines, log);
+            var restored = AllowlistGridUi.ReadEntries(mcMain);
+            Assert.True(AllowlistGridUi.SameEntries(restoreLines, restored),
+                $"restore failed: allowlist reads '{string.Join(" | ", restored)}', expected '{string.Join(" | ", restoreLines)}'");
+            Assert.False(AllowlistGridUi.WarningBannerVisible(mcMain),
+                "the full-host-wildcard warning banner stayed up after the hatch row was removed.");
+            log.AppendLine("allowlist restored (probe lines removed, verified readback, banner down)");
         }
         finally
         {
@@ -189,47 +196,6 @@ public class McWildcardAllowlistProbeTests
                         !l.Split(' ')[0].Equals(HatchLine, StringComparison.OrdinalIgnoreCase) &&
                         !l.Split(' ')[0].Equals(ApexUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
             .ToList();
-
-    /// <summary>The ProxyTargetProvisioning save discipline, whole-box version: focus-gated edit,
-    /// dirty guards, the pre-Save Name check, and a verified readback.</summary>
-    private static void SaveTargets(ClientSession mc, Window mcMain, string workspaceName, List<string> lines, StringBuilder log)
-    {
-        var joined = string.Join("\n", lines);
-        ManagementClientUi.EnsureCheckBox(mcMain, "chkProxyEnabled", true);
-
-        var pasted = ManagementClientUi.PasteIntoControl(mcMain, "txtProxyTargets", joined);
-        var edited = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 5));
-        if (!SameLines(lines, edited))
-        {
-            log.AppendLine($"paste route {(pasted ? "" : "(clipboard unavailable) ")}did not land (readback '{edited}'); ValuePattern fallback");
-            ManagementClientUi.SetValue(mcMain, "txtProxyTargets", joined);
-            edited = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 5));
-        }
-
-        if (!ManagementClientUi.WaitForSaveEnabled(mcMain, 6))
-        {
-            log.AppendLine("Save still disabled after edit; flipping chkProxyEnabled twice to dirty the pane");
-            ManagementClientUi.DirtyPaneViaCheckbox(mcMain, "chkProxyEnabled");
-            if (!ManagementClientUi.WaitForSaveEnabled(mcMain, 6))
-            {
-                ManagementClientUi.NudgeControlWithKeystroke(mcMain, "txtProxyTargets");
-            }
-        }
-
-        var paneName = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtName", 5));
-        if (!string.Equals(paneName, workspaceName, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"Refusing to Save: the Name field reads '{paneName}', expected '{workspaceName}'.");
-
-        if (!ManagementClientUi.Save(mc, mcMain, 20))
-            throw new InvalidOperationException($"Save never became enabled for allowlist '{joined}'.");
-
-        Thread.Sleep(1500);
-        var after = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 15));
-        if (!SameLines(lines, after))
-            throw new InvalidOperationException($"After Save, the proxy targets read back '{after}' — expected '{joined}'.");
-        log.AppendLine($"saved allowlist '{joined}' (verified readback)");
-    }
 
     private string FetchUntil(Window mcMain, string url, Func<string, bool> accept, StringBuilder log, string label)
     {
@@ -283,19 +249,4 @@ public class McWildcardAllowlistProbeTests
 
     private static string ResultText(Window mcMain) =>
         mcMain.FindFirstDescendant(cf => cf.ByAutomationId("lblProxyTestResult"))?.Name ?? string.Empty;
-
-    private static string ReadValue(AutomationElement element)
-    {
-        try { return element.Patterns.Value.IsSupported ? element.Patterns.Value.Pattern.Value.Value : element.Name; }
-        catch { return element.Name; }
-    }
-
-    private static bool SameLines(IEnumerable<string> expected, string actual) =>
-        Norm(expected).SequenceEqual(Norm(Split(actual)));
-
-    private static string[] Split(string s) =>
-        (s ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-
-    private static string[] Norm(IEnumerable<string> lines) =>
-        lines.Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
 }
