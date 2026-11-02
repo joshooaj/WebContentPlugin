@@ -57,5 +57,30 @@ namespace WebContent.Tests
             Assert.Equal(string.Empty, standalone.WorkspaceItemId);
             Assert.Equal(string.Empty, standalone.WorkspaceFingerprint);
         }
+
+        [Fact]
+        public void WildcardPatternEntriesSurviveTheSeededPropertyIntact()
+        {
+            // #73: the comma-separated seeding property carries pattern entries the same way it
+            // carries exact origins - the listener's matcher decides their scope, the profile
+            // just transports them canonically.
+            Assert.True(ProxyWorkspaceProfile.TryCreate(
+                true, "https://*.portal.test,http://*.cams.local:8080,https://*", null, null, out var profile));
+            Assert.Equal(
+                new[] { "https://*.portal.test", "http://*.cams.local:8080", "https://*" },
+                profile.CanonicalTargets);
+        }
+
+        [Fact]
+        public void VmsFloorHostsTravelWithTheProfileForTheListenersMatcher()
+        {
+            // #73: the client gate and the Event Server gate must floor the same hosts.
+            Assert.True(ProxyWorkspaceProfile.TryCreate(
+                true, "https://*", null, null, out var profile, new[] { " VMS.Joshooaj.com ", "vms.joshooaj.com", " " }));
+            Assert.Equal(new[] { "vms.joshooaj.com" }, profile.VmsFloorHosts);
+
+            Assert.True(ProxyWorkspaceProfile.TryCreate(true, "https://*", null, null, out var bare));
+            Assert.Empty(bare.VmsFloorHosts);
+        }
     }
 }

@@ -371,5 +371,36 @@ namespace WebContent.Tests
             Assert.Equal(ProxyForwardDisposition.Forward, decision);
             Assert.Equal("http://10.0.0.5:8080/", request.Uri.AbsoluteUri);
         }
+
+        // #73: the client gate consumes the same shared matcher as the Event Server gate -
+        // wildcard entries carry the same apex/subdomain, port-exact, and VMS-floor semantics
+        // through every posture (forward, CONNECT-terminate, ws-tunnel twin, wss upgrade).
+
+        private static readonly string[] WildcardAllowlist =
+        {
+            "https://*.portal.test",
+            "http://*.cams.local:8080",
+            "https://*",
+        };
+
+        [Theory]
+        [InlineData("https://a.portal.test/dashboard", "Forward")]
+        [InlineData("https://a.b.portal.test/", "Forward")]
+        [InlineData("https://portal.test/", "Forward")] // apex misses *.portal.test but the https://* hatch covers it
+        [InlineData("http://cam1.cams.local:8080/live", "Forward")]
+        [InlineData("http://cam1.cams.local:9090/live", "OriginNotAllowed")]
+        [InlineData("https://anything.example.test/", "Forward")]
+        [InlineData("https://vms.joshooaj.com/", "OriginNotAllowed")]
+        [InlineData("https://10.20.30.40/", "OriginNotAllowed")]
+        [InlineData("https://localhost:9443/", "OriginNotAllowed")]
+        public void ClientGateWildcardPosturesMatchTheSharedMatcher(string url, string expected)
+        {
+            var head = $"GET {url} HTTP/1.1\r\nHost: host\r\n\r\n";
+
+            var decision = ProxyForwardPolicy.Decide(
+                WildcardAllowlist, head, null, new[] { "vms.joshooaj.com" }, out _, out _);
+
+            Assert.Equal(expected, decision.ToString());
+        }
     }
 }

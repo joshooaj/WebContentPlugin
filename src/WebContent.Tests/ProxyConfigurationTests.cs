@@ -64,5 +64,81 @@ namespace WebContent.Tests
             Assert.Equal("cam2.local", proxied.ProxyTargets[1].Host);
             Assert.Equal(80, proxied.ProxyTargets[1].Port);
         }
+
+        // #73: the stored entry shape gains a structured pattern member. Readers accept both
+        // shapes forever (no migration write-back); a save writes the new one.
+
+        private const string LegacyShapeBlob =
+            "{\"version\":1,\"layout\":\"1x1\",\"items\":[{\"type\":\"WebContent\",\"position\":0," +
+            "\"settings\":{\"homeAddress\":\"https://x/\",\"proxyEnabled\":true,\"proxyTargets\":[" +
+            "{\"scheme\":\"https\",\"host\":\"portal.test\",\"port\":443,\"acceptUntrusted\":true}]}}]}";
+
+        private const string PatternShapeBlob =
+            "{\"version\":1,\"layout\":\"1x1\",\"items\":[{\"type\":\"WebContent\",\"position\":0," +
+            "\"settings\":{\"homeAddress\":\"https://x/\",\"proxyEnabled\":true,\"proxyTargets\":[" +
+            "{\"scheme\":\"https\",\"pattern\":\"*.portal.test\",\"port\":443,\"acceptUntrusted\":true}," +
+            "{\"scheme\":\"https\",\"pattern\":\"*\",\"port\":443}]}}]}";
+
+        [Fact]
+        public void LegacyHostShapeStillReadsAndCanonicalizesThroughThePatternPath()
+        {
+            var settings = WorkspaceConfiguration.Deserialize(LegacyShapeBlob).GetFirstWebContentSettings();
+
+            Assert.Equal(1, settings.ProxyTargets.Count);
+            var entry = settings.ProxyTargets[0];
+            Assert.Null(entry.Pattern);
+            Assert.Equal("portal.test", entry.Host);
+            Assert.Equal("portal.test", entry.EffectivePattern);
+            Assert.True(entry.AcceptUntrusted);
+        }
+
+        [Fact]
+        public void NewPatternShapeReadsIncludingWildcardEntries()
+        {
+            var settings = WorkspaceConfiguration.Deserialize(PatternShapeBlob).GetFirstWebContentSettings();
+
+            Assert.Equal(2, settings.ProxyTargets.Count);
+            Assert.Equal("*.portal.test", settings.ProxyTargets[0].EffectivePattern);
+            Assert.True(settings.ProxyTargets[0].AcceptUntrusted);
+            Assert.Equal("*", settings.ProxyTargets[1].EffectivePattern);
+            Assert.False(settings.ProxyTargets[1].AcceptUntrusted);
+        }
+
+        [Fact]
+        public void SavingAWorkspaceWritesTheNewStructuredPatternShape()
+        {
+            var config = WorkspaceConfiguration.CreateDefault("https://x/");
+            var settings = config.GetFirstWebContentSettings();
+            settings.ProxyEnabled = true;
+            settings.ProxyTargets = new List<ProxyTargetConfiguration>
+            {
+                new ProxyTargetConfiguration { Scheme = "https", Pattern = "*.portal.test", Port = 443, AcceptUntrusted = true },
+                new ProxyTargetConfiguration { Scheme = "https", Pattern = "exact.host", Port = 0 },
+            };
+
+            var json = config.Serialize();
+            Assert.Contains("\"pattern\":\"*.portal.test\"", json);
+            Assert.Contains("\"pattern\":\"exact.host\"", json);
+            Assert.DoesNotContain("\"host\"", json);
+
+            var reparsed = WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings();
+            Assert.Equal("*.portal.test", reparsed.ProxyTargets[0].EffectivePattern);
+            Assert.True(reparsed.ProxyTargets[0].AcceptUntrusted);
+            Assert.Equal("exact.host", reparsed.ProxyTargets[1].EffectivePattern);
+            Assert.Equal(0, reparsed.ProxyTargets[1].Port);
+        }
+
+        [Fact]
+        public void ReadingALegacyWorkspaceNeverRewritesTheStoredShapeByItself()
+        {
+            // No migration write-back: deserializing a legacy blob and re-serializing it (the
+            // read path does this on inspection) keeps the legacy host member.
+            var config = WorkspaceConfiguration.Deserialize(LegacyShapeBlob);
+            var json = config.Serialize();
+
+            Assert.Contains("\"host\":\"portal.test\"", json);
+            Assert.DoesNotContain("\"pattern\"", json);
+            Assert.Equal("portal.test", WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings().ProxyTargets[0].EffectivePattern);
+        }
     }
 }
