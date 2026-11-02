@@ -50,6 +50,7 @@ is not evidence the plugin never ran.
 | Proxy allowlist wildcards: ONE shared matcher for all three gates, structured entry shape, wildcard SSRF floor | #73 | `ProxyPolicyTests` (wildcard grammar: leftmost-label `*.tail` + the lone `*` hatch only - mid-label wildcards, `*x`, `*.`, bad labels, non-http schemes rejected; matching: subdomains covered, apex never, label-boundary safe, scheme/port exact, case-insensitive; SSRF floor: literal IPv4 (dotted-quad + numeric shorthand), IPv6 (bracketed/colon), `localhost`, and the VMS's own hosts are never wildcard-matched while explicit exact entries may still name them; seeded pseudo-random host/IPv4 property pins over 300+200 rounds), `ProxyAllowlistGateAgreementTests` (the same (entries, request-origin) matrix drives the Event Server fetch gate, the client forward gate, and the leaf-mint gate to identical verdicts; legacy `host` records and new `pattern` records gate identically), `ProxyServerAllowlistTests` (pattern and legacy shapes gate identically at the ES; VMS floor fed through a resolver seam and kept across resolver faults; the accept-untrusted flag rides wildcard entries under the same floor), `ProxyForwardPolicyTests` (client gate consumes the shared matcher in every posture), `ProxyWorkspaceProfileTests` (pattern entries and the floor hosts travel together through the seeded profile property), `ProxyConfigurationTests` (the stored entry gains `pattern`; readers accept BOTH shapes forever, no migration write-back - a read never rewrites the stored shape), `WorkspaceTabShellGuardTests` (boolean-attribute pins learned the hard way in the MC-13 live walk) | See MC-13 below - **live rows PASSED 2026-11-02** (run `20261102-073648`): wildcard/hatch lines save and read back verbatim through the live Management Client (structured `pattern` shape round-trip); `http://*.neverssl.com` admits `http://online.neverssl.com/` (a `HTTP 200 - 3961 bytes` banking in run `20261102-071520`) while the apex refuses `NotAllowed` in 0.0s; the `http://*` hatch admits the apex (200 in run `20261102-073010`) yet the literal IP and the VMS's own host both refuse `NotAllowed` in 0.0s - refused before any socket opens; allowlist restored to its four production lines with verified readback |
 
 | Rule triggers: a matched proxied fetch raises the fixed `WebContent proxy request` analytics event on the Event Server bus | #65 | `ProxyTriggerPolicyTests` (url glob grammar: absolute or the lone `*` hatch only; scheme http/https/`*`; host exact — empty labels refused — leftmost-label `*.tail`, or lone `*`; port explicit 1-65535 or absent = the url's own scheme default, so an explicit non-default port never matches an absent-port row; anchored path glob where `*` spans `/` and `?` is exactly one char, query/fragment never participate; method verb tokens; status class `1xx..5xx` or exact 100-599; seeded-Random property pins over the glob engine with a wildcard-safe alphabet on the pattern side), `ProxyTriggerMatcherTests` (store closed before the first resolve; rows evaluate against their own workspace only; first matching row wins — one fetch raises at most one event; absent sections tolerated silently; a refused row is audited by reason without taking down the workspace's other rows; a resolver failure after a good resolve keeps serving last-known-good rows; `Prime` logs what the configuration actually loaded), `ProxyConfigurationTests` (raw `proxyTriggers` rows survive the serialized roundtrip — grammar is decided only on read; a pre-#65 definition reads `ProxyTriggers=null` with no error; empty `method`/`status` members optional; a workspace without rows never grows an empty section), `ProxyFetchWireCodecTests` + `ProxyDiagnosticsWireTests` (#65-revised skew contract: the request wire's members are explicitly optional on read so an older Smart Client's frame decodes as an unattributed fetch, while a frame that names no url stays an unusable null; the tunnel wire keeps the strict inferred contract), `EventServerTriggerWiringGuardTests` (event header carries ID/Timestamp/Message=the one fixed event type with per-row context in CustomTag; the raise goes through `EnvironmentManager.SendMessage` with a TYPED platform `AnalyticsEvent` + `RelatedFQID` — never raw `TransmitMessage`, which the live transmit layer refuses for system Command ids; the plugin observes `Server.NewEventIndication` and detaches at Close; the store is primed in `Init` and logs; the self-test probe stays behind the env/flag switch; attribution chain: stamped request → diagnostics session map → fail closed) | See ES-3 below - **live gate PASSED 2026-11-02** (run `20261102-141512`, drop `WebContent.dll` SHA-256 `2B974839…`): the flag-file probe raised with a real workspace source and the SAME event id came back through the plugin's NewEventIndication observer (`d9ea7200…` on all three markers); the two refusal postures were learned live - raw `TransmitMessage` of a system Command id (`Discarding message Server.NewEventCommand`) and a sourceless event (`ArgumentException: Invalid event`) |
+| MC exports the deployment proxy CA certificate over MIP messaging (provenance-independent, read-only, size-capped single frame) | #75 | `ProxyCaExportTests` (responder postures: authority present → Success with base64 DER + thumbprint + validity window; absent → `NoAuthority` with the actionable "does not exist yet" sentence, never an empty answer; expired/not-yet-valid and malformed entries refused by code, never silently skipped past; the fixed-CN finder opens `LocalMachine\Personal` with `ReadOnly | OpenExistingOnly` only — a source guard pins that no write/create flag can enter the export path — and several copies prefer the private-key one; wire codec round-trips the payloads as one JSON string with optional-member tolerance; correlation deadline silence → `ServerUnavailable`; the MC view builder NEVER yields a save for a success that carries no bytes — it renders the error copy instead; size caps: a REAL 2048-bit CA's DER frames under `MaxAuthorityDerBytes` (8 KiB) and its full response wire form stays under `MaxResponseWireChars` (16 KiB), the caps themselves pinned far under the proven ~87K-char single fetch-chunk headroom), `ProxyFetchContractGuardTests` extended (both new payloads stay plugin-namespace `[Serializable]` public-field types; `WebContent.Proxy.CaExportRequest`/`…Response` declared in `PluginDefinedMessageIds`; ids never end in "Command" so SecurityLevel.Normal clients can send) | See MC-15 below - **live row PASSED 2026-11-02** (run `20261102-154554`): the button answers for a CA this build did NOT create (legacy-script provenance, thumbprint `E4D254D5…`), and the `.cer` the Save As dialog writes is byte-identical to the certificate in the Event Server machine's live store |
 
 ## Manual host checks
 
@@ -412,6 +413,56 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    binding in the grid); the storage de-dupes so probe leftovers double up (the harness now
    treats its own host/hatch rows as not-baseline); and the wildcard banner probe must read the
    TextBlock, not the peerless Border.
+
+### MC-15 Export the deployment CA certificate over MIP messaging (#75)
+
+1. Deploy the drop to BOTH machines (`Invoke-psake -taskList Build, Deploy` — the Event Server half
+   matters: the responder lives in the background plugin there). Confirm the Event Server loaded it:
+   `logs\MIP.log` gains `Proxy fetcher ready (…, export=WebContent.Proxy.CaExportRequest, …)`.
+2. In Management Client select the plugin's **Web Content Workspaces** node: the overview page carries
+   the **Export proxy certificate** button. Press it: the pane shows the "asking the Event Server"
+   line, then a **Save the proxy authority certificate** Save As dialog with default name
+   `WebContent-Proxy-Authority.cer` and a `*.cer` (DER) filter.
+3. Expected (success half): MC `Logs\MIP.log` gains `Proxy authority certificate answered: thumbprint
+   …, valid to …, N DER bytes.` then `Proxy authority certificate exported to '<path>' (thumbprint
+   …)`; the Event Server log gains the paired `Exported the deployment proxy authority certificate
+   (thumbprint …, valid to …)`; the saved file parses as X.509 (first byte `30`, NOT PEM text) and its
+   thumbprint equals the store entry's. The pane then states the saved path + thumbprint and the
+   LocalMachine\Root / AD-GPO follow-up (README "HTTPS targets").
+4. Expected (no-CA half): on a machine whose `LocalMachine\Personal` has no `XProtect WebContent
+   Plugin Loopback Proxy` certificate, the button opens NO dialog and the pane banner says the proxy
+   authority certificate does not exist yet (with the provisioning pointer); no file is written —
+   the ticket's empty-file prohibition. Proven live server-side by driving the deployed dll's
+   responder against an empty finder: it answers `NoAuthority` with exactly that sentence.
+5. Provenance independence: the live proof used a CA created by the OLD provisioning script, not by
+   this build — the responder resolves by fixed CN only. Read-only: the export path opens the store
+   `ReadOnly | OpenExistingOnly`; the live responder probe left the store count unchanged (6→6).
+
+   Automatable: `McCaExportProbeTests.ProbeProxyCaExportSavesTheEventServerAuthorityAsDer` (probe
+   category — reads the ES store FIRST over WinRM through `EventServerAuthority.ReadDeploymentAuthority`
+   (read-only) so the assertion is against the live store, not a stale view; drives the button, the
+   Save As dialog, the file-name box and the commit; then asserts the saved bytes are BYTE-IDENTICAL
+   to the store copy, the thumbprint matches, the DER parses, and both MC MIP.log markers carry this
+   run's own artifacts path). Artifacts `mc-ca-export-overview.png`, `mc-ca-export-save-dialog.png`,
+   `mc-ca-export-result.png`, `exported-authority.cer` + `mc-ca-export-probe-results.txt` under
+   `%TEMP%\webcontent-mc-ca-export-probe\<run>`.
+
+   Record (MC-15) - **live row PASSED 2026-11-02**, green run `20261102-154554` on drop `FACA878B…`
+   (hash-verified on the local install folder AND the Event Server copy): ES ready marker at
+   14:51:49 carried `export=WebContent.Proxy.CaExportRequest`; the store held exactly one authority
+   (thumbprint `E4D254D58CB1BDA6E894C0F484F3C5AA718D2377`, 816 DER bytes, to 2036-10-30), and the
+   legacy script's own `C:\Users\Public\WebContent-Proxy-Authority.cer` (written 2026-10-31, before
+   this build existed) carries the same thumbprint - the provenance AC. Pressing the button paired
+   ES 15:46:15.598 `Exported the deployment proxy authority certificate (thumbprint E4D254D5…, valid
+   to 2036-10-30 15:33:01Z)` with MC 15:46:16.213 `Proxy authority certificate answered: … 816 DER
+   bytes` and 15:46:18.967 `exported to '…\20261102-154554\exported-authority.cer'`; the written file
+   was byte-identical to the live store copy (asserted, not eyeballed). The no-CA posture, the
+   read-only store open (count 6→6), and the DER round-trip were additionally proven by driving the
+   DEPLOYED dll's responder in-process on the ES machine (`verify-ca-export.ps1`). The live walk
+   caught two harness truths worth remembering: the modal Win32 common dialog is not reliably under
+   the client's own window list (desktop-wide window scan needed), and typing the path via
+   `ValuePattern.SetValue` gets honoured only for the NAME - the dialog saves into its OWN folder, so
+   the probe types the path with keystrokes and commits with ENTER.
 
 ### SC-1 End-to-end proxied page load (#54)
 
@@ -1009,6 +1060,7 @@ ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all 
 | Client-side proxy refusals vanishing with the debug log, so an integrator fixing "camera won't load" gets no per-view record of which origin the allowlist refused (#83) | `ProxyBlockTallyTests` (per-origin+reason counts, navigation reset, bounded eviction, dead-forwarder isolation, one ES payload + one local row per refusal), SC-7 |
 | A wildcard allowlist entry reaching the apex, a literal IP, `localhost`, or the VMS's own hosts - SSRF widening of every gate AND the mint policy at once (#73) | `ProxyPolicyTests` (seeded apex/subdomain/floor invariants over random hosts and IPv4s), `ProxyAllowlistGateAgreementTests` (ES fetch, client forward, and leaf mint reach identical verdicts on one matrix), MC-13 |
 | A tri-state string on a WPF-boolean DataGrid attribute taking the whole Management Client config page down at BAML parse time (#76, found in the MC-13 walk) | `WorkspaceTabShellGuardTests` (every `CanUser*` on every page DataGrid pinned to a real bool), MC-13 |
+| A CA export writing an EMPTY file when no authority exists, guessing the CA's provenance (a script-provisioned certificate invisible to the export), reaching any cert store WRITE flag, or outgrowing the MIP frame limits mid-reply (#75) | `ProxyCaExportTests` (`NoAuthority` "does not exist yet" posture; fixed-CN read-only `LocalMachine\Personal` resolve with source guards on the open flags; view builder never offers a save without bytes; 8 KiB DER / 16 KiB wire caps pinned under the proven chunk headroom with a real 2048-bit CA under the cap), MC-15 (live bytes byte-identical to the legacy-script-provisioned store entry) |
 
 ## Scope notes (deliberate)
 
@@ -1017,4 +1069,4 @@ ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all 
   ever refactored, extract the policy into a pure class first and move MC-4's backoff
   assertions into the suite.
 - WebView2/Smart Client UI behavior (actual page render, WPF address-bar visuals) cannot be
-  unit-tested at the pure seams; MC-1–MC-12 (plus ES-1 and SC-1) are the release gate for those.
+  unit-tested at the pure seams; MC-1–MC-15 (plus ES-1 and SC-1) are the release gate for those.
