@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+
 using VideoOS.Platform.Client;
 
 namespace WebContent.Client
@@ -8,7 +9,7 @@ namespace WebContent.Client
     /// </summary>
     public partial class WebContentPropertiesUserControl : PropertiesWpfUserControl
     {
-        private WebContentViewItemManager _viewItemManager;
+        private readonly WebContentViewItemManager _viewItemManager;
 
         public WebContentPropertiesUserControl()
         {

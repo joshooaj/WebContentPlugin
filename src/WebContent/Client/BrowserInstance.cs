@@ -1,12 +1,15 @@
-﻿using Microsoft.Web.WebView2.Wpf;
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+
+using Microsoft.Web.WebView2.Wpf;
+
 using VideoOS.Platform;
 using VideoOS.Platform.Messaging;
+
 using WebContent;
 
 namespace WebContent.Client
@@ -14,7 +17,7 @@ namespace WebContent.Client
     public class BrowserInstance : IDisposable, INotifyPropertyChanged
     {
         public Guid Id { get; }
-        
+
         public WebView2 WebView { get; set; }
 
         private readonly object _sync = new object();
@@ -58,9 +61,10 @@ namespace WebContent.Client
         }
 
         private bool _clearBrowsingDataOnExit;
-        
 
-        public bool ClearBrowsingDataOnExit {
+
+        public bool ClearBrowsingDataOnExit
+        {
             get => _clearBrowsingDataOnExit;
             set
             {
@@ -76,7 +80,8 @@ namespace WebContent.Client
             set
             {
                 _allowDevTools = value;
-                if (WebView?.CoreWebView2 != null) {
+                if (WebView?.CoreWebView2 != null)
+                {
                     WebView.CoreWebView2.Settings.AreDevToolsEnabled = value;
                 }
                 OnPropertyChanged();

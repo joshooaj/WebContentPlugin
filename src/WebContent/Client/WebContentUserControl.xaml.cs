@@ -6,11 +6,14 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+
 using Microsoft.Web.WebView2.Wpf;
+
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.Messaging;
 using VideoOS.Platform.UI.Controls;
+
 using WebContent;
 
 namespace WebContent.Client
@@ -108,7 +111,7 @@ namespace WebContent.Client
                     EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), $"Browser {_viewModel.Id} does not have an available WebView after initialization.");
                     return;
                 }
-                
+
                 var binding = new Binding("BrowserVisibility")
                 {
                     Source = _viewModel
@@ -193,7 +196,7 @@ namespace WebContent.Client
         private void WebContentUserControl_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton != MouseButton.Left) return;
-            
+
             // I don't know why I originally was only firing the click events in setup mode
             //if (ClientControl.Instance.WorkSpaceState != WorkSpaceState.Setup) return;
 
@@ -208,7 +211,7 @@ namespace WebContent.Client
             }
         }
 
-        
+
 
         private object ModeChanged(Message message, FQID destination, FQID sender)
         {

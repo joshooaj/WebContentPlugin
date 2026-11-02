@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+
 using WebContent;
 
 namespace WebContent.Client
@@ -295,7 +296,7 @@ namespace WebContent.Client
             return true;
         }
 
-        private WebContentViewItemManager _viewItemManager;
+        private readonly WebContentViewItemManager _viewItemManager;
         private bool _disposed;
 
         public WebContentSettings()

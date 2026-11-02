@@ -44,16 +44,16 @@ namespace WebContent
             var chunkCount = (int)((body.Length + chunkSizeBytes - 1) / chunkSizeBytes);
 
             frames.Add(new ProxyFetchResponsePayload
-                {
-                    CorrelationId = correlationId,
-                    Kind = ProxyFetchFrameKinds.Response,
-                    Sequence = -1,
-                    StatusCode = result.StatusCode,
-                    StatusText = result.StatusText,
-                    Headers = result.Headers ?? new List<ProxyFetchHeader>(),
-                    BodyLength = result.BodyLength,
-                    ChunkCount = chunkCount,
-                });
+            {
+                CorrelationId = correlationId,
+                Kind = ProxyFetchFrameKinds.Response,
+                Sequence = -1,
+                StatusCode = result.StatusCode,
+                StatusText = result.StatusText,
+                Headers = result.Headers ?? new List<ProxyFetchHeader>(),
+                BodyLength = result.BodyLength,
+                ChunkCount = chunkCount,
+            });
 
             for (var index = 0; index < chunkCount; index++)
             {

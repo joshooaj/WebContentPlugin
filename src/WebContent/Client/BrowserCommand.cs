@@ -1,21 +1,24 @@
-﻿using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Input;
+
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
+
 using VideoOS.Platform;
 
 namespace WebContent.Client
 {
     class BrowserCommand : ICommand, IDisposable
     {
-        private BrowserAction _action;
-        private WebContentViewModel _viewModel;
+        private readonly BrowserAction _action;
+        private readonly WebContentViewModel _viewModel;
         private BrowserInstance _instance;
         private WebView2 _subscribedWebView;
 
         private bool _enabled = true;
-        public bool Enabled {
+        public bool Enabled
+        {
             get => _enabled;
             set
             {

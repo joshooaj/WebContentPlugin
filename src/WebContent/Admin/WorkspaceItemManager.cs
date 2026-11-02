@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
+
 using VideoOS.Platform;
 using VideoOS.Platform.Admin;
 using VideoOS.Platform.Messaging;
+
 using WebContent;
+
 using Message = VideoOS.Platform.Messaging.Message;
 
 namespace WebContent.Admin
@@ -108,7 +111,7 @@ namespace WebContent.Admin
         public override void FillUserControl(Item item)
         {
             if (_userControl == null) return;
-            
+
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
             var properties = item?.Properties;
@@ -212,7 +215,7 @@ namespace WebContent.Admin
         public override bool ValidateAndSaveUserControl()
         {
             if (CurrentItem == null) return false;
-            
+
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Saving workspace configuration for item: {CurrentItem.Name} (FQID: {CurrentItem.FQID}).");
 
             var name = _userControl?.WorkspaceName;

@@ -1,11 +1,14 @@
-﻿using Microsoft.Web.WebView2.Wpf;
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+
+using Microsoft.Web.WebView2.Wpf;
+
 using VideoOS.Platform;
 using VideoOS.Platform.Messaging;
+
 using WebContent;
 
 namespace WebContent.Client
@@ -21,13 +24,14 @@ namespace WebContent.Client
             get => _viewItemManager?.Settings.HomeAddress ?? Strings.HomeAddress;
         }
 
-        private string _address = Strings.HomeAddress;
+        private readonly string _address = Strings.HomeAddress;
         public string Address
         {
             get => Browser?.Address ?? Strings.HomeAddress;
         }
 
-        public bool IsAddressEnabled {
+        public bool IsAddressEnabled
+        {
             get => (ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal) == WorkSpaceState.Normal ? true : false;
         }
 
@@ -59,7 +63,7 @@ namespace WebContent.Client
 
         public Guid Id => _viewItemManager?.Settings.InstanceId ?? (_designerMode ? Guid.NewGuid() : Guid.Empty);
 
-        
+
         private object _workspaceStateChangedReceiver;
 
         private bool _isWorkspaceFloating;
@@ -73,7 +77,7 @@ namespace WebContent.Client
             }
         }
 
-        private bool _designerMode;
+        private readonly bool _designerMode;
         private BrowserInstance _browser;
         public BrowserInstance Browser
         {
@@ -125,7 +129,7 @@ namespace WebContent.Client
 
                 return _browser;
             }
-        } 
+        }
 
         private BrowserCommand _backCommand;
         public ICommand BackCommand
@@ -273,7 +277,7 @@ namespace WebContent.Client
                     _reloadCommand.Init();
                     _printCommand.Init();
                     _homeCommand.Init();
-                    
+
                     // Can't set this here because the damn corewebview2 isn't available yet
                     // Browser.WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 }

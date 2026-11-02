@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Drawing;
-using System.Windows.Media.Imaging;
 using System.Windows;
+using System.Windows.Media.Imaging;
 
 namespace WebContent.Client
 {
@@ -10,7 +10,8 @@ namespace WebContent.Client
         [System.Runtime.InteropServices.DllImport("gdi32.dll")]
         private static extern bool DeleteObject(IntPtr hObject);
 
-        public static System.Windows.Media.Imaging.BitmapSource ToBitmapSource(this Bitmap bitmap) {
+        public static System.Windows.Media.Imaging.BitmapSource ToBitmapSource(this Bitmap bitmap)
+        {
             var hBitmap = bitmap.GetHbitmap();
             var bmpSource = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
               hBitmap,
