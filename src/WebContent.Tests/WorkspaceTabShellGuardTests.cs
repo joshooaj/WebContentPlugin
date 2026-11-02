@@ -78,14 +78,15 @@ namespace WebContent.Tests
         public void PlaceholderTabsCarryNoConfigWriteControls()
         {
             // The AC "no config writes from placeholder tabs" pinned structurally: an interactive
-            // input on Proxy/Diagnostics/Status could fire the dirty chain or land in the save.
+            // input on Proxy/Diagnostics could fire the dirty chain or land in the save. Status is
+            // no longer a placeholder (#76) and is guarded on its own below.
             var writeCapable = new[]
             {
                 "TextBox", "CheckBox", "Button", "Slider", "ComboBox", "ListBox",
                 "RadioButton", "PasswordBox", "DataGrid", "TreeView", "Menu",
             };
 
-            foreach (var placeholder in new[] { "tabProxy", "tabDiagnostics", "tabStatus" })
+            foreach (var placeholder in new[] { "tabProxy", "tabDiagnostics" })
             {
                 var tab = ConfigPageTabs().Single(t => Name(t) == placeholder);
                 var offenders = tab.Descendants()
@@ -96,6 +97,43 @@ namespace WebContent.Tests
                 Assert.True(
                     tab.Descendants().Any(e => e.Attribute(Xaml + "Name")?.Value == placeholder.Replace("tab", "txt") + "TabPlaceholder"),
                     $"{placeholder} has no placeholder marker TextBlock for the ux probes to assert.");
+            }
+        }
+
+        [Fact]
+        public void StatusTabReportsOnlyAndCanNeverDirtyThePane()
+        {
+            // #76 replaced the Status placeholder with the live session table. It reads, it never
+            // writes: the grid is read-only with no row editing, and the only button on the tab is
+            // the explicit re-pull - so walking the tab cannot enable Save or land anything in
+            // ValidateAndSaveUserControl. AutomationIds the ux probe selects by are pinned too.
+            var status = ConfigPageTabs().Single(t => Name(t) == "tabStatus");
+
+            var grid = status.Descendants().Single(e => e.Name.LocalName == "DataGrid");
+            Assert.Equal("dgStatusSessions", grid.Attribute(Xaml + "Name")?.Value);
+            Assert.Equal("True", grid.Attribute("IsReadOnly")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserAddRows")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserDeleteRows")?.Value);
+
+            foreach (var button in status.Descendants().Where(e => e.Name.LocalName == "Button"))
+            {
+                Assert.Equal("OnStatusRefresh", button.Attribute("Click")?.Value);
+            }
+
+            var settingsInput = new[] { "TextBox", "CheckBox", "Slider", "ComboBox", "ListBox", "RadioButton", "PasswordBox" };
+            var offenders = status.Descendants()
+                .Select(e => e.Name.LocalName)
+                .Where(n => settingsInput.Contains(n))
+                .ToArray();
+            Assert.True(offenders.Length == 0, $"Status tab contains configuration input(s): {string.Join(", ", offenders)}.");
+
+            var names = status.Descendants()
+                .Select(e => e.Attribute(Xaml + "Name")?.Value)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .ToList();
+            foreach (var required in new[] { "txtStatusSummary", "dgStatusSessions", "statusError", "txtStatusError", "btnStatusRefresh" })
+            {
+                Assert.True(names.Contains(required), $"Status tab lost the probe surface '{required}'.");
             }
         }
 

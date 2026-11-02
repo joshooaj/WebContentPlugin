@@ -276,4 +276,22 @@
   <data name="ProxyTestFetchFailureFormat" xml:space="preserve">
     <value>Proxy fetch {0} after {1:0.0}s - {2}</value>
   </data>
+  <data name="StatusSummaryFormat" xml:space="preserve">
+    <value>{0} live proxy session(s) - {1:0.0} requests/min, sent {2}/s, received {3}/s</value>
+  </data>
+  <data name="StatusNoSessions" xml:space="preserve">
+    <value>No live proxy sessions on this workspace right now. Open a Web Content workspace tab in a Smart Client to see it here.</value>
+  </data>
+  <data name="StatusNotConnected" xml:space="preserve">
+    <value>No status from the Event Server: this Management Client has no proxy messaging channel to it. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment.</value>
+  </data>
+  <data name="StatusWorkspaceGone" xml:space="preserve">
+    <value>The Event Server does not know this workspace any more, so it has no proxy sessions to report.</value>
+  </data>
+  <data name="StatusQueryFailedFormat" xml:space="preserve">
+    <value>Proxy status query failed ({0}) - {1}</value>
+  </data>
+  <data name="StatusNoItemContext" xml:space="preserve">
+    <value>No workspace item context: this page cannot ask the Event Server for a status snapshot.</value>
+  </data>
 </root>

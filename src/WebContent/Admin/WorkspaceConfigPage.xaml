@@ -16,10 +16,11 @@
 
   <!--
     Ticket #74: the workspace config page is now a tabbed shell. The Settings tab carries the
-    existing content verbatim; Proxy/Diagnostics/Status are landing panels for the epic tickets
-    (#81/#85/#86, #84, #76) and hold NO input controls - a placeholder tab must never dirty the
-    pane. Status starts collapsed: the item manager shows it only after the workspace item's
-    SecurityActions Manage (edit-rights) check passes for the current MC user.
+    existing content verbatim; Proxy/Diagnostics are landing panels for the epic tickets (#81,
+    #85, #86, #84) and hold NO input controls - a placeholder tab must never dirty the pane. Status
+    is live since #76 and is strictly read-only. Status starts collapsed: the item manager shows it
+    only after the workspace item's SecurityActions Manage (edit-rights) check passes for the
+    current MC user.
     Tab x:Names are UIA AutomationIds - the ux probes and later tickets select tabs by them.
   -->
   <TabControl x:Name="workspaceTabs" Background="White"
@@ -157,13 +158,55 @@
     </TabItem>
 
     <TabItem x:Name="tabStatus" Header="Status" Visibility="Collapsed">
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel MaxWidth="760" Margin="20,16,20,24">
-          <TextBlock x:Name="txtStatusTabHeading" Style="{StaticResource SectionHeaderStyle}" Margin="0,0,0,6" Text="Status" />
-          <TextBlock x:Name="txtStatusTabPlaceholder" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap"
-                     Text="Live proxy sessions for this workspace land on this tab (#69/#76). The tab renders only for users who hold the workspace's Manage security action." />
+      <!--
+        Ticket #76: live proxy sessions for this workspace, pulled from the Event Server's status
+        snapshot (#69) every few seconds while this tab is the selected one - and never outside the
+        role gate that made the tab visible at all (#74). The grid is read-only: the tab reports,
+        it writes no configuration, so walking it can never dirty the pane.
+      -->
+      <Grid Margin="20,16,20,24">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="txtStatusTabHeading" Style="{StaticResource SectionHeaderStyle}"
+                   Margin="0,0,0,6" Text="Status" />
+        <TextBlock Grid.Row="1" x:Name="txtStatusSummary" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,8">
+          <Button x:Name="btnStatusRefresh" Content="Refresh now" Padding="10,4" Click="OnStatusRefresh" />
+          <TextBlock x:Name="txtStatusCadence" Style="{StaticResource SecondaryTextStyle}" Margin="10,0,0,0"
+                     VerticalAlignment="Center" TextWrapping="Wrap"
+                     Text="Live sessions refresh on their own while this tab is open; polling stops the moment you leave it." />
         </StackPanel>
-      </ScrollViewer>
+
+        <DataGrid Grid.Row="3" x:Name="dgStatusSessions" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False"
+                  CanUserResizeRows="Disabled" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="XProtect user" Binding="{Binding UserName}" Width="160" />
+            <DataGridTextColumn Header="Client machine" Binding="{Binding ClientMachine}" Width="160" />
+            <DataGridTextColumn Header="Open for" Binding="{Binding Duration}" Width="90" />
+            <DataGridTextColumn Header="Idle" Binding="{Binding IdleFor}" Width="80" />
+            <DataGridTextColumn Header="Requests" Binding="{Binding Requests}" Width="90" />
+            <DataGridTextColumn Header="Requests/min" Binding="{Binding RequestsPerMinute}" Width="110" />
+            <DataGridTextColumn Header="Sent" Binding="{Binding BytesSent}" Width="90" />
+            <DataGridTextColumn Header="Received" Binding="{Binding BytesReceived}" Width="90" />
+            <DataGridTextColumn Header="Send rate" Binding="{Binding SendRate}" Width="100" />
+            <DataGridTextColumn Header="Receive rate" Binding="{Binding ReceiveRate}" Width="110" />
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <Border Grid.Row="4" x:Name="statusError" Style="{StaticResource ErrorBannerStyle}"
+                Visibility="Collapsed" Margin="0,10,0,0">
+          <TextBlock x:Name="txtStatusError" Style="{StaticResource ErrorBannerTextStyle}" TextWrapping="Wrap" />
+        </Border>
+      </Grid>
     </TabItem>
   </TabControl>
 </UserControl>

@@ -172,6 +172,14 @@ namespace WebContent.Admin
             _page.SetStatusTabVisible(visible);
         }
 
+        /// <summary>
+        /// #76: tells the Status tab which workspace item to ask the Event Server about.
+        /// </summary>
+        internal void SetWorkspaceItemId(string workspaceItemId)
+        {
+            _page.SetWorkspaceItemId(workspaceItemId);
+        }
+
         private void OnPageChanged(object sender, EventArgs e)
         {
             ConfigurationChangedByUser?.Invoke(this, EventArgs.Empty);

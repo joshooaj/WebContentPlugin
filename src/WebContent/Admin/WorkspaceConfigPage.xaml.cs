@@ -4,6 +4,9 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Threading;
+
+using VideoOS.Platform;
 
 namespace WebContent.Admin
 {
@@ -11,16 +14,26 @@ namespace WebContent.Admin
     /// The WPF workspace configuration page, hosted inside the WinForms
     /// <see cref="WorkspaceUserControl"/> wrapper through an ElementHost.
     /// Since #74 the page is a four-tab shell (Settings | Proxy | Diagnostics | Status): the
-    /// Settings tab carries the configuration content, the Proxy/Diagnostics/Status tabs are
-    /// landing panels for the epic tickets and hold no input controls, and the Status tab is
-    /// rendered only behind the workspace's SecurityActions edit-rights gate.
+    /// Settings tab carries the configuration content, Proxy/Diagnostics are still landing panels
+    /// with no input controls, and Status (#76) renders the workspace's live proxy sessions behind
+    /// the SecurityActions edit-rights gate — read-only, and polled only while that tab is open.
     /// All field labels come from <see cref="Strings"/> so the Smart Client
     /// properties page and the Management Client admin page share wording.
     /// </summary>
     public partial class WorkspaceConfigPage : UserControl
     {
+        /// <summary>#76: how often the open Status tab pulls a fresh snapshot from the Event Server.</summary>
+        internal static readonly TimeSpan StatusPollInterval = TimeSpan.FromSeconds(3);
+
+        /// <summary>#76: how long a status query may stay unanswered before the page says so.</summary>
+        internal static readonly TimeSpan StatusQueryDeadline = TimeSpan.FromSeconds(2);
+
         private bool _syncingZoom;
         private bool _proxyTestRunning;
+        private bool _statusQueryRunning;
+        private string _statusWorkspaceItemId;
+        private readonly ProxyStatusRateTracker _statusRates = new ProxyStatusRateTracker();
+        private readonly DispatcherTimer _statusPoll;
 
         internal event EventHandler ConfigurationChanged;
 
@@ -42,6 +55,12 @@ namespace WebContent.Admin
             lblProxyTargetsHint.Text = Strings.ProxyTargetsHint;
             lblProxyTestUrl.Text = Strings.ProxyTestFetchLabel + ":";
             lblProxyTestHint.Text = Strings.ProxyTestFetchHint;
+
+            // #76: the pull loop exists only while the Status tab is the one being looked at. No
+            // push channel, no persistence, and no timer running for a page nobody is reading.
+            _statusPoll = new DispatcherTimer { Interval = StatusPollInterval };
+            _statusPoll.Tick += (sender, args) => RefreshStatus();
+            workspaceTabs.SelectionChanged += OnTabSelectionChanged;
         }
 
         public string WorkspaceName
@@ -175,6 +194,16 @@ namespace WebContent.Admin
             // Status role gate has nothing to grant — the tab stays hidden until a fill says otherwise.
             workspaceTabs.SelectedItem = tabSettings;
             tabStatus.Visibility = Visibility.Collapsed;
+
+            // #76: a different item means a different workspace's sessions - drop the old page's
+            // rows, its rate baseline, and its pull timer before the next fill.
+            StopStatusPolling();
+            _statusWorkspaceItemId = null;
+            _statusRates.Reset();
+            dgStatusSessions.ItemsSource = null;
+            txtStatusSummary.Text = string.Empty;
+            statusError.Visibility = Visibility.Collapsed;
+            txtStatusError.Text = string.Empty;
         }
 
         public void FillContent()
@@ -205,6 +234,194 @@ namespace WebContent.Admin
             {
                 workspaceTabs.SelectedItem = tabSettings;
             }
+
+            // A gate that closes mid-session must stop the pull loop with the tab: the page must
+            // never keep querying (or keep rendering) a status feed the user cannot see.
+            if (!visible)
+            {
+                StopStatusPolling();
+            }
+        }
+
+        /// <summary>
+        /// #76: which workspace the page is showing, so the Status tab knows what to ask the Event
+        /// Server for. The id travels in exactly the form the Smart Client's block reports and
+        /// session events carry (the workspace item's <c>FQID.ObjectId.ToString()</c>), because the
+        /// Event Server matches it as a string against its own workspace lookup.
+        /// </summary>
+        public void SetWorkspaceItemId(string workspaceItemId)
+        {
+            var changed = !string.Equals(_statusWorkspaceItemId, workspaceItemId, StringComparison.Ordinal);
+            _statusWorkspaceItemId = workspaceItemId;
+            if (changed)
+            {
+                // Byte counters are per session and per Event Server process: a new item context
+                // never inherits the previous one's rate baseline.
+                _statusRates.Reset();
+                if (IsStatusTabOpen)
+                {
+                    RefreshStatus();
+                }
+            }
+        }
+
+        private bool IsStatusTabOpen =>
+            tabStatus != null && tabStatus.Visibility == Visibility.Visible && ReferenceEquals(workspaceTabs.SelectedItem, tabStatus);
+
+        private void OnTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!ReferenceEquals(e.OriginalSource, workspaceTabs) && !ReferenceEquals(e.Source, workspaceTabs))
+            {
+                // TabItem children raise their own selection events; only the TabControl's switch
+                // decides whether the Status tab is being looked at.
+                return;
+            }
+
+            if (IsStatusTabOpen)
+            {
+                StartStatusPolling();
+            }
+            else
+            {
+                StopStatusPolling();
+            }
+        }
+
+        private void OnStatusRefresh(object sender, RoutedEventArgs e)
+        {
+            RefreshStatus();
+        }
+
+        private void StartStatusPolling()
+        {
+            if (_statusPoll.IsEnabled)
+            {
+                return;
+            }
+
+            _statusPoll.Start();
+
+            // The first snapshot comes immediately - a tab that opens onto three seconds of blank
+            // space reads as broken even when it is not.
+            RefreshStatus();
+        }
+
+        private void StopStatusPolling()
+        {
+            if (_statusPoll != null)
+            {
+                _statusPoll.Stop();
+            }
+        }
+
+        /// <summary>
+        /// #76: one pull of the Event Server's status snapshot for this workspace. Re-entrancy
+        /// guarded, and no ConfigureAwait(false) anywhere: every statement after the await touches
+        /// WPF elements and must stay on the UI thread.
+        /// </summary>
+        private async void RefreshStatus()
+        {
+            if (_statusQueryRunning)
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_statusWorkspaceItemId))
+            {
+                RenderStatusFailure(Strings.StatusNoItemContext);
+                return;
+            }
+
+            var client = ProxyFetchClient.Active;
+            if (client == null || !client.IsReady)
+            {
+                RenderStatusFailure(Strings.StatusNotConnected);
+                return;
+            }
+
+            _statusQueryRunning = true;
+            try
+            {
+                var response = await client.RequestWorkspaceStatusAsync(_statusWorkspaceItemId, StatusQueryDeadline);
+                var view = ProxyStatusViewBuilder.Build(response, _statusRates, DateTime.UtcNow);
+                if (!view.QuerySucceeded)
+                {
+                    // #76 acceptance trace: every pull of the poll loop leaves exactly one line in
+                    // the MC's MIP.log, so "polling stopped when the tab closed" is provable from
+                    // the messaging trace, not narrated.
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(WorkspaceConfigPage),
+                        $"Proxy status query for workspace '{_statusWorkspaceItemId}' failed (code={view.FailureCode}).");
+                    RenderStatusFailure(StatusFailureText(view.FailureCode, response));
+                    return;
+                }
+
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(WorkspaceConfigPage),
+                    $"Proxy status snapshot for workspace '{_statusWorkspaceItemId}' answered: {view.SessionCount} live session(s).");
+                dgStatusSessions.ItemsSource = view.Sessions;
+                statusError.Visibility = Visibility.Collapsed;
+                txtStatusError.Text = string.Empty;
+                txtStatusSummary.Text = view.SessionCount == 0
+                    ? Strings.StatusNoSessions
+                    : string.Format(
+                        CultureInfo.InvariantCulture,
+                        Strings.StatusSummaryFormat,
+                        view.SessionCount,
+                        view.TotalRequestsPerMinute,
+                        ProxyStatusFormat.Rate(view.SendBytesPerSecond),
+                        ProxyStatusFormat.Rate(view.ReceiveBytesPerSecond));
+            }
+            catch (Exception exception)
+            {
+                // A failed pull must not kill the timer or throw through the WPF dispatcher; the
+                // next tick simply asks again.
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(WorkspaceConfigPage),
+                    $"Proxy status query for workspace '{_statusWorkspaceItemId}' threw: {exception.Message}");
+                RenderStatusFailure(string.Format(
+                    CultureInfo.InvariantCulture,
+                    Strings.StatusQueryFailedFormat,
+                    ProxyFetchErrorCodes.Error,
+                    exception.Message));
+            }
+            finally
+            {
+                _statusQueryRunning = false;
+            }
+        }
+
+        /// <summary>
+        /// The Event Server's failure codes the admin can act on get their own sentence: an unknown
+        /// workspace (the item was deleted, or this page is stale) reads differently from an Event
+        /// Server that never answered.
+        /// </summary>
+        private static string StatusFailureText(string code, ProxyStatusResponsePayload response)
+        {
+            switch (code)
+            {
+                case ProxyFetchErrorCodes.BadRequest:
+                    return Strings.StatusWorkspaceGone;
+                case ProxyFetchErrorCodes.ServerUnavailable:
+                    return Strings.StatusNotConnected;
+                default:
+                    return string.Format(
+                        CultureInfo.InvariantCulture,
+                        Strings.StatusQueryFailedFormat,
+                        code,
+                        response == null ? "no response" : response.ErrorMessage);
+            }
+        }
+
+        private void RenderStatusFailure(string text)
+        {
+            dgStatusSessions.ItemsSource = null;
+            txtStatusSummary.Text = string.Empty;
+            txtStatusError.Text = text;
+            statusError.Visibility = Visibility.Visible;
         }
 
         private void OnUserChanged(object sender, RoutedEventArgs e)

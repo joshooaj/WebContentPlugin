@@ -527,5 +527,59 @@ namespace WebContent {
                 return ResourceManager.GetString("ProxyTestFetchFailureFormat", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} live proxy session(s) - {1:0.0} requests/min, sent {2}/s, received {3}/s.
+        /// </summary>
+        internal static string StatusSummaryFormat {
+            get {
+                return ResourceManager.GetString("StatusSummaryFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No live proxy sessions on this workspace right now. Open a Web Content workspace tab in a Smart Client to see it here.
+        /// </summary>
+        internal static string StatusNoSessions {
+            get {
+                return ResourceManager.GetString("StatusNoSessions", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No status from the Event Server: this Management Client has no proxy messaging channel to it..
+        /// </summary>
+        internal static string StatusNotConnected {
+            get {
+                return ResourceManager.GetString("StatusNotConnected", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The Event Server does not know this workspace any more, so it has no proxy sessions to report..
+        /// </summary>
+        internal static string StatusWorkspaceGone {
+            get {
+                return ResourceManager.GetString("StatusWorkspaceGone", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy status query failed ({0}) - {1}.
+        /// </summary>
+        internal static string StatusQueryFailedFormat {
+            get {
+                return ResourceManager.GetString("StatusQueryFailedFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No workspace item context: this page cannot ask the Event Server for a status snapshot..
+        /// </summary>
+        internal static string StatusNoItemContext {
+            get {
+                return ResourceManager.GetString("StatusNoItemContext", resourceCulture);
+            }
+        }
     }
 }

@@ -123,6 +123,10 @@ namespace WebContent.Admin
             _userControl.SetStatusTabVisible(
                 WorkspaceTabPolicy.ShowStatusTab(WorkspaceManagePermissionEvaluator.Check(item)));
 
+            // #76: the Status tab queries the Event Server for this item's live sessions, and the
+            // id has to travel in the same form the Smart Client reports blocks under.
+            _userControl.SetWorkspaceItemId(item?.FQID != null ? item.FQID.ObjectId.ToString() : null);
+
             var properties = item?.Properties;
             var configError = WorkspaceConfiguration.DetectError(properties);
 
