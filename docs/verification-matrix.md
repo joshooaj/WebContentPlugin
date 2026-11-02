@@ -44,6 +44,7 @@ is not evidence the plugin never ran.
 | wss:// websockets tunnelled through a terminated TLS tunnel (Event Server dials a validated TLS leg, replays the rebuilt handshake, admits only 101) | #60 | `ProxyForwardPolicyTests` (the entry scheme IS the posture: an in-tunnel upgrade GET against an allowlisted https origin — or absolute wss:// against an https entry — becomes `WebSocketTunnel`, never 501; an http twin alone is 403 for the upgrade; the `WebSocketTunnelRefused` posture is deleted outright), `ProxyForwardConnectionTests` (in-tunnel upgrade opens the byte tunnel, the target's verbatim 101 rides back ON the terminated tunnel, then both directions pump decrypted frames over the tunnel stream; open failure renders an explicit 502 page on the tunnel and the tunnel keeps serving), `ProxyTunnelServerTests` (in-process `TlsWsTarget` with a self-signed SAN certificate: an https-scheme tunnel target gets a TLS leg authenticated against the target host before the handshake is replayed, 101-only admission, frames echo over both pumps; untrusted chain → explicit `TlsValidation` error naming the origin and the Event Server as the failing side; production resolver is null = SslStream full chain validation), `ProxyWebSocketHandshakeTests` (rebuilt handshake pins the https origin's Host for https-scheme tunnel targets) | See SC-6 below - **both live rows PASSED 2026-11-01** (runs `20261101-174151` + `20261101-174657`): with the probe certificate imported into the Event Server's trust store, a wss-echo page in a proxied Smart Client browser shows `WS-OK:<token>` while the wss server journals TLS-HANDSHAKE + WS-HANDSHAKE + WS-ECHO; the fail-closed row's target journals the TLS leg dialed + negotiated but never the upgrade - the Event Server refused the chain there |
 | MC workspace config tab shell (Settings \| Proxy \| Diagnostics \| Status; Status behind the SecurityActions edit-rights gate) | #74 | `WorkspaceTabShellGuardTests` (the XAML declares exactly the four tabs in shell order with stable AutomationIds; Status defaults `Collapsed` so the gate fails closed before any fill; EVERY pre-existing settings/proxy control still lives on the Settings tab under the same AutomationId the ux probes read; placeholder tabs contain zero write-capable input and carry a probe-assertable placeholder marker), `WorkspaceTabPolicy` decision table (Status renders only on an explicit `Granted` — `Denied`/`LookupFailed` hide the whole tab) | See MC-11 below - **admin half live row PASSED 2026-11-02** (run `20261102-012719`): four tabs render on the live MC with Status granted to the admin, walking the placeholder tabs never enables Save, and the Settings fields read back identically; the View-only denial half stays manual |
 | Proxy diagnostics substrate (block reports, session lifecycle, Event Server aggregation, status query) | #69 | `ProxyDiagnosticsAggregatorTests` (blocked ring dedup + accumulating counts + recency eviction at the 200-origin cap, new-entry-only transition signal; session open/heartbeat/close and the idle sweep; fetch/tunnel traffic counters and req/min; workspaces stay isolated), `ProxySessionRegistryTests` (client-side per-view registry: open/close, heartbeat payloads, bounded), `ProxyBlockReporterTests` (report carries the workspace identity + canonical origin; blank or workspace-less reports drop; a throwing send seam never reaches the browser flow), `ProxyDiagnosticsWireTests` (every diagnostics payload round-trips as one JSON string; an unset session is an explicit null member; a frame shaped by another build is refused, never half-bound), `ProxyForwardConnectionTests` (each client-visible refusal reaches the reporter — local 403, tunnel-open fault, dead fetch channel — while an ES-answered refusal is never re-reported, so counts do not double), `ProxyFetchContractGuardTests` (four new payloads stay plugin-namespace `[Serializable]` public-field types inside the whitelist; the new ids declared in `PluginDefinedMessageIds`) | See ES-2 below - **load half observed live 2026-11-02**: the restarted Event Server logs `Proxy fetcher ready (..., diagnostics=WebContent.Proxy.BlockReport/WebContent.Proxy.SessionEvent/WebContent.Proxy.StatusRequest)` on a drop hash-identical to the Smart Client machine's. The ingress markers (session open, block recorded) need a proxied Smart Client session, which only an interactive desktop can drive |
+| MC Status tab: live proxy sessions (polling tied to the open tab, read-only, role-gated by the #74 grant) | #76 | `ProxyStatusViewTests` (failure postures: a lost query is never rendered as an empty table, the Event Server's own code survives, a blank code falls back to `ServerUnavailable`; zero sessions is an honest success with no rows; rows arrive as pre-formatted display strings with `(unknown)` placeholders; rate differencing over the ES's cumulative counters needs two sightings, impossible deltas (non-later snapshot, backwards counters, unknown ids) answer zero, `Reset` drops the baseline; culture-invariant byte/rate/per-minute/duration formatting incl. NaN/Infinity/negative clamps), `WorkspaceTabShellGuardTests` (the Status tab is no longer a placeholder: exactly one `IsReadOnly` DataGrid with add/delete off, every button on the tab wired to `OnStatusRefresh`, zero configuration input controls - walking it can never dirty the pane; probe-selectable surface ids pinned) | See MC-12 below - **live row pending a connected desktop (2026-11-02)**: units green, drop deployed to the Management Client machine (`C32CE7B5…`), the Event Server untouched (its #69 drop already answers `StatusRequest`); the first probe attempt died at the first mouse call on a disconnected session, before any live state was touched |
 
 ## Manual host checks
 
@@ -159,10 +160,13 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
 4. **Not yet run (2026-11-02):** the agent session that shipped #69 cannot drive FlaUI — every
    input call dies with `Win32Exception: Access is denied` on a non-interactive desktop — so the
    step 3 markers are still unverified live. The status-query answer (a
-   `WebContent.Proxy.StatusRequest` answered with a snapshot) has no sender until the Management
-   Client Status page (#76) lands; its semantics (unknown workspace answers `Success=false` +
-   `BadRequest`, client-side deadline silence completes as `ServerUnavailable`) are pinned by the
-   unit suites only.
+   `WebContent.Proxy.StatusRequest` answered with a snapshot) has its sender since #76 landed in
+   the Management Client drop (2026-11-02): the Status tab sends one query every ~3 s while it is
+   the selected tab and logs one MC marker per pull (`Proxy status snapshot for workspace '...'
+   answered: N live session(s).`). The MC↔ES round trip runs with MC-12's probe once a connected
+   desktop window exists; its semantics (unknown workspace answers `Success=false` +
+   `BadRequest`, client-side deadline silence completes as `ServerUnavailable`) stay pinned by the
+   unit suites until then.
 
 
 ### MC-10 Management Client proxy-fetch harness (#53, hardened by #54)
@@ -190,7 +194,7 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    Settings; every former field (name, home address, display/behavior/privacy/advanced toggles,
    proxy toggle + targets, test-fetch harness) is on Settings and behaves exactly as before
    (MC-9/MC-10 steps still pass without any tab click).
-2. Proxy/Diagnostics/Status tabs render their placeholder notice only. Click through all tabs:
+2. Proxy/Diagnostics tabs render their placeholder notice only (Status is live since #76 — MC-12). Click through all tabs:
    the shell's **Save must never become enabled** (placeholder tabs hold no inputs and fire no
    change events); returning to Settings shows the same values as before the walk.
 3. Status-tab role gate: with a full administrator the Status tab is visible. Assign a test role
@@ -211,6 +215,50 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    live allowlist lines read back identically after the walk), each placeholder tab rendered its
    marker, and **Save stayed disabled through the whole tab walk**. Screenshots confirm the shell
    visually in the MC detail pane.
+
+### MC-12 MC Status tab live proxy sessions (#76)
+
+1. Restart the Management Client with the new drop. `Invoke-psake -taskList Build, DeployLocally`
+   is enough — #76 is MC-side only and the Event Server's #69 drop already answers
+   `StatusRequest`. Select a Web Content workspace as a user holding its Manage action: the
+   Status tab shows the session grid (`dgStatusSessions`), a summary line, and a "Refresh now"
+   button — no placeholder.
+2. Selecting the tab starts the ~3 s pull loop, and **every pull logs exactly one line** in the
+   Management Client's `Logs\MIP.log`:
+   - `Proxy status snapshot for workspace '<item id>' answered: N live session(s).`
+   - or, on a failed pull, `Proxy status query for workspace '<item id>' failed (code=...)` —
+     and the UI banner names the kind: unknown workspace ("does not know this workspace any
+     more") vs no channel ("no proxy messaging channel to it").
+3. Open any proxied Smart Client view: within a cadence the session appears as a row — XProtect
+   user from the platform sender identity, client machine from the Open event, duration/idle,
+   requests + req/min from the ES's correlation traffic, and send/receive bitrates differencing
+   the ES's cumulative byte counters across two consecutive polls (a first sighting shows
+   `0 B/s` — the honest no-baseline zero, never the session's whole life as a spike).
+   Zero sessions is rendered as its own quiet message, not a failure banner.
+4. **Leave the tab: the marker count goes FLAT** — the timer is tied to tab selection, and a
+   closing role gate or a workspace-item switch tears it down with the rate baseline. Re-selecting
+   re-arms it. Nothing is persisted; there is no push channel.
+5. Automatable: `McProxyStatusProbeTests.ProbeStatusTabPollsLiveSessionsAndStopsWhenLeft`
+   (probe category, read-only — drives Management Client AND Smart Client on one machine:
+   cadence markers appear while the tab is open, this machine's proxied view surfaces as a
+   session row within 25 s, the marker count stays flat across 10 s of tab-away, re-selecting
+   resumes the pulls, Save never enables); artifacts `mc-status-{quiet,live}.png` +
+   `mc-status-probe-results.txt` under `%TEMP%\webcontent-mc-status-probe\<run>`. The role-gate
+   denial half stays manual (MC-11 step 3 — needs a second restricted user).
+
+   Record (MC-12) - **live row pending a connected desktop (2026-11-02)**: 546 unit tests green,
+   drop deployed to the Management Client machine only (`WebContent.dll` SHA-256
+   `C32CE7B5…6B2E6F13` hash-verified in the MIP root; the Event Server deliberately untouched —
+   no wire/payload changes, its #69 drop answers `StatusRequest`). The first live attempt (run
+   `20261102-040119`) died at the FIRST mouse call (`Win32Exception: Access is denied` in
+   `CollapseTreeToRoot` — the driving session had gone disconnected; desktop input is refused
+   there, the same wall ES-2 step 4 documents) — before any tree click or Save, so no workspace
+   state was touched. Re-run in a window when the RDP/console session is connected and unlocked:
+
+   ```powershell
+   Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~McProxyStatusProbeTests' }
+   Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~McWorkspaceTabsProbeTests' }   # its Status step now expects the live grid
+   ```
 
 ### SC-1 End-to-end proxied page load (#54)
 
@@ -712,6 +760,7 @@ uri and died before the import (`7813b73`).
 | A blind raw-byte CONNECT tunnel opened by an http-allowlisted entry (anything riding the tunnel, not just websockets) (#57) | `ProxyForwardConnectionTests` (in-tunnel head validated as a real ws handshake before any ES socket opens; non-ws first bytes close the tunnel; failed open closes quietly inside the tunnel) |
 | A stopped/restarting Event Server surfacing as a silent 30-second hang or a generic 502 indistinguishable from a target failure, so the admin cannot tell "proxy component absent" from "target down" (#58) | `ProxyFetchCorrelationTests` (deadline silence = `ServerUnavailable`; `Fail` carries the channel reason), `ProxyForwardConnectionTests` (503 component page, 403 vs 502 vs 504 posture table, size-cap page), SC-5 |
 | The tunnel TLS leg trusting any chain (every wss device invisibly unvalidated), or the wss posture drifting onto an http twin entry so a strict https origin never admits the upgrade (#60) | `ProxyTunnelServerTests` (production resolver is null = SslStream full chain validation; untrusted chain → explicit `TlsValidation` naming the origin and the Event Server side; the accept-all resolver is a test-only seam), `ProxyForwardPolicyTests` (https entry required for the upgrade — http twin alone 403; no `WebSocketTunnelRefused` posture exists), SC-6 |
+| The Status tab hammering the Event Server after its tab closes (polling follows the pane, not the selection), or bitrate columns inventing spikes out of first sightings / backwards counters (#76) | `ProxyStatusViewTests` (rate needs two sightings, non-later snapshot / backwards counters / unknown ids → zero, `Reset` drops the baseline), `WorkspaceTabShellGuardTests` (Status tab has no config input — it can never dirty the pane), MC-12 (marker count flat across tab-away, resumes on reopen) |
 
 ## Scope notes (deliberate)
 
@@ -720,4 +769,4 @@ uri and died before the import (`7813b73`).
   ever refactored, extract the policy into a pure class first and move MC-4's backoff
   assertions into the suite.
 - WebView2/Smart Client UI behavior (actual page render, WPF address-bar visuals) cannot be
-  unit-tested at the pure seams; MC-1–MC-10 (plus ES-1 and SC-1) are the release gate for those.
+  unit-tested at the pure seams; MC-1–MC-12 (plus ES-1 and SC-1) are the release gate for those.
