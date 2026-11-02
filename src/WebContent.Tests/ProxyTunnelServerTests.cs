@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -178,6 +179,61 @@ namespace WebContent.Tests
             Assert.Contains("127.0.0.1:" + _target.Port, opened.ErrorMessage);
             Assert.Contains("Event Server", opened.ErrorMessage);
             Assert.Equal(0, server.ActiveTunnels);
+        }
+
+        [Fact]
+        public void ClassifiesAWrappedAuthenticationExceptionAsTlsValidationQuotingTheCause()
+        {
+            // Live fail-closed runs show Schannel surfacing a chain refusal as an IOException
+            // wrapping the AuthenticationException. The classification must follow the cause, and
+            // the message must quote the cause's text, not the wrapper's.
+            var cause = new AuthenticationException("The certificate chain was issued by an authority that is not trusted");
+            var outcome = ProxyTunnelServer.ClassifyOpenFailure(
+                new Uri("https://172.16.128.210:18127"),
+                new IOException("The decryption operation failed, see inner exception.", cause));
+
+            Assert.False(outcome.Success);
+            Assert.Equal(ProxyFetchErrorCodes.TlsValidation, outcome.ErrorCode);
+            Assert.Contains("172.16.128.210:18127", outcome.ErrorMessage);
+            Assert.Contains("Event Server", outcome.ErrorMessage);
+            Assert.Contains("certificate chain was issued by an authority", outcome.ErrorMessage);
+            Assert.DoesNotContain("decryption operation failed", outcome.ErrorMessage);
+        }
+
+        [Fact]
+        public void ClassifiesARawAuthenticationExceptionAsTlsValidationQuotingItsMessage()
+        {
+            var outcome = ProxyTunnelServer.ClassifyOpenFailure(
+                new Uri("https://172.16.128.210:18127"),
+                new AuthenticationException("The remote certificate is invalid because of errors in the certificate chain"));
+
+            Assert.False(outcome.Success);
+            Assert.Equal(ProxyFetchErrorCodes.TlsValidation, outcome.ErrorCode);
+            Assert.Contains("errors in the certificate chain", outcome.ErrorMessage);
+        }
+
+        [Fact]
+        public void ClassifiesAWrappedSocketExceptionAsUnreachable()
+        {
+            var outcome = ProxyTunnelServer.ClassifyOpenFailure(
+                new Uri("https://172.16.128.210:18126"),
+                new IOException("Unable to read data from the transport connection",
+                    new SocketException((int)SocketError.ConnectionRefused)));
+
+            Assert.False(outcome.Success);
+            Assert.Equal(ProxyFetchErrorCodes.Unreachable, outcome.ErrorCode);
+        }
+
+        [Fact]
+        public void ClassifiesAnUnrelatedFailureAsGenericError()
+        {
+            var outcome = ProxyTunnelServer.ClassifyOpenFailure(
+                new Uri("https://172.16.128.210:18126"),
+                new InvalidOperationException("something else went wrong"));
+
+            Assert.False(outcome.Success);
+            Assert.Equal(ProxyFetchErrorCodes.Error, outcome.ErrorCode);
+            Assert.Contains("something else went wrong", outcome.ErrorMessage);
         }
 
         [Fact]

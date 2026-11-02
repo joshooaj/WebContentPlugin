@@ -245,44 +245,36 @@ namespace WebContent
                     HandshakeBytes = handshakeBytes,
                 };
             }
-            catch (AuthenticationException authenticationException)
-            {
-                // #60 AC: an unvalidatable TLS target fails with an explicit TLS-validation
-                // error naming the target origin and the failing side (the Event Server's leg).
-                CloseSocket(socket);
-                return OpenFailure(
-                    ProxyFetchErrorCodes.TlsValidation,
-                    $"{OriginOf(target)}: the Event Server refused the target's TLS certificate on the websocket tunnel leg: {authenticationException.Message}");
-            }
-            catch (SocketException socketException)
-            {
-                CloseSocket(socket);
-                return OpenFailure(ProxyFetchErrorCodes.Unreachable, $"{OriginOf(target)}: {socketException.Message}");
-            }
             catch (Exception exception)
             {
                 CloseSocket(socket);
-                for (var inner = exception; inner != null; inner = inner.InnerException)
-                {
-                    if (inner is AuthenticationException)
-                    {
-                        // Schannel has been seen surfacing a chain refusal as an IOException
-                        // wrapping the authentication failure rather than the raw
-                        // AuthenticationException: same explicit TlsValidation posture, never
-                        // mislabeled as an unreachable target.
-                        return OpenFailure(
-                            ProxyFetchErrorCodes.TlsValidation,
-                            $"{OriginOf(target)}: the Event Server refused the target's TLS certificate on the websocket tunnel leg: {exception.Message}");
-                    }
+                return ClassifyOpenFailure(target, exception);
+            }
+        }
 
-                    if (inner is SocketException)
-                    {
-                        return OpenFailure(ProxyFetchErrorCodes.Unreachable, $"{OriginOf(target)}: {exception.Message}");
-                    }
+        /// <summary>
+        /// Turns a target-connect or handshake failure into an explicit outcome. A chain refusal
+        /// is TlsValidation whether Schannel throws the AuthenticationException directly or wraps
+        /// it (live fail-closed runs showed an IOException wrapping), and the message quotes the
+        /// AuthenticationException itself so the wrapper never hides the real cause. A socket
+        /// failure anywhere in the chain is Unreachable; anything else is the generic Error.
+        /// </summary>
+        internal static ProxyTunnelOpenOutcome ClassifyOpenFailure(Uri target, Exception exception)
+        {
+            for (var inner = exception; inner != null; inner = inner.InnerException)
+            {
+                if (inner is AuthenticationException authenticationException)
+                {
+                    return TlsValidationFailure(target, authenticationException);
                 }
 
-                return OpenFailure(ProxyFetchErrorCodes.Error, $"{OriginOf(target)}: {exception.Message}");
+                if (inner is SocketException)
+                {
+                    return OpenFailure(ProxyFetchErrorCodes.Unreachable, $"{OriginOf(target)}: {exception.Message}");
+                }
             }
+
+            return OpenFailure(ProxyFetchErrorCodes.Error, $"{OriginOf(target)}: {exception.Message}");
         }
 
         /// <summary>Relay client bytes toward the target. Unknown ids (closed/timed-out tunnels) are logged, not thrown.</summary>
@@ -599,6 +591,16 @@ namespace WebContent
         }
 
         private static string OriginOf(Uri target) => ProxyPolicy.CanonicalOrigin(target);
+
+        /// <summary>
+        /// #60 AC: an unvalidatable TLS target fails with an explicit TLS-validation error
+        /// naming the target origin and the failing side (the Event Server's leg). Quoting the
+        /// authentication cause keeps the Schannel-wrapped case as informative as the raw one.
+        /// </summary>
+        private static ProxyTunnelOpenOutcome TlsValidationFailure(Uri target, Exception cause) =>
+            OpenFailure(
+                ProxyFetchErrorCodes.TlsValidation,
+                $"{OriginOf(target)}: the Event Server refused the target's TLS certificate on the websocket tunnel leg: {cause.Message}");
 
         private static ProxyTunnelOpenOutcome OpenFailure(string errorCode, string message, int statusCode = 0)
         {

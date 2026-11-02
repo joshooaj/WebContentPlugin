@@ -24,7 +24,9 @@
      fails on the locked file.
   4. Copy the drop into the MIP root (default: the setup.wxs INSTALLFOLDER,
      C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin; the other
-     valid root is Milestone\MIPPlugins for OEM installs).
+     valid root is Milestone\MIPPlugins for OEM installs). The copy retries
+     briefly because the service releases WebContent.dll a moment after it
+     reports Stopped (observed live during the #60 rollout).
   5. Verify every copied file by SHA-256 HASH against the source - never by
      timestamp (Copy-Item preserves LastWriteTime, so a good copy looks stale
      and a partial copy looks fresh).
@@ -72,6 +74,15 @@
   .\scripts\deploy-event-server-plugin.ps1 -ComputerName localhost
 
   Local deploy on the Event Server machine itself (elevated session).
+
+.NOTES
+  The copy retries for about 50 seconds because the service process releases
+  WebContent.dll a moment after the service reports Stopped. If the copy still
+  fails, the script throws with the service left Stopped and the install folder
+  possibly half-copied; re-running the script is the documented recovery.
+  Non-interactive runs need -Confirm:$False: PowerShell 7.6.9 throws a
+  NullReferenceException when a High-impact ShouldProcess confirmation has no
+  console to answer it.
 
 .OUTPUTS
   Status lines; throws on any pre-check, copy, or hash-verification failure.
@@ -186,22 +197,26 @@ try {
     # The service state flips to Stopped slightly BEFORE the last thread lets go of
     # WebContent.dll (observed live, #60 rollout): a single copy attempt fails on the
     # lock even though the stop completed. Retry briefly instead of failing the run.
+    $maxCopyAttempts = 10
     $copied = $false
-    $copyAttempts = 0
     $copyError = $null
-    while (-not $copied -and $copyAttempts -lt 10) {
-        $copyAttempts++
+    $copyAttempts = 0
+    for ($attempt = 1; $attempt -le $maxCopyAttempts; $attempt++) {
+        $copyAttempts = $attempt
         try {
             Copy-Item -Path (Join-Path $SourceDrop '*') -Destination $InstallFolder -ToSession $session -Recurse -Force -ErrorAction Stop
             $copied = $true
+            break
         } catch {
             $copyError = $_
-            Write-Warning "Copy attempt $copyAttempts failed (the service process may still be releasing the dll): $($_.Exception.Message)"
-            Start-Sleep -Seconds 5
+            if ($attempt -lt $maxCopyAttempts) {
+                Write-Warning "Copy attempt $attempt failed (the service process may still be releasing the dll): $($_.Exception.Message)"
+                Start-Sleep -Seconds 5
+            }
         }
     }
     if (-not $copied) {
-        throw "Drop copy to $ComputerName failed after $copyAttempts attempts - a process other than the service still holds the files: $($copyError.Exception.Message)"
+        throw "Drop copy to $ComputerName failed after $copyAttempts attempts - a process other than the service still holds the files: $($copyError.Exception.Message)`n$ServiceName is left Stopped and $InstallFolder may hold a half-copied drop. Re-running this script is the recovery: it stops, copies, verifies, and starts again."
     }
     Write-Output "Drop copied to $ComputerName`:$InstallFolder (attempt $copyAttempts)."
 

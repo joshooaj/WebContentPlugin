@@ -294,41 +294,44 @@ namespace WebContent
                         // tunnel: the Event Server dials a validated TLS leg to the tunnel's
                         // origin, replays the rebuilt handshake over it, and only a 101 admits
                         // the tunnel. From there both sides pump decrypted websocket frames.
+                        // Every open failure is an explicit 502 page ON the tunnel; the tunnel
+                        // stays usable, the upgrade is never fetched and never taken direct.
+                        string upgradeFailure = null;
+                        ProxyTunnelOpenOutcome upgradeOutcome = null;
                         if (openTunnel == null)
                         {
-                            var inTunnelWiring = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws(s):// targets ride CONNECT-style byte tunnels the VMS server opens.";
-                            log(inTunnelWiring);
-                            await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", inTunnelWiring));
-                            pending = head.Leftover;
-                            continue;
+                            upgradeFailure = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws(s):// targets ride CONNECT-style byte tunnels the VMS server opens.";
+                            log(upgradeFailure);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                upgradeOutcome = await openTunnel(request);
+                            }
+                            catch (Exception exception)
+                            {
+                                // Same explicit page as the top-level ws posture (#57): the open
+                                // exception is named on the page, not swallowed into the generic
+                                // no-outcome wording.
+                                log($"Proxy in-tunnel websocket open for '{request.RawTarget}' threw: {exception.Message}");
+                                upgradeFailure = $"The VMS proxy tunnel failed to open: {exception.Message}";
+                            }
+
+                            if (upgradeFailure == null && (upgradeOutcome == null || !upgradeOutcome.Success))
+                            {
+                                // An open the Event Server refuses (an old ES still answering
+                                // https-scheme targets NotAllowed, an unreachable target, a
+                                // non-101) keeps its own error text on the page.
+                                upgradeFailure = upgradeOutcome == null
+                                    ? "The Event Server tunnel opener returned no outcome."
+                                    : upgradeOutcome.ErrorMessage;
+                                log($"Proxy in-tunnel websocket tunnel to '{request.RawTarget}' refused (code={upgradeOutcome?.ErrorCode}): {upgradeFailure}");
+                            }
                         }
 
-                        ProxyTunnelOpenOutcome upgradeOutcome;
-                        try
+                        if (upgradeFailure != null)
                         {
-                            upgradeOutcome = await openTunnel(request);
-                        }
-                        catch (Exception exception)
-                        {
-                            // Same explicit page as the top-level ws posture (#57): the open
-                            // exception is named on the page, not swallowed into the generic
-                            // no-outcome wording.
-                            log($"Proxy in-tunnel websocket open for '{request.RawTarget}' threw: {exception.Message}");
-                            await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy tunnel failed to open: {exception.Message}"));
-                            pending = head.Leftover;
-                            continue;
-                        }
-
-                        if (upgradeOutcome == null || !upgradeOutcome.Success)
-                        {
-                            // An open the Event Server refuses (an old ES still answering
-                            // https-scheme targets NotAllowed, an unreachable target, a non-101)
-                            // is an explicit 502 page ON the tunnel; the tunnel stays usable,
-                            // the upgrade is never fetched and never taken direct.
-                            var upgradeFailure = upgradeOutcome == null
-                                ? "The Event Server tunnel opener returned no outcome."
-                                : upgradeOutcome.ErrorMessage;
-                            log($"Proxy in-tunnel websocket tunnel to '{request.RawTarget}' refused (code={upgradeOutcome?.ErrorCode}): {upgradeFailure}");
                             await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", upgradeFailure));
                             pending = head.Leftover;
                             continue;

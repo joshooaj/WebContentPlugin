@@ -29,8 +29,9 @@ public static class WssTargetTrust
 
     public static void ImportOnEventServer(UxConfig config, X509Certificate2 certificate, StringBuilder log)
     {
-        // Same host resolution as EventServerControl: UX_ES_HOST or VMS_ADDRESS, which in the
-        // lab .env is a bare hostname - only parse as a uri when it actually carries a scheme.
+        // The same host sources as EventServerControl (UX_ES_HOST or VMS_ADDRESS), but a
+        // tolerant parse: the lab .env VMS_ADDRESS is a bare hostname, so this only takes a
+        // uri host when the value actually carries a scheme.
         var address = Environment.GetEnvironmentVariable("UX_ES_HOST") ?? config.VmsAddress;
         var host = address.Contains("://", StringComparison.Ordinal) && Uri.TryCreate(address, UriKind.Absolute, out var addressUri)
             ? addressUri.Host
