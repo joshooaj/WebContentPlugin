@@ -43,6 +43,11 @@ namespace WebContent.Client
 
         private static BrowserInstance CreateBrowser(Guid id, Uri initialAddress, bool isIsolated, ProxyWorkspaceProfile proxyProfile)
         {
+            // #83: one blocked-resource tally per browser view instance, owned by the browser so
+            // it survives a listener rewire; the current listener forwards through it. Stays
+            // empty for a non-proxied browser - there is nothing client-side to refuse.
+            var blocks = new ProxyBlockTally(message => EnvironmentManager.Instance.Log(true, nameof(BrowserManager), message));
+
             LoopbackProxyListener listener = null;
             string proxyArguments = null;
             string proxyUserDataFolder = null;
@@ -60,7 +65,8 @@ namespace WebContent.Client
                         WorkspaceItemId = proxyProfile.WorkspaceItemId,
                         WorkspaceFingerprint = proxyProfile.WorkspaceFingerprint,
                         ClientMachine = Environment.MachineName,
-                    });
+                    },
+                    blocks);
                 listener.Start();
                 proxyArguments = ProxyBrowserArguments.For(listener.Port);
                 proxyUserDataFolder = ProxiedUserDataFolder(id);
@@ -90,6 +96,7 @@ namespace WebContent.Client
 
                 var browser = new BrowserInstance(instance, id);
                 browser.ProxyListener = listener;
+                browser.ProxyBlocks = blocks;
                 browser.ProxyBrowserArguments = proxyArguments;
                 browser.ProxyUserDataFolder = proxyUserDataFolder;
                 return browser;
@@ -132,6 +139,12 @@ namespace WebContent.Client
                     return false;
                 }
 
+                // #83: a re-enabled proxy starts a fresh tally - stale refusals from before the
+                // proxy was off must not haunt the new listener's chrome.
+                var tally = browser.ProxyBlocks ?? new ProxyBlockTally(message => EnvironmentManager.Instance.Log(true, nameof(BrowserManager), message));
+                browser.ProxyBlocks = tally;
+                tally.Reset();
+
                 var listener = new LoopbackProxyListener(
                     proxyProfile.CanonicalTargets,
                     FetchThroughMessaging,
@@ -140,7 +153,8 @@ namespace WebContent.Client
                         SessionId = Guid.NewGuid().ToString("N"),
                         WorkspaceItemId = proxyProfile.WorkspaceItemId,
                         ClientMachine = Environment.MachineName,
-                    });
+                    },
+                    tally);
                 listener.Start();
                 browser.ProxyListener = listener;
                 browser.ProxyBrowserArguments = ProxyBrowserArguments.For(listener.Port);
@@ -162,6 +176,7 @@ namespace WebContent.Client
             browser.ProxyBrowserArguments = null;
             browser.ProxyUserDataFolder = null;
             stopped?.Stop();
+            browser.ProxyBlocks?.Reset();
             EnvironmentManager.Instance.Log(
                 false,
                 nameof(BrowserManager),

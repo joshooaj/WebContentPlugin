@@ -134,6 +134,14 @@ namespace WebContent.Client
         /// </summary>
         internal LoopbackProxyListener ProxyListener { get; set; }
 
+        /// <summary>
+        /// Ticket #83: the blocked-resource tally for this browser view instance. Owned by the
+        /// browser (not the listener) so it survives a proxy rewire, fed by whatever listener
+        /// currently fronts the profile, and reset on every top-level navigation — the view's
+        /// setup-mode indicator ("N resources blocked") reads it directly, no ES roundtrip.
+        /// </summary>
+        internal ProxyBlockTally ProxyBlocks { get; set; }
+
         internal string ProxyBrowserArguments { get; set; }
 
         /// <summary>
@@ -205,6 +213,24 @@ namespace WebContent.Client
             webView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
             webView.CoreWebView2.IsDocumentPlayingAudioChanged += WebView_IsDocumentPlayingAudioChanged;
             webView.CoreWebView2.IsMuted = _isMuted;
+
+            // #83: a top-level navigation starts a fresh page load - the blocked-resource
+            // tally resets here, before the document request reaches the listener, exactly
+            // like the browser's own console clearing on navigation.
+            webView.CoreWebView2.NavigationStarting -= CoreWebView2_NavigationStarting;
+            webView.CoreWebView2.NavigationStarting += CoreWebView2_NavigationStarting;
+        }
+
+        private void CoreWebView2_NavigationStarting(object sender, Microsoft.Web.WebView2.Core.CoreWebView2NavigationStartingEventArgs e)
+        {
+            try
+            {
+                ProxyBlocks?.Reset();
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Blocked-resource reset failed for browser {Id}: {ex.Message}");
+            }
         }
 
         private readonly CallbackOwnership _callbackOwnership = new CallbackOwnership();
@@ -353,6 +379,7 @@ namespace WebContent.Client
                         if (WebView.CoreWebView2 != null)
                         {
                             WebView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
+                            WebView.CoreWebView2.NavigationStarting -= CoreWebView2_NavigationStarting;
                         }
                     }
 

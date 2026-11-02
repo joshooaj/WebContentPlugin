@@ -36,6 +36,15 @@ namespace WebContent.Client
         /// </summary>
         private readonly ProxyViewSessionContext _session;
         private readonly ProxyBlockReporter _blocks;
+
+        /// <summary>
+        /// Ticket #83: the per-browser-view blocked-resource tally this listener reports
+        /// through. It forwards every refusal to <see cref="_blocks"/> exactly as #69 shipped
+        /// it and counts locally so the view's setup-mode indicator needs no ES roundtrip.
+        /// Owned by the browser (stable across listener rewires), attached here for the life
+        /// of this listener.
+        /// </summary>
+        private readonly ProxyBlockTally _tally;
         private IReadOnlyList<string> _canonicalTargets;
         private TcpListener _listener;
         private volatile bool _stopping;
@@ -47,7 +56,8 @@ namespace WebContent.Client
         internal LoopbackProxyListener(
             IReadOnlyList<string> canonicalTargets,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
-            ProxyViewSessionContext session = null)
+            ProxyViewSessionContext session = null,
+            ProxyBlockTally tally = null)
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
             _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));
@@ -67,6 +77,8 @@ namespace WebContent.Client
                     }
                 },
                 message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
+            _tally = tally ?? new ProxyBlockTally(message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
+            _tally.SetForwarder(_blocks);
             _tls = new ProxyLoopbackTls(RequestLeafAsync, message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
         }
 
@@ -127,6 +139,10 @@ namespace WebContent.Client
                     WorkspaceFingerprint = _session.WorkspaceFingerprint,
                 });
             }
+
+            // #83: the tally outlives this listener when the browser is rewired to a new one;
+            // detach so a stopped listener's ES reporter is never a forward target.
+            _tally.SetForwarder(null);
 
             // Leaf certificates and their local key containers die with the listener; the
             // deployment CA is shared machine state and deliberately untouched here.
@@ -230,7 +246,7 @@ namespace WebContent.Client
                             message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), $"Proxy listener on port {Port}: {message}"),
                             _tls.AcceptTunnelAsync,
                             OpenTunnelAsync,
-                            _blocks);
+                            _tally);
                     }
                 }
                 catch (Exception exception)
