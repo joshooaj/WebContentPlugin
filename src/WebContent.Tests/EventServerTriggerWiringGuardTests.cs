@@ -11,7 +11,8 @@ namespace WebContent.Tests
     /// full event header (the Event Server matches administrator Analytics Event definitions
     /// against the header's Message field, and a header without ID/Timestamp is dropped), the
     /// receiver contract is the matching NewEventIndication with detach at Close, and the payload
-    /// travels as one JSON string like every other proxy payload. These are text guards over the
+    /// is the platform's own typed AnalyticsEvent (the documented raise route; the JSON-string
+    /// codec remains only as the receive-side fallback). These are text guards over the
     /// real source file, not stubs, because the platform event types cannot be exercised in a
     /// unit test and the live gate only proves one labeled run, not the permanent shape.
     /// </summary>
@@ -47,14 +48,17 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void MatchEventsRideSystemNewEventCommandAsOneJsonString()
+        public void MatchEventsRideSystemNewEventCommandWithATypedAnalyticsEvent()
         {
-            // The raise route available to a component-hosted plugin is the system-defined
-            // Server.NewEventCommand message; the payload stays one JSON string (the platform
-            // binds custom types via Type.GetType and silently delivers null across hosts).
+            // The documented raise route for plugin-generated analytics events: EnvironmentManager.
+            // SendMessage with Server.NewEventCommand and a TYPED platform AnalyticsEvent (every
+            // host binds that type; the #54 JSON-string discipline was for plugin-namespace types,
+            // and raw TransmitMessage of a system message id is refused by the transmit layer -
+            // proven on the live Event Server, "Unable to Transmit").
             Assert.Matches(
-                new Regex(@"new Message\(MessageId\.Server\.NewEventCommand,\s*ProxyTriggerEventCodec\.ToWire\(analyticsEvent\)\)", RegexOptions.Singleline),
+                new Regex(@"EnvironmentManager\.Instance\.SendMessage\(\s*new Message\(MessageId\.Server\.NewEventCommand\)\s*\{\s*Data\s*=\s*analyticsEvent", RegexOptions.Singleline),
                 PluginSource);
+            Assert.Contains("RelatedFQID = analyticsEvent.EventHeader.Source", PluginSource);
 
             // The matcher evaluates the served response per workspace, after the outcome exists.
             Assert.Contains("matcher.TryMatch(workspaceItemId, query.Uri, query.Method, responseStatus, out match)", PluginSource);

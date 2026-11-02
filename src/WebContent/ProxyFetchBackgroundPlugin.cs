@@ -1072,12 +1072,6 @@ namespace WebContent
                     return;
                 }
 
-                var communication = _messageCommunication;
-                if (communication == null)
-                {
-                    return;
-                }
-
                 var workspaceName = match.WorkspaceName ?? match.WorkspaceItemId;
                 var row = match.RowDescription ?? "row";
                 var analyticsEvent = new VideoOS.Platform.Data.AnalyticsEvent
@@ -1099,21 +1093,7 @@ namespace WebContent
                     },
                     Description = $"{workspaceName} | {query.Method} {query.Uri.AbsoluteUri} | HTTP {responseStatus}",
                 };
-                try
-                {
-                    communication.TransmitMessage(
-                        new Message(MessageId.Server.NewEventCommand, ProxyTriggerEventCodec.ToWire(analyticsEvent)),
-                        null,
-                        null,
-                        null);
-                }
-                catch (Exception transmitException)
-                {
-                    EnvironmentManager.Instance.Log(
-                        true,
-                        nameof(ProxyFetchBackgroundPlugin),
-                        $"Proxy trigger event not raised ({analyticsEvent.EventHeader.CustomTag}): {transmitException.Message}");
-                }
+                RaiseAnalyticsEvent(analyticsEvent);
             }
             catch (Exception exception)
             {
@@ -1123,9 +1103,10 @@ namespace WebContent
 
         /// <summary>
         /// #65: workspace item id (the FQID ObjectId string) → the workspace's FQID for the event
-        /// Source. The platform resolves a device event source through its matcher chain, and an
-        /// unresolvable FQID suppresses downstream alarm matching, so a null FQID is deliberate
-        /// when the item is gone: the event still records, it just cannot be attributed.
+        /// Source. Live-proven on the Event Server: its event processor validates the source and
+        /// answers a sourceless event with ArgumentException "Invalid event", so a match whose
+        /// workspace item vanished mid-flight produces a raise the Event Server rejects (logged
+        /// by <see cref="RaiseAnalyticsEvent"/>, never a fault in the fetch path).
         /// </summary>
         private static FQID WorkspaceItemFqid(string workspaceItemId)
         {
@@ -1176,6 +1157,50 @@ namespace WebContent
         }
 
         /// <summary>
+        /// #65: the single raise route for this plugin's analytics events. The documented way for
+        /// a plugin to generate an analytics event is <c>EnvironmentManager.Instance.SendMessage</c>
+        /// with a <see cref="MessageId.Server.NewEventCommand"/> message whose Data is a TYPED
+        /// <c>VideoOS.Platform.Data.AnalyticsEvent</c>: unlike the plugin-namespace payloads that
+        /// forced the #54 JSON-string discipline, AnalyticsEvent is a platform type every host
+        /// binds through its own type resolution. (Raw MessageCommunication.TransmitMessage of a
+        /// system-defined message id is refused by the transmit layer outright.) Replies, if any,
+        /// are logged: an empty reply set is the Event Server core consuming the event normally.
+        /// </summary>
+        private void RaiseAnalyticsEvent(VideoOS.Platform.Data.AnalyticsEvent analyticsEvent)
+        {
+            try
+            {
+                var results = EnvironmentManager.Instance.SendMessage(
+                    new Message(MessageId.Server.NewEventCommand)
+                    {
+                        Data = analyticsEvent,
+                        RelatedFQID = analyticsEvent.EventHeader.Source != null
+                            ? analyticsEvent.EventHeader.Source.FQID
+                            : null,
+                    });
+
+                string replies = null;
+                if (results != null && results.Count > 0)
+                {
+                    var first = results[0];
+                    replies = $" replies={results.Count} first={first}";
+                }
+
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Analytics event raised: {analyticsEvent.EventHeader.ID} \"{analyticsEvent.EventHeader.Message}\"{replies}");
+            }
+            catch (Exception raiseException)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Analytics event not raised ({analyticsEvent.EventHeader.CustomTag ?? analyticsEvent.EventHeader.Message}): {raiseException.GetType().Name}: {raiseException.Message}");
+            }
+        }
+
+        /// <summary>
         /// #65 live-gate self-test: one probe event rides the same raise path the trigger matches
         /// use, and the NewEventIndication receiver logs its return; the pair of log lines proves
         /// the plugin's event registration (raise + observe) is alive inside the running service.
@@ -1198,6 +1223,21 @@ namespace WebContent
 
             try
             {
+                // The probe carries the SAME source shape as a real trigger event (an existing
+                // VMS item as the event source): the Event Server's event processor validates the
+                // source and rejects sourceless events with ArgumentException "Invalid event" -
+                // proven live. The first workspace item in the system is as faithful as any.
+                FQID sourceFqid = null;
+                string sourceName = null;
+                List<Item> workspaces;
+                Exception lookupError;
+                if (Admin.WorkspaceItemManager.TryGetWorkspaces(out workspaces, out lookupError) &&
+                    workspaces != null && workspaces.Count > 0)
+                {
+                    sourceFqid = workspaces[0].FQID;
+                    sourceName = workspaces[0].Name;
+                }
+
                 var probe = new VideoOS.Platform.Data.AnalyticsEvent
                 {
                     EventHeader = new VideoOS.Platform.Data.EventHeader
@@ -1206,18 +1246,19 @@ namespace WebContent
                         Timestamp = DateTime.Now,
                         Message = ProxyTriggerPolicy.EventType,
                         CustomTag = "selftest",
+                        Source = new VideoOS.Platform.Data.EventSource
+                        {
+                            FQID = sourceFqid,
+                            Name = sourceName ?? "WebContent self-test",
+                        },
                     },
                     Description = "WebContent trigger self-test probe",
                 };
-                _messageCommunication.TransmitMessage(
-                    new Message(MessageId.Server.NewEventCommand, ProxyTriggerEventCodec.ToWire(probe)),
-                    null,
-                    null,
-                    null);
+                RaiseAnalyticsEvent(probe);
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(ProxyFetchBackgroundPlugin),
-                    $"Trigger self-test probe raised: {probe.EventHeader.ID} \"{ProxyTriggerPolicy.EventType}\"");
+                    $"Trigger self-test probe raised: {probe.EventHeader.ID} \"{ProxyTriggerPolicy.EventType}\" source={sourceName ?? "(none)"}");
             }
             catch (Exception exception)
             {
@@ -1239,17 +1280,20 @@ namespace WebContent
                     return null;
                 }
 
-                // The raise path sends one JSON string (same codec discipline as every other
-                // payload on this channel: the platform binds custom types via Type.GetType and
-                // silently delivers null Data across hosts). Read the raw JSON so the echo works
-                // whatever the platform hands back.
-                var json = message.Data as string;
-                if (string.IsNullOrEmpty(json))
+                // Typed-first: the raise path sends the platform's own AnalyticsEvent object, and
+                // every host binds that type through its own resolution (the #54 silent-null
+                // hazard was plugin-namespace types only). The string branch is the belt for a
+                // host that hands back the serialized form.
+                var evt = message.Data as VideoOS.Platform.Data.AnalyticsEvent;
+                if (evt == null)
                 {
-                    return null;
+                    var json = message.Data as string;
+                    if (!string.IsNullOrEmpty(json))
+                    {
+                        evt = ProxyTriggerEventCodec.FromWire(json);
+                    }
                 }
 
-                var evt = ProxyTriggerEventCodec.FromWire(json);
                 if (evt == null || evt.EventHeader == null)
                 {
                     return null;
