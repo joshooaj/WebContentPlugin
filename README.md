@@ -188,6 +188,38 @@ plugin deployment:
   `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest)` — or use the
   Management Client workspace page's **Test proxy fetch** row for an end-to-end check.
 
+### Rule triggers (fire VMS rules from proxied requests)
+
+A **rule trigger** turns one served proxy request into a VMS event the normal rule engine can
+react to — an operator notification, a saved view, an export, whatever the rule builder offers.
+Each workspace keeps its own list of trigger rows; when a proxied fetch **completes with a
+response** and matches a row, the plugin raises one analytics event on the Event Server bus.
+Matching runs on the Event Server after the response exists, so transport failures (no status)
+and CONNECT tunnels never trigger, and a match never changes the browser's response.
+
+The event type is fixed — **`WebContent proxy request`** — for every trigger in every workspace.
+Per-request detail rides inside the event (workspace name, method, full url, HTTP status, the
+matching row), so the admin writes **one** Analytics Event definition
+(*Management Client → Event definitions*, matching the message text `WebContent proxy request`,
+source = the workspace item) and then builds as many rules on it as desired.
+
+A trigger row has three parts:
+
+| Part | Written as | Matches |
+|---|---|---|
+| **url** | `scheme://host[:port][/path-glob]` | the FULL fetched url. Scheme `http`, `https`, or `*`; host exact, `*.tail` (one or more labels below the tail — never the apex, same wildcard as the allowlist), or a lone `*` after the scheme; a **port only when the url names that port** (an absent port means the scheme default, so `:8443` traffic needs `:8443` in the row); the path glob is literal text where `*` spans any run **including `/`** and `?` is exactly one character — an absent path means any path. Query strings and fragments never take part. A lone `*` as the whole url matches anything. |
+| **method** | `GET`, `POST`, … (case-insensitive) | exact verb; blank means any method. |
+| **status** | `4xx` or `404` | the response status: a class (`1xx`…`5xx`) or an exact code; blank means any status. |
+
+A row the matcher refuses is reported once per configuration refresh in the Event Server's MIP
+log (`Workspace rows refreshed: N row(s)...` plus a named per-row reason) and never takes down the
+workspace's other rows. Trigger rows live in the workspace configuration alongside the proxy
+allowlist; the Management Client editor for them arrives with the #78 admin story. To confirm the
+event channel on a freshly deployed Event Server before any rules exist, place a
+`trigger-selftest.flag` file next to the deployed `WebContent.dll` and restart the service — the
+Event Server MIP log shows the probe event raised and seen on the bus with the same id (see
+`docs/verification-matrix.md`, ES-3).
+
 ### Versions, logs, and failure pages
 
 - The relay rides classic MIP message communication (Event Server message service, default port

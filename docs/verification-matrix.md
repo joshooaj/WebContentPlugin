@@ -49,6 +49,8 @@ is not evidence the plugin never ran.
 | MC structured allowlist grid on the Proxy tab (scheme/host/port/accept-untrusted rows, inline refusal, wildcard banner) | #81 | `ProxyAllowlistEditorTests` (row validation IS the shared grammar — mid-label wildcard, `*x`, `*.`, path, inner space, port out of range, port-with-blank-host all refused while exact hosts/IPv6/`*.tail`/the lone `*` pass; blank rows are not entries; canonicalization of case and scheme-default ports; only the lone `*` is the full-host hatch; both stored shapes render forever with corrupt records dropped and counted; a legacy `host`-shape workspace opens and saves back to structured `pattern` records without losing entries or flags; invalid rows refuse the build BY NAME and never vanish; duplicate rows collapse with any flagged duplicate flagging the entry; touching the flag never changes validation), `WorkspaceTabShellGuardTests` (the Proxy tab carries the grid with the six pinned columns in order and every per-row AutomationId, the warning banner starts `Collapsed`, rows are added/removed only by explicit buttons with `CanUserAddRows`/`CanUserDeleteRows` off, the proxy section is asserted ABSENT from the Settings tab, and neither `txtProxyTargets` nor any admin-facing `accept-untrusted` token survives in the page or its strings) | See MC-14 below |
 | Proxy allowlist wildcards: ONE shared matcher for all three gates, structured entry shape, wildcard SSRF floor | #73 | `ProxyPolicyTests` (wildcard grammar: leftmost-label `*.tail` + the lone `*` hatch only - mid-label wildcards, `*x`, `*.`, bad labels, non-http schemes rejected; matching: subdomains covered, apex never, label-boundary safe, scheme/port exact, case-insensitive; SSRF floor: literal IPv4 (dotted-quad + numeric shorthand), IPv6 (bracketed/colon), `localhost`, and the VMS's own hosts are never wildcard-matched while explicit exact entries may still name them; seeded pseudo-random host/IPv4 property pins over 300+200 rounds), `ProxyAllowlistGateAgreementTests` (the same (entries, request-origin) matrix drives the Event Server fetch gate, the client forward gate, and the leaf-mint gate to identical verdicts; legacy `host` records and new `pattern` records gate identically), `ProxyServerAllowlistTests` (pattern and legacy shapes gate identically at the ES; VMS floor fed through a resolver seam and kept across resolver faults; the accept-untrusted flag rides wildcard entries under the same floor), `ProxyForwardPolicyTests` (client gate consumes the shared matcher in every posture), `ProxyWorkspaceProfileTests` (pattern entries and the floor hosts travel together through the seeded profile property), `ProxyConfigurationTests` (the stored entry gains `pattern`; readers accept BOTH shapes forever, no migration write-back - a read never rewrites the stored shape), `WorkspaceTabShellGuardTests` (boolean-attribute pins learned the hard way in the MC-13 live walk) | See MC-13 below - **live rows PASSED 2026-11-02** (run `20261102-073648`): wildcard/hatch lines save and read back verbatim through the live Management Client (structured `pattern` shape round-trip); `http://*.neverssl.com` admits `http://online.neverssl.com/` (a `HTTP 200 - 3961 bytes` banking in run `20261102-071520`) while the apex refuses `NotAllowed` in 0.0s; the `http://*` hatch admits the apex (200 in run `20261102-073010`) yet the literal IP and the VMS's own host both refuse `NotAllowed` in 0.0s - refused before any socket opens; allowlist restored to its four production lines with verified readback |
 
+| Rule triggers: a matched proxied fetch raises the fixed `WebContent proxy request` analytics event on the Event Server bus | #65 | `ProxyTriggerPolicyTests` (url glob grammar: absolute or the lone `*` hatch only; scheme http/https/`*`; host exact — empty labels refused — leftmost-label `*.tail`, or lone `*`; port explicit 1-65535 or absent = the url's own scheme default, so an explicit non-default port never matches an absent-port row; anchored path glob where `*` spans `/` and `?` is exactly one char, query/fragment never participate; method verb tokens; status class `1xx..5xx` or exact 100-599; seeded-Random property pins over the glob engine with a wildcard-safe alphabet on the pattern side), `ProxyTriggerMatcherTests` (store closed before the first resolve; rows evaluate against their own workspace only; first matching row wins — one fetch raises at most one event; absent sections tolerated silently; a refused row is audited by reason without taking down the workspace's other rows; a resolver failure after a good resolve keeps serving last-known-good rows; `Prime` logs what the configuration actually loaded), `ProxyConfigurationTests` (raw `proxyTriggers` rows survive the serialized roundtrip — grammar is decided only on read; a pre-#65 definition reads `ProxyTriggers=null` with no error; empty `method`/`status` members optional; a workspace without rows never grows an empty section), `ProxyFetchWireCodecTests` + `ProxyDiagnosticsWireTests` (#65-revised skew contract: the request wire's members are explicitly optional on read so an older Smart Client's frame decodes as an unattributed fetch, while a frame that names no url stays an unusable null; the tunnel wire keeps the strict inferred contract), `EventServerTriggerWiringGuardTests` (event header carries ID/Timestamp/Message=the one fixed event type with per-row context in CustomTag; the raise goes through `EnvironmentManager.SendMessage` with a TYPED platform `AnalyticsEvent` + `RelatedFQID` — never raw `TransmitMessage`, which the live transmit layer refuses for system Command ids; the plugin observes `Server.NewEventIndication` and detaches at Close; the store is primed in `Init` and logs; the self-test probe stays behind the env/flag switch; attribution chain: stamped request → diagnostics session map → fail closed) | See ES-3 below - **live gate PASSED 2026-11-02** (run `20261102-141512`, drop `WebContent.dll` SHA-256 `2B974839…`): the flag-file probe raised with a real workspace source and the SAME event id came back through the plugin's NewEventIndication observer (`d9ea7200…` on all three markers); the two refusal postures were learned live - raw `TransmitMessage` of a system Command id (`Discarding message Server.NewEventCommand`) and a sourceless event (`ArgumentException: Invalid event`) |
+
 ## Manual host checks
 
 Run after deploying new build output (`Invoke-psake -taskList Build, DeployLocally, DeployToVms`;
@@ -140,10 +142,12 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
 
 ### ES-2 Event Server proxy diagnostics ingress (#69)
 
-1. Deploy both halves from one drop (`Invoke-psake -taskList Build, Deploy`) — the wire payloads are
-   strict about their member set, so a Smart Client plugin and an Event Server plugin from different
-   builds simply fail to decode each other's frames. Restart desktop clients afterwards: an Event
-   Server restart disposes every running client's `MessageCommunication`.
+1. Deploy both halves from one drop (`Invoke-psake -taskList Build, Deploy`). Since #65 the fetch
+   REQUEST payload tolerates members missing from an older Smart Client's frame (it decodes as an
+   unattributed fetch instead of dying), but every other wire payload is still strict about its
+   member set, so a Smart Client plugin and an Event Server plugin from very different builds can
+   still fail to decode each other's frames — ship from one drop. Restart desktop clients
+   afterwards: an Event Server restart disposes every running client's `MessageCommunication`.
 2. Load marker in the Event Server's `logs\MIP.log`:
    `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest, diagnostics=WebContent.Proxy.BlockReport/WebContent.Proxy.SessionEvent/WebContent.Proxy.StatusRequest)`.
    The diagnostics clause only appears once the four new ids in `plugin.def` are accepted and all
@@ -172,6 +176,38 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    `BadRequest`, client-side deadline silence completes as `ServerUnavailable`) stay pinned by the
    unit suites.
 
+
+### ES-3 Rule-trigger event raise and observation (#65)
+
+1. Deploy the Event Server half (`Invoke-psake -taskList Build, DeployToVms`) and verify the drop
+   by hash. Restart desktop clients afterwards (the service restart disposes their
+   `MessageCommunication`).
+2. Load markers in the Event Server's `logs\MIP.log`: the ready line now ends with
+   `triggers=WebContent proxy request`, preceded by `Workspace rows refreshed: N row(s) across
+   M workspace(s).` — the eager prime of the trigger store. `0 row(s) across 0 workspace(s)` is
+   the expected state until the Management Client trigger editor (#78) writes rows; the matcher
+   stays closed and simply never fires.
+3. Self-test probe (the raise-path round trip on demand): create a `trigger-selftest.flag` file
+   next to the deployed `WebContent.dll` and restart the service. Expected, in order:
+   - `Analytics event raised: <guid> "WebContent proxy request"` — the documented
+     `EnvironmentManager.SendMessage` + typed-`AnalyticsEvent` route (live-proven: raw
+     `MessageCommunication.TransmitMessage` of a system Command id is refused by the Event Server
+     MessageBroker, `Discarding message 'Server.NewEventCommand' as sending Indication and Command
+     messages are not allowed`, and surfaces to the plugin as `Unable to Transmit`);
+   - `Trigger self-test probe raised: <guid> "WebContent proxy request" source=<workspace name>`;
+   - `Proxy trigger event seen on the bus: <guid> "WebContent proxy request" (selftest)` — the
+     SAME guid as the raise line, arriving through the plugin's `Server.NewEventIndication`
+     receiver after the Event Server's own event processor accepted the event. A sourceless
+     analytics event does NOT survive that processor (`ArgumentException: Invalid event`), which is
+     why the probe carries a real workspace item as the event source, exactly like a match event.
+   Remove the flag and restart again: the markers must go silent.
+4. **Observed 2026-11-02 (run `20261102-141512`):** all three markers with
+   `d9ea7200-5c25-4b65-ab74-5d23613a31f4` on a drop hash-identical to the build output
+   (`WebContent.dll` SHA-256 `2B97483955E8…`); clean flagless restart at `20261102-141621` logged
+   only the prime + ready lines.
+5. **Not yet run:** the full end-to-end (a served fetch matching a stored row, and an
+   administrator's Analytics Event definition + rule reacting to it) waits on the #78 trigger
+   editor; the event definition/rule walk in Management Client stays a manual row then.
 
 ### MC-10 Management Client proxy-fetch harness (#53, hardened by #54)
 
