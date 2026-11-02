@@ -142,13 +142,17 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void AFrameFromAnOlderBuildIsRejectedRatherThanHalfBound()
+        public void AFrameFromAnOlderBuildDecodesAsUnattributedRatherThanDying()
         {
-            // The wire is strict in both directions: a payload shape that predates #69 has no
-            // SessionId member to write, and this build answers that frame with null (an unusable
-            // frame), never a half-bound payload. That is why the Smart Client plugin and the
-            // Event Server plugin ship from one drop (psake Deploy), and why an unattributed
-            // session is expressed as null - not as a missing member.
+            // Skew contract for the request wire, revised by #65: Smart Clients on workstations
+            // can lag the Event Server, and a member added later (SessionId in #69,
+            // WorkspaceItemId in #65) is OPTIONAL on read. An older client's frame decodes as an
+            // unattributed fetch - null attribution, which downstream already treats as "no
+            // session/no workspace", never a refusal - instead of every fetch from that client
+            // dying on a strict read. Frames that are not fetch requests at all (no url, no
+            // decodable shape) stay unusable nulls. The tunnel wire deliberately keeps the
+            // strict inferred contract: a tunnel is negotiated inside one live browser session
+            // on one matching pair of plugin builds, so no drift case exists to tolerate.
             var wire = ProxyFetchWireCodec.ToWire(new ProxyFetchRequestPayload
             {
                 CorrelationId = "c-1",
@@ -157,7 +161,12 @@ namespace WebContent.Tests
             });
             var preDiagnostics = wire.Replace("\"SessionId\":null,", string.Empty);
             Assert.DoesNotContain("SessionId", preDiagnostics);
-            Assert.Null(ProxyFetchWireCodec.RequestFromWire(preDiagnostics));
+
+            var old = ProxyFetchWireCodec.RequestFromWire(preDiagnostics);
+            Assert.NotNull(old);
+            Assert.Equal("http://one.test:80/", old.Url);
+            Assert.Null(old.SessionId);
+            Assert.Null(old.WorkspaceItemId);
 
             var tunnelWire = ProxyFetchWireCodec.ToWire(new ProxyTunnelPayload
             {

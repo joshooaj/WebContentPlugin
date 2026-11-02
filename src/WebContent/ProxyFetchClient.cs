@@ -203,8 +203,10 @@ namespace WebContent
         /// <summary>
         /// Send one GET proxy-fetch request (the Management Client harness path, #53). The
         /// browser-facing flows use the full <see cref="ProxyFetchQuery"/> overload below.
+        /// #65: the MC page passes the workspace item id it is editing, so a test fetch can prove
+        /// a rule-trigger row end-to-end; the id is attribution only, never a gate.
         /// </summary>
-        internal Task<ProxyFetchResult> FetchAsync(string url, TimeSpan? deadline = null)
+        internal Task<ProxyFetchResult> FetchAsync(string url, string workspaceItemId = null, TimeSpan? deadline = null)
         {
             Uri target;
             if (!Uri.TryCreate(url, UriKind.Absolute, out target))
@@ -212,7 +214,7 @@ namespace WebContent
                 return Task.FromResult(Failure(ProxyFetchErrorCodes.BadRequest, "The proxy-fetch url must be an absolute http(s) uri."));
             }
 
-            return FetchAsync(new ProxyFetchQuery { Uri = target, Method = "GET" }, deadline);
+            return FetchAsync(new ProxyFetchQuery { Uri = target, Method = "GET", WorkspaceItemId = workspaceItemId }, deadline);
         }
 
         /// <summary>
@@ -258,6 +260,7 @@ namespace WebContent
                             CorrelationId = correlationId,
                             Url = target.AbsoluteUri,
                             SessionId = query.SessionId,
+                            WorkspaceItemId = query.WorkspaceItemId,
                             Method = string.IsNullOrWhiteSpace(query.Method) ? null : query.Method.Trim().ToUpperInvariant(),
                             Headers = query.Headers != null && query.Headers.Count > 0 ? query.Headers : null,
                             BodyBase64 = query.Body != null && query.Body.Length > 0 ? Convert.ToBase64String(query.Body) : null,

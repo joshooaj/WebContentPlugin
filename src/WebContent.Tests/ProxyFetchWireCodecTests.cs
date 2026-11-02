@@ -62,6 +62,32 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void RequestCarriesTheWorkspaceItemIdAndOldShapesStillDecode()
+        {
+            // #65: the workspace attribution that rule-trigger rows are evaluated against rides
+            // the existing request wire; a sender from before #65 (no member in the JSON at all)
+            // decodes to null and the request is still a fully valid fetch.
+            var wire = ProxyFetchWireCodec.ToWire(new ProxyFetchRequestPayload
+            {
+                CorrelationId = "corr-ws",
+                Url = "https://camera.local/snapshot",
+                SessionId = "sess-1",
+                WorkspaceItemId = "e8955f17-d107-424f-a81f-e076b4f332e9",
+            });
+
+            var back = ProxyFetchWireCodec.RequestFromWire(wire);
+            Assert.NotNull(back);
+            Assert.Equal("sess-1", back.SessionId);
+            Assert.Equal("e8955f17-d107-424f-a81f-e076b4f332e9", back.WorkspaceItemId);
+
+            var preTriggerSender = "{\"CorrelationId\":\"corr-old\",\"Url\":\"https://camera.local/x\",\"SessionId\":\"sess-old\"}";
+            var oldBack = ProxyFetchWireCodec.RequestFromWire(preTriggerSender);
+            Assert.NotNull(oldBack);
+            Assert.Equal("sess-old", oldBack.SessionId);
+            Assert.Null(oldBack.WorkspaceItemId);
+        }
+
+        [Fact]
         public void PlainGetRequestsStillDecodeWithNullMethodHeadersAndBody()
         {
             // Field additions must not disturb the GET path: absent fields decode to null, and

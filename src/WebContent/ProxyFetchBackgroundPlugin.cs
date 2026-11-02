@@ -42,10 +42,19 @@ namespace WebContent
         private object _statusRequestFilterRegistration;
         private object _onlineTableFilterRegistration;
         private object _newEndPointFilterRegistration;
+        private object _newEventIndicationRegistration;
         private SemaphoreSlim _fetchSlots;
         private ProxyServerAllowlist _allowlist;
         private ProxyLeafIssuer _leafIssuer;
         private ProxyTunnelServer _tunnels;
+
+        /// <summary>
+        /// #65: per-workspace rule-trigger rows (URL/method/status matchers) matched against
+        /// completed proxy fetches; a match raises the fixed "WebContent proxy request" platform
+        /// event so administrators can build Event Server rules on it.
+        /// </summary>
+        private ProxyTriggerMatcher _triggerMatcher;
+        private int _selfTestProbeDone;
 
         /// <summary>
         /// Ticket #69: the diagnostics substrate - per-workspace blocked-origin rings and live
@@ -187,10 +196,27 @@ namespace WebContent
 
                 _sessionSweeper = new Timer(_ => SweepSessionsSafely(), null, SessionSweepPeriod, SessionSweepPeriod);
 
+                // #65: rule triggers. Per-workspace URL/method/status rows (the "proxyTriggers"
+                // section of the workspace's WebContent item settings) are matched against
+                // completed proxy fetches; each match raises the fixed "WebContent proxy request"
+                // platform event as a system-defined Server.NewEventCommand message (the raise
+                // route available to a component-hosted plugin - see the EventTracer sample's
+                // matching NewEventIndication receiver). The receiver logs every WebContent event
+                // as it comes back on the bus, which is the end-to-end proof the raise path is
+                // live in this process.
+                _triggerMatcher = new ProxyTriggerMatcher(
+                    ResolveWorkspaceTriggerSnapshots,
+                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                _triggerMatcher.Prime();
+                _newEventIndicationRegistration = EnvironmentManager.Instance.RegisterReceiver(
+                    OnPlatformNewEvent,
+                    new MessageIdFilter(MessageId.Server.NewEventIndication));
+                RaiseTriggerSelfTestProbeIfRequested();
+
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(ProxyFetchBackgroundPlugin),
-                    $"Proxy fetcher ready (concurrency={MaxConcurrentFetches}, request id={ProxyMessageIds.FetchRequestId}, diagnostics={ProxyMessageIds.BlockReportId}/{ProxyMessageIds.SessionEventId}/{ProxyMessageIds.StatusRequestId}).");
+                    $"Proxy fetcher ready (concurrency={MaxConcurrentFetches}, request id={ProxyMessageIds.FetchRequestId}, diagnostics={ProxyMessageIds.BlockReportId}/{ProxyMessageIds.SessionEventId}/{ProxyMessageIds.StatusRequestId}, triggers={ProxyTriggerPolicy.EventType}).");
             }
             catch (Exception exception)
             {
@@ -239,7 +265,7 @@ namespace WebContent
 
             if (_messageCommunication != null)
             {
-                foreach (var registration in new[] { _tunnelOpenFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _blockReportFilterRegistration, _sessionEventFilterRegistration, _statusRequestFilterRegistration, _onlineTableFilterRegistration, _newEndPointFilterRegistration })
+                foreach (var registration in new[] { _tunnelOpenFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _blockReportFilterRegistration, _sessionEventFilterRegistration, _statusRequestFilterRegistration, _onlineTableFilterRegistration, _newEndPointFilterRegistration, _newEventIndicationRegistration })
                 {
                     if (registration == null)
                     {
@@ -265,6 +291,8 @@ namespace WebContent
             _statusRequestFilterRegistration = null;
             _onlineTableFilterRegistration = null;
             _newEndPointFilterRegistration = null;
+            _newEventIndicationRegistration = null;
+            _triggerMatcher = null;
 
             // #69: stop sweeping and drop the in-memory diagnostics tables (by design they never
             // outlive the service process).
@@ -473,6 +501,12 @@ namespace WebContent
                         EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy fetch traffic not recorded: {diagnosticsException.Message}");
                     }
                 }
+
+                // #65: rule triggers run on the fetch path AFTER the response is known - the row's
+                // status filter matches the actual response status. A transport failure (status 0)
+                // never matches; the response frames are already on their way and an event fault
+                // must not touch them.
+                RaiseTriggerEventsSafely(payload, query, result.StatusCode);
 
                 if (requesterFqid == null)
                 {
@@ -1002,6 +1036,271 @@ namespace WebContent
             {
                 EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy diagnostics sweep faulted: {exception.Message}");
             }
+        }
+
+        /// <summary>
+        /// #65: raise the platform event for one rule-trigger match on the event bus
+        /// (Server.NewEventCommand, the system-defined raise the Event Server processes through its
+        /// matcher chain). Fire-and-swallow: a trigger event must never alter or break the fetch
+        /// response that is already on its way back to the browser. The fetch payload's workspace
+        /// attribution wins; an older Smart Client that stamps no workspace id falls back to the
+        /// session's workspace in the diagnostics session map; an unattributable request is fail-
+        /// closed (no event), mirroring how #69 treats unattributed traffic.
+        /// </summary>
+        private void RaiseTriggerEventsSafely(ProxyFetchRequestPayload payload, ProxyFetchQuery query, int responseStatus)
+        {
+            var matcher = _triggerMatcher;
+            if (matcher == null || query == null || responseStatus <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var workspaceItemId = payload.WorkspaceItemId;
+                if (string.IsNullOrEmpty(workspaceItemId))
+                {
+                    string mapped;
+                    workspaceItemId = _diagnostics != null && _diagnostics.TryGetSessionWorkspace(payload.SessionId, out mapped)
+                        ? mapped
+                        : null;
+                }
+
+                ProxyTriggerMatcher.TriggerMatch match;
+                if (!matcher.TryMatch(workspaceItemId, query.Uri, query.Method, responseStatus, out match))
+                {
+                    return;
+                }
+
+                var communication = _messageCommunication;
+                if (communication == null)
+                {
+                    return;
+                }
+
+                var workspaceName = match.WorkspaceName ?? match.WorkspaceItemId;
+                var row = match.RowDescription ?? "row";
+                var analyticsEvent = new VideoOS.Platform.Data.AnalyticsEvent
+                {
+                    EventHeader = new VideoOS.Platform.Data.EventHeader
+                    {
+                        ID = Guid.NewGuid(),
+                        Timestamp = DateTime.Now,
+                        Message = ProxyTriggerPolicy.EventType,
+                        // The admin's Analytics Event definition matches on Message; the fixed
+                        // property text (workspace | method | url | status) rides in CustomTag for
+                        // the rule's condition values and action text.
+                        CustomTag = $"{workspaceName} | {query.Method} {query.Uri.AbsoluteUri} | HTTP {responseStatus} | row {row}",
+                        Source = new VideoOS.Platform.Data.EventSource
+                        {
+                            FQID = WorkspaceItemFqid(match.WorkspaceItemId),
+                            Name = workspaceName,
+                        },
+                    },
+                    Description = $"{workspaceName} | {query.Method} {query.Uri.AbsoluteUri} | HTTP {responseStatus}",
+                };
+                try
+                {
+                    communication.TransmitMessage(
+                        new Message(MessageId.Server.NewEventCommand, ProxyTriggerEventCodec.ToWire(analyticsEvent)),
+                        null,
+                        null,
+                        null);
+                }
+                catch (Exception transmitException)
+                {
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(ProxyFetchBackgroundPlugin),
+                        $"Proxy trigger event not raised ({analyticsEvent.EventHeader.CustomTag}): {transmitException.Message}");
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy trigger evaluation faulted: {exception.Message}");
+            }
+        }
+
+        /// <summary>
+        /// #65: workspace item id (the FQID ObjectId string) → the workspace's FQID for the event
+        /// Source. The platform resolves a device event source through its matcher chain, and an
+        /// unresolvable FQID suppresses downstream alarm matching, so a null FQID is deliberate
+        /// when the item is gone: the event still records, it just cannot be attributed.
+        /// </summary>
+        private static FQID WorkspaceItemFqid(string workspaceItemId)
+        {
+            if (string.IsNullOrEmpty(workspaceItemId))
+            {
+                return null;
+            }
+
+            try
+            {
+                List<Item> workspaces;
+                Exception error;
+                if (!Admin.WorkspaceItemManager.TryGetWorkspaces(out workspaces, out error))
+                {
+                    return null;
+                }
+
+                foreach (var workspace in workspaces)
+                {
+                    if (workspace != null && workspace.FQID != null &&
+                        string.Equals(workspace.FQID.ObjectId.ToString(), workspaceItemId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return workspace.FQID;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Attribution is best-effort.
+            }
+
+            return null;
+        }
+
+        private static bool SelfTestFlagFilePresent()
+        {
+            try
+            {
+                var directory = System.IO.Path.GetDirectoryName(
+                    new System.Uri(typeof(ProxyFetchBackgroundPlugin).Assembly.CodeBase).LocalPath);
+                return !string.IsNullOrEmpty(directory) &&
+                       System.IO.File.Exists(System.IO.Path.Combine(directory, "trigger-selftest.flag"));
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// #65 live-gate self-test: one probe event rides the same raise path the trigger matches
+        /// use, and the NewEventIndication receiver logs its return; the pair of log lines proves
+        /// the plugin's event registration (raise + observe) is alive inside the running service.
+        /// Requested either by WEBCONTENT_TRIGGER_SELFTEST=1 in the service environment or by a
+        /// trigger-selftest.flag file next to the plugin dll (the deployed folder's write ACL is a
+        /// deliberate operator grant, so a lab run can request the probe without touching machine
+        /// state). One-shot per process; never fires without one of the two switches.
+        /// </summary>
+        private void RaiseTriggerSelfTestProbeIfRequested()
+        {
+            if (Environment.GetEnvironmentVariable("WEBCONTENT_TRIGGER_SELFTEST") != "1" && !SelfTestFlagFilePresent())
+            {
+                return;
+            }
+
+            if (Interlocked.Exchange(ref _selfTestProbeDone, 1) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var probe = new VideoOS.Platform.Data.AnalyticsEvent
+                {
+                    EventHeader = new VideoOS.Platform.Data.EventHeader
+                    {
+                        ID = Guid.NewGuid(),
+                        Timestamp = DateTime.Now,
+                        Message = ProxyTriggerPolicy.EventType,
+                        CustomTag = "selftest",
+                    },
+                    Description = "WebContent trigger self-test probe",
+                };
+                _messageCommunication.TransmitMessage(
+                    new Message(MessageId.Server.NewEventCommand, ProxyTriggerEventCodec.ToWire(probe)),
+                    null,
+                    null,
+                    null);
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Trigger self-test probe raised: {probe.EventHeader.ID} \"{ProxyTriggerPolicy.EventType}\"");
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Trigger self-test probe failed: {exception.Message}");
+            }
+        }
+
+        /// <summary>
+        /// #65: the platform event bus echo for this process. Only WebContent's own event type is
+        /// logged (the bus carries every VMS event; logging them all would bury the MIP log); the
+        /// self-test probe id logs with it as the raise-path round trip marker.
+        /// </summary>
+        private object OnPlatformNewEvent(Message message, FQID sourceFqid, FQID destinationFqid)
+        {
+            try
+            {
+                if (message == null)
+                {
+                    return null;
+                }
+
+                // The raise path sends one JSON string (same codec discipline as every other
+                // payload on this channel: the platform binds custom types via Type.GetType and
+                // silently delivers null Data across hosts). Read the raw JSON so the echo works
+                // whatever the platform hands back.
+                var json = message.Data as string;
+                if (string.IsNullOrEmpty(json))
+                {
+                    return null;
+                }
+
+                var evt = ProxyTriggerEventCodec.FromWire(json);
+                if (evt == null || evt.EventHeader == null)
+                {
+                    return null;
+                }
+
+                if (string.Equals(evt.EventHeader.Message, ProxyTriggerPolicy.EventType, StringComparison.OrdinalIgnoreCase))
+                {
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(ProxyFetchBackgroundPlugin),
+                        $"Proxy trigger event seen on the bus: {evt.EventHeader.ID} \"{evt.EventHeader.Message}\" ({evt.EventHeader.CustomTag ?? "no tag"})");
+                }
+            }
+            catch (Exception)
+            {
+                // Observation only; a fault here must not touch messaging.
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// #65: per-workspace trigger rows for the matcher, read from the WebContent item settings
+        /// the Management Client page stores (the proxyTriggers section). Invalid rows are refused
+        /// by ProxyTriggerPolicy with a specific reason logged; one bad row never drops the
+        /// workspace's other rows.
+        /// </summary>
+        private static System.Collections.Generic.IEnumerable<ProxyWorkspaceTriggerSource> ResolveWorkspaceTriggerSnapshots()
+        {
+            List<Item> workspaces;
+            Exception error;
+            if (!Admin.WorkspaceItemManager.TryGetWorkspaces(out workspaces, out error))
+            {
+                throw error ?? new InvalidOperationException("Workspace configuration lookup failed.");
+            }
+
+            var sources = new List<ProxyWorkspaceTriggerSource>();
+            foreach (var workspace in workspaces)
+            {
+                if (workspace != null && workspace.FQID != null && workspace.Properties != null)
+                {
+                    sources.Add(new ProxyWorkspaceTriggerSource
+                    {
+                        ItemId = workspace.FQID.ObjectId.ToString(),
+                        Name = workspace.Name,
+                        Properties = workspace.Properties,
+                    });
+                }
+            }
+
+            return sources;
         }
 
         /// <summary>

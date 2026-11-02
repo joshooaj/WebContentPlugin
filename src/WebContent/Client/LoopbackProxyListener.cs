@@ -201,11 +201,14 @@ namespace WebContent.Client
 
         /// <summary>
         /// #69: stamp the session on every fetch query before it crosses the messaging seam, so
-        /// the Event Server counts the served request toward this session's live status.
+        /// the Event Server counts the served request toward this session's live status. #65: the
+        /// workspace item id rides along for the same crossing - rule-trigger rows are evaluated
+        /// against the workspace the issuing view belongs to.
         /// </summary>
         private Task<ProxyFetchResult> FetchWithSession(ProxyFetchQuery query)
         {
             query.SessionId = _session.SessionId;
+            query.WorkspaceItemId = _session.WorkspaceItemId;
             return _fetch(query);
         }
 

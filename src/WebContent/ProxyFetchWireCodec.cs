@@ -64,7 +64,10 @@ namespace WebContent
 
         /// <summary>
         /// Decode a request payload from a received Message.Data. Null for anything that is not
-        /// a decodable request JSON string (foreign/host values, garbage, version skew).
+        /// a decodable request JSON string (foreign/host values, garbage, version skew). Members
+        /// added by later plugin versions are optional on read (explicit DataContract), so an
+        /// older Smart Client's frame still decodes; a frame that decodes but names no url was
+        /// never a fetch request, and stays an unusable frame.
         /// </summary>
         internal static ProxyFetchRequestPayload RequestFromWire(object data)
         {
@@ -74,7 +77,13 @@ namespace WebContent
                 return null;
             }
 
-            return Deserialize<ProxyFetchRequestPayload>(json, RequestSerializer);
+            var payload = Deserialize<ProxyFetchRequestPayload>(json, RequestSerializer);
+            if (payload == null || string.IsNullOrEmpty(payload.Url))
+            {
+                return null;
+            }
+
+            return payload;
         }
 
         /// <summary>Decode one response frame from a received Message.Data; null when unusable.</summary>

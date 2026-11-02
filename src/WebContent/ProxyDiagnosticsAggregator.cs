@@ -416,6 +416,32 @@ namespace WebContent
             }
         }
 
+        /// <summary>
+        /// #65: the workspace a live session belongs to, straight from the session table. The
+        /// fallback attribution for fetch requests from clients that stamp no workspace id: an
+        /// unknown session id answers false and the request stays unattributed (fail closed).
+        /// </summary>
+        internal bool TryGetSessionWorkspace(string sessionId, out string workspaceItemId)
+        {
+            workspaceItemId = null;
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                return false;
+            }
+
+            lock (_sync)
+            {
+                var record = FindSession(sessionId);
+                if (record == null || string.IsNullOrEmpty(record.WorkspaceItemId))
+                {
+                    return false;
+                }
+
+                workspaceItemId = record.WorkspaceItemId;
+                return true;
+            }
+        }
+
         /// <summary>Locate a session record across workspace tables; caller must hold the lock.</summary>
         private SessionRecord FindSession(string sessionId)
         {

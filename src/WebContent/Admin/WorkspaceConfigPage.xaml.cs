@@ -664,7 +664,10 @@ namespace WebContent.Admin
 
                 var url = (txtProxyTestUrl.Text ?? string.Empty).Trim();
                 var stopwatch = Stopwatch.StartNew();
-                var result = await client.FetchAsync(url);
+
+                // #65: stamp the workspace this page is editing so the Event Server can evaluate
+                // this workspace's rule-trigger rows against a test fetch too.
+                var result = await client.FetchAsync(url, _statusWorkspaceItemId);
                 stopwatch.Stop();
 
                 if (result.Success)

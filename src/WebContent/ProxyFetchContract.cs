@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 using System.Threading.Tasks;
 
 namespace WebContent
@@ -159,11 +160,22 @@ namespace WebContent
     /// passthrough for authentication (Cookie/Authorization cross untouched; the plugin never
     /// injects or stores target credentials). A null Method means GET; null Headers/BodyBase64
     /// mean none. Still ONE JSON string on the wire via <see cref="ProxyFetchWireCodec"/>.
+    ///
+    /// The explicit [DataContract]/[DataMember] shape matters for version skew: Smart Clients on
+    /// user workstations lag the Event Server, and a request from an older client simply lacks
+    /// members added later (#65's WorkspaceItemId, #69's SessionId). Data members declared this
+    /// way are optional on read — the missing member decodes to null instead of poisoning the
+    /// whole frame. (Without the attributes the inferred contract marks every member required,
+    /// and a strict reader refuses the frame outright.)
     /// </summary>
     [Serializable]
+    [DataContract]
     public class ProxyFetchRequestPayload
     {
+        [DataMember]
         public string CorrelationId;
+
+        [DataMember]
         public string Url;
 
         /// <summary>
@@ -172,16 +184,29 @@ namespace WebContent
         /// from pre-#69 senders (and for unattributed requests) — an absent session never
         /// refuses the fetch itself.
         /// </summary>
+        [DataMember]
         public string SessionId;
 
+        /// <summary>
+        /// Ticket #65: the workspace item (Guid string) whose browser view issued this fetch —
+        /// the attribution rule-trigger rows are evaluated against. Null from pre-#65 senders;
+        /// the Event Server then falls back to the session's workspace from its diagnostics
+        /// session map, and an unattributable fetch simply never triggers.
+        /// </summary>
+        [DataMember]
+        public string WorkspaceItemId;
+
         /// <summary>Uppercase HTTP method (POST/PUT/DELETE/OPTIONS/...); null or blank is GET.</summary>
+        [DataMember]
         public string Method;
 
         /// <summary>Request headers to replay at the target, hop-by-hop headers already stripped
         /// by the requester side; null when the request carried none worth relaying.</summary>
+        [DataMember]
         public List<ProxyFetchHeader> Headers;
 
         /// <summary>Request body as base64 (login forms, XHR payloads); null when there is no body.</summary>
+        [DataMember]
         public string BodyBase64;
     }
 
@@ -250,6 +275,13 @@ namespace WebContent
         /// live status. Null for unattributed requests.
         /// </summary>
         internal string SessionId;
+
+        /// <summary>
+        /// Ticket #65: the workspace item id the issuing view belongs to, stamped by the listener;
+        /// copied onto the wire payload so the Event Server can evaluate rule-trigger rows against
+        /// the served request. Null for unattributed requests.
+        /// </summary>
+        internal string WorkspaceItemId;
     }
 
     /// <summary>
