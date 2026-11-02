@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
              mc:Ignorable="d"
              d:DesignHeight="560" d:DesignWidth="760"
              Background="White">
@@ -11,6 +12,11 @@
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/WebContent;component/Admin/AdminPageStyles.xaml" />
       </ResourceDictionary.MergedDictionaries>
+      <!-- #81: the one scheme set the grid dropdown offers - exactly what ProxyPolicy accepts. -->
+      <x:Array x:Key="ProxySchemes" Type="{x:Type sys:String}">
+        <sys:String>http</sys:String>
+        <sys:String>https</sys:String>
+      </x:Array>
     </ResourceDictionary>
   </UserControl.Resources>
 
@@ -21,6 +27,9 @@
     is live since #76 and is strictly read-only. Status starts collapsed: the item manager shows it
     only after the workspace item's SecurityActions Manage (edit-rights) check passes for the
     current MC user.
+    #81 took the Proxy tab live: the whole proxy section (routing toggle, the structured allowlist
+    grid, the wildcard warning, the fetch harness) now lives there - the Settings tab keeps no
+    proxy controls. Diagnostics stays a placeholder until #84.
     Tab x:Names are UIA AutomationIds - the ux probes and later tickets select tabs by them.
   -->
   <TabControl x:Name="workspaceTabs" Background="White"
@@ -107,21 +116,131 @@
           <CheckBox x:Name="chkEnableDevTools" Content="Enable developer tools (F12)"
                     Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
 
-          <!-- Ticket #52: server-side proxy toggle + target allowlist. Routing itself ships in #54; -->
-          <!-- here the setting only travels to the view item properties. #74 keeps these on Settings -->
-          <!-- verbatim; #81's structured grid moves the allowlist onto the Proxy tab. -->
-          <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Proxy" />
+        </StackPanel>
+      </ScrollViewer>
+    </TabItem>
+
+    <TabItem x:Name="tabProxy" Header="Proxy">
+      <!--
+        Ticket #81: the proxy section lives here in full - the routing toggle, the structured
+        allowlist grid that replaces the free-text one-line-per-entry box, the full-host-wildcard
+        warning banner, and the #53 fetch harness the admin uses to prove a gate decision. Every
+        entry is a row: scheme dropdown, wildcard-aware host, optional port, accept-untrusted
+        checkbox (the old free-text "accept-untrusted" token is gone from the UI), plus an inline
+        Problem cell so a refused entry is flagged on its row and its save refused by name -
+        never silently dropped. Entries load from either stored shape (#73) and save structured.
+      -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="760" Margin="20,16,20,24">
+          <TextBlock x:Name="txtProxyTabHeading" Style="{StaticResource SectionHeaderStyle}" Margin="0,0,0,6" Text="Proxy" />
           <CheckBox x:Name="chkProxyEnabled" Content="Route web traffic through the VMS server proxy"
                     Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
-          <TextBlock x:Name="lblProxyTargets" Style="{StaticResource FieldLabelStyle}" Text="Proxy targets:" Margin="0,6,0,2" />
-          <TextBox x:Name="txtProxyTargets" Style="{StaticResource FormTextBoxStyle}"
-                     AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="56"
-                     VerticalScrollBarVisibility="Auto" MaxLength="4096" TextChanged="OnProxyTargetsTextChanged" />
+
+          <TextBlock x:Name="lblProxyTargets" Style="{StaticResource FieldLabelStyle}" Text="Proxy targets:" Margin="0,10,0,2" />
+
+          <Border x:Name="proxyWildcardWarning" Style="{StaticResource WarningBannerStyle}" Visibility="Collapsed">
+            <TextBlock x:Name="txtProxyWildcardWarning" Style="{StaticResource WarningBannerTextStyle}" TextWrapping="Wrap" />
+          </Border>
+
+          <!--
+            Every cell is a live editor (template columns, no grid edit mode) so the row's Problem
+            cell always shows why a half-typed entry is refused. Virtualization is off: the list is
+            a handful of rows, and a probe (or a admin) must see every row realized.
+          -->
+          <DataGrid x:Name="dgProxyTargets" AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="72" MaxHeight="260" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="Scheme" Width="100">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!--
+                      UpdateSourceTrigger=PropertyChanged is load-bearing here, not decoration: a
+                      DataGrid defers the source update of any cell-content binding that does not
+                      ask for it (learned live on #81 - picking http in this dropdown changed the
+                      row's display and silently stored https; the accept-untrusted checkbox fell
+                      into the same trap one run later). The grid's whole design is "every cell is
+                      a live editor", so every writeable cell binding says PropertyChanged.
+                    -->
+                    <ComboBox x:Name="cmbProxyRowScheme" AutomationProperties.AutomationId="proxyRowScheme"
+                              ItemsSource="{StaticResource ProxySchemes}"
+                              SelectedItem="{Binding Scheme, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Host" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyRowHost" AutomationProperties.AutomationId="proxyRowHost"
+                             Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="253" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Port" Width="70">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyRowPort" AutomationProperties.AutomationId="proxyRowPort"
+                             Text="{Binding PortText, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="5" TextAlignment="Right" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Accept untrusted" Width="110">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox x:Name="chkProxyRowUntrusted" AutomationProperties.AutomationId="proxyRowUntrusted"
+                              IsChecked="{Binding AcceptUntrusted, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="170">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyRowProblem" AutomationProperties.AutomationId="proxyRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyRowRemove" AutomationProperties.AutomationId="proxyRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyRowRemove" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <Button x:Name="btnProxyTargetAdd" Content="Add target" Padding="10,4" Click="OnProxyTargetAdd" />
+            <TextBlock x:Name="lblProxyRowCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
           <TextBlock x:Name="lblProxyTargetsHint" Style="{StaticResource SecondaryTextStyle}"
-                     TextWrapping="Wrap" Margin="0,2,0,0" />
+                     TextWrapping="Wrap" Margin="0,4,0,0" />
 
           <!-- Ticket #53 demo harness: Management Client-driven proxy fetch across MIP messaging. -->
-          <TextBlock x:Name="lblProxyTestUrl" Style="{StaticResource FieldLabelStyle}" Text="Test proxy fetch:" Margin="0,10,0,2" />
+          <TextBlock x:Name="lblProxyTestUrl" Style="{StaticResource FieldLabelStyle}" Text="Test proxy fetch:" Margin="0,14,0,2" />
           <StackPanel Orientation="Horizontal">
             <TextBox x:Name="txtProxyTestUrl" Style="{StaticResource FormTextBoxStyle}" Width="470"
                      VerticalAlignment="Center" MaxLength="2048" />
@@ -132,17 +251,6 @@
                      TextWrapping="Wrap" Margin="0,2,0,0" />
           <TextBlock x:Name="lblProxyTestResult" Style="{StaticResource SecondaryTextStyle}"
                      TextWrapping="Wrap" Margin="0,4,0,0" FontWeight="Bold" Visibility="Collapsed" />
-
-        </StackPanel>
-      </ScrollViewer>
-    </TabItem>
-
-    <TabItem x:Name="tabProxy" Header="Proxy">
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel MaxWidth="760" Margin="20,16,20,24">
-          <TextBlock x:Name="txtProxyTabHeading" Style="{StaticResource SectionHeaderStyle}" Margin="0,0,0,6" Text="Proxy" />
-          <TextBlock x:Name="txtProxyTabPlaceholder" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap"
-                     Text="The structured proxy allowlist grid (#81), the per-workspace response size cap (#85), the request header policy (#86) and the rule triggers (#78/#79) land on this tab. Until they ship, proxy routing and the target allowlist stay on the Settings tab." />
         </StackPanel>
       </ScrollViewer>
     </TabItem>

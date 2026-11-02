@@ -238,10 +238,43 @@
     <value>Proxy targets</value>
   </data>
   <data name="ProxyTargetsHint" xml:space="preserve">
-    <value>One target per line, for example https://10.0.0.5:8443. Only allowlisted targets can be reached through the proxy. Append accept-untrusted to a target's line to accept that device's untrusted TLS certificate; without it, certificates are validated normally.</value>
+    <value>One row per allowlisted target: pick the scheme, enter the host, and add a port only when the target is not on the scheme default. Wildcards: *.foo.bar.com allows that domain's subdomains (never the apex itself), and a lone * allows any host of that scheme except literal IP addresses, localhost and this VMS's own hosts - list those explicitly. Only allowlisted targets can be reached through the proxy.</value>
+  </data>
+  <data name="ProxyAddTargetButton" xml:space="preserve">
+    <value>Add target</value>
+  </data>
+  <data name="ProxyColumnScheme" xml:space="preserve">
+    <value>Scheme</value>
+  </data>
+  <data name="ProxyColumnHost" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="ProxyColumnPort" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="ProxyColumnAcceptUntrusted" xml:space="preserve">
+    <value>Accept untrusted</value>
+  </data>
+  <data name="ProxyColumnProblem" xml:space="preserve">
+    <value>Problem</value>
+  </data>
+  <data name="ProxyRowCounterFormat" xml:space="preserve">
+    <value>{0} row(s) in the allowlist</value>
+  </data>
+  <data name="ProxyWildcardWarning" xml:space="preserve">
+    <value>The allowlist contains the full-host wildcard (*): the Event Server will fetch ANY host on that scheme - every host except literal IP addresses, localhost and this VMS's own hosts. Use *.domain.com to bound a wildcard to one domain.</value>
+  </data>
+  <data name="ProxyRowErrorHostRequired" xml:space="preserve">
+    <value>A host or wildcard pattern is required.</value>
+  </data>
+  <data name="ProxyRowErrorPortInvalid" xml:space="preserve">
+    <value>Port must be a number between 0 and 65535; leave it empty for the scheme default.</value>
+  </data>
+  <data name="ProxyRowErrorHostInvalid" xml:space="preserve">
+    <value>'{0}' is not a valid host or wildcard pattern.</value>
   </data>
   <data name="InvalidProxyTargetMessage" xml:space="preserve">
-    <value>"{0}" is not a valid proxy target. Enter a target with scheme, host and port, for example https://10.0.0.5:8443.</value>
+    <value>{0} is not a valid proxy target. Fix the highlighted row or remove it before saving.</value>
   </data>
   <data name="MissingProxyTargetsMessage" xml:space="preserve">
     <value>The proxy is enabled but no target is allowlisted. Add at least one proxy target or disable the proxy.</value>

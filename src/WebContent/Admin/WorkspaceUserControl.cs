@@ -120,10 +120,15 @@ namespace WebContent.Admin
             set => _page.ProxyEnabled = value;
         }
 
-        public string ProxyTargetsText
+        /// <summary>
+        /// #81: forwards the structured allowlist grid's row surface to the item manager. The
+        /// free-text ProxyTargetsText property left with the txtProxyTargets box it served.
+        /// </summary>
+        internal System.Collections.Generic.IReadOnlyList<ProxyTargetEditorRow> ProxyTargetRows => _page.ProxyTargetRows;
+
+        internal int LoadProxyTargets(System.Collections.Generic.IEnumerable<ProxyTargetConfiguration> stored)
         {
-            get => _page.ProxyTargetsText;
-            set => _page.ProxyTargetsText = value;
+            return _page.LoadProxyTargets(stored);
         }
 
         internal void ClearUserControl()

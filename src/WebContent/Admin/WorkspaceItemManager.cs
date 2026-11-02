@@ -150,7 +150,14 @@ namespace WebContent.Admin
                     _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
                     _userControl.EnableDevTools = settings.EnableDevTools;
                     _userControl.ProxyEnabled = settings.ProxyEnabled;
-                    _userControl.ProxyTargetsText = DescribeProxyTargets(settings.ProxyTargets);
+                    // #81: the structured grid renders stored entries from either shape (legacy
+                    // host, structured pattern) forever; records too corrupt to render are
+                    // dropped here exactly as the old text-box fill dropped them - with a log line.
+                    var droppedStoredTargets = _userControl.LoadProxyTargets(settings.ProxyTargets);
+                    if (droppedStoredTargets > 0)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredTargets} stored proxy target record(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
+                    }
                     _userControl.FillContent();
                     if (configError != WorkspaceConfigError.None)
                     {
@@ -177,7 +184,7 @@ namespace WebContent.Admin
             _userControl.IsolateBrowserInstances = WebContentConfiguration.GetBoolean(properties, false, "IsolateBrowserInstances");
             _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
             _userControl.ProxyEnabled = false;
-            _userControl.ProxyTargetsText = string.Empty;
+            _userControl.LoadProxyTargets(null);
             _userControl.FillContent();
 
             if (configError != WorkspaceConfigError.None)
@@ -261,10 +268,33 @@ namespace WebContent.Admin
             var hideAddress = !hideToolbar && (_userControl?.HideAddress ?? false);
 
             var proxyEnabled = _userControl?.ProxyEnabled ?? false;
-            if (!TryBuildProxyTargets(CurrentItem.Name, CurrentItem.FQID, _userControl?.ProxyTargetsText, proxyEnabled, out var proxyTargets))
+            // #81: the save reads the structured grid rows, not free text. An invalid row
+            // refuses the save by name (the grid already highlights it); duplicates collapse
+            // onto one canonical record with any flagged duplicate flagging the entry; and an
+            // enabled proxy with no targets at all stays refused, exactly as the old text-box
+            // path had it. A disabled proxy keeps its targets parsed and stored anyway -
+            // turning the proxy off must not erase the allowlist (MC-9 in the verification matrix).
+            if (!ProxyAllowlistEditor.TryBuildStoredTargets(
+                    _userControl?.ProxyTargetRows ?? new List<ProxyTargetEditorRow>(),
+                    out var proxyTargets,
+                    out var rejectedTargetRows))
             {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy target row(s): {string.Join(" | ", rejectedTargetRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, string.Join("; ", rejectedTargetRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
+
+            if (proxyEnabled && proxyTargets.Count == 0)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): proxy enabled but no target allowlisted.");
+                MessageBox.Show(Strings.MissingProxyTargetsMessage, Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            // What the grid actually stored, in the admin's own entry shape. The MC MIP.log is the
+            // storage-side view of the allowlist editor that does not depend on how the WPF grid
+            // surfaces through accessibility, so it is what the #81 probe compares against.
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Stored proxy targets for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): routing {(proxyEnabled ? "on" : "off")}; {ProxyAllowlistEditor.DescribeStoredTargets(proxyTargets)}.");
 
             SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
             SetOrRemoveProperty(CurrentItem, "HomeAddress", homeAddress);
@@ -315,107 +345,6 @@ namespace WebContent.Admin
             {
                 item.Properties[key] = value;
             }
-        }
-
-        /// <summary>
-        /// Ticket #52: parses the admin's one-origin-per-line proxy targets into canonical
-        /// records. Since #56 a line may carry the accept-untrusted-certificate flag token,
-        /// stored on the entry itself. Since #73 a line's host may be a wildcard pattern
-        /// ("*.tail" or the lone "*"), and saved records carry the structured <c>pattern</c>
-        /// member instead of the legacy <c>host</c>. An invalid line rejects the save whatever
-        /// the proxy toggle state (same posture as the home address), duplicates and other
-        /// overlapping entries collapse onto one record (any flagged duplicate flags the entry),
-        /// and an enabled proxy with no targets at all is rejected so the toggle can never mean
-        /// "allow nothing" by accident. A disabled proxy keeps the targets parsed and stored
-        /// anyway - turning the proxy off must not erase the allowlist the next admin will need
-        /// (MC-9 in the verification matrix).
-        /// </summary>
-        private static bool TryBuildProxyTargets(string itemName, FQID itemFqid, string targetsText, bool proxyEnabled, out List<ProxyTargetConfiguration> targets)
-        {
-            targets = new List<ProxyTargetConfiguration>();
-            var canonicalEntries = new List<string>();
-            var seenEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var untrustedEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var rawLine in (targetsText ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                var line = rawLine.Trim();
-                if (line.Length == 0)
-                {
-                    continue;
-                }
-
-                if (!ProxyPolicy.TryParseTargetEntry(line, out var entry, out var acceptUntrusted))
-                {
-                    EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): invalid proxy target '{line}'.");
-                    MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, line), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return false;
-                }
-
-                if (seenEntries.Add(entry))
-                {
-                    canonicalEntries.Add(entry);
-                }
-
-                if (acceptUntrusted)
-                {
-                    untrustedEntries.Add(entry);
-                }
-            }
-
-            foreach (var entry in canonicalEntries)
-            {
-                // #73: the split is the shared canonical-entry parser, and the record it writes
-                // is the new structured shape - scheme + pattern + port, no legacy host member.
-                if (!ProxyPolicy.TrySplitCanonicalEntry(entry, out var scheme, out var pattern, out var port))
-                {
-                    EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): canonical proxy target '{entry}' failed to re-split.");
-                    MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, entry), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return false;
-                }
-
-                targets.Add(new ProxyTargetConfiguration
-                {
-                    Scheme = scheme,
-                    Pattern = pattern,
-                    Port = port,
-                    AcceptUntrusted = untrustedEntries.Contains(entry),
-                });
-            }
-
-            if (proxyEnabled && targets.Count == 0)
-            {
-                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{itemName}' (FQID: {itemFqid}): proxy enabled but no target allowlisted.");
-                MessageBox.Show(Strings.MissingProxyTargetsMessage, Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Renders stored proxy target records back as canonical one-per-line text for the admin
-        /// page; invalid stored records are dropped rather than shown. #73: both stored shapes
-        /// (legacy host, new pattern) render through the same canonical path, so an old
-        /// workspace re-opens with its entries intact and wildcard entries read back verbatim.
-        /// </summary>
-        private static string DescribeProxyTargets(List<ProxyTargetConfiguration> targets)
-        {
-            if (targets == null || targets.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            var lines = new List<string>();
-            foreach (var target in targets)
-            {
-                if (target != null && ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.EffectivePattern, target.Port, out var entry))
-                {
-                    lines.Add(ProxyPolicy.DescribeTargetEntry(entry, target.AcceptUntrusted));
-                }
-            }
-
-            return string.Join(Environment.NewLine, lines);
         }
 
         public override Item CreateItem(Item parentItem, FQID suggestedFQID)

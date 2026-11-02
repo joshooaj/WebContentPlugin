@@ -412,7 +412,7 @@ namespace WebContent {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to One target per line, for example https://10.0.0.5:8443. Only allowlisted targets can be reached through the proxy..
+        ///   Looks up a localized string similar to One row per allowlisted target: pick the scheme, enter the host, and add a port only when the target is not on the scheme default. Wildcards: *.foo.bar.com allows that domain&apos;s subdomains (never the apex itself), and a lone * allows any host of that scheme except literal IP addresses, localhost and this VMS&apos;s own hosts - list those explicitly. Only allowlisted targets can be reached through the proxy..
         /// </summary>
         internal static string ProxyTargetsHint {
             get {
@@ -421,7 +421,106 @@ namespace WebContent {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to "{0}" is not a valid proxy target. Enter a target with scheme, host and port, for example https://10.0.0.5:8443..
+        ///   Looks up a localized string similar to Add target.
+        /// </summary>
+        internal static string ProxyAddTargetButton {
+            get {
+                return ResourceManager.GetString("ProxyAddTargetButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Scheme.
+        /// </summary>
+        internal static string ProxyColumnScheme {
+            get {
+                return ResourceManager.GetString("ProxyColumnScheme", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Host.
+        /// </summary>
+        internal static string ProxyColumnHost {
+            get {
+                return ResourceManager.GetString("ProxyColumnHost", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Port.
+        /// </summary>
+        internal static string ProxyColumnPort {
+            get {
+                return ResourceManager.GetString("ProxyColumnPort", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Accept untrusted.
+        /// </summary>
+        internal static string ProxyColumnAcceptUntrusted {
+            get {
+                return ResourceManager.GetString("ProxyColumnAcceptUntrusted", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Problem.
+        /// </summary>
+        internal static string ProxyColumnProblem {
+            get {
+                return ResourceManager.GetString("ProxyColumnProblem", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} row(s) in the allowlist.
+        /// </summary>
+        internal static string ProxyRowCounterFormat {
+            get {
+                return ResourceManager.GetString("ProxyRowCounterFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The allowlist contains the full-host wildcard (*): the Event Server will fetch ANY host on that scheme - every host except literal IP addresses, localhost and this VMS&apos;s own hosts. Use *.domain.com to bound a wildcard to one domain..
+        /// </summary>
+        internal static string ProxyWildcardWarning {
+            get {
+                return ResourceManager.GetString("ProxyWildcardWarning", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A host or wildcard pattern is required..
+        /// </summary>
+        internal static string ProxyRowErrorHostRequired {
+            get {
+                return ResourceManager.GetString("ProxyRowErrorHostRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Port must be a number between 0 and 65535; leave it empty for the scheme default..
+        /// </summary>
+        internal static string ProxyRowErrorPortInvalid {
+            get {
+                return ResourceManager.GetString("ProxyRowErrorPortInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid host or wildcard pattern..
+        /// </summary>
+        internal static string ProxyRowErrorHostInvalid {
+            get {
+                return ResourceManager.GetString("ProxyRowErrorHostInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} is not a valid proxy target. Fix the highlighted row or remove it before saving..
         /// </summary>
         internal static string InvalidProxyTargetMessage {
             get {

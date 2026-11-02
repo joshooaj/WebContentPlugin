@@ -35,6 +35,12 @@ namespace WebContent.Admin
         private readonly ProxyStatusRateTracker _statusRates = new ProxyStatusRateTracker();
         private readonly DispatcherTimer _statusPoll;
 
+        // #81: the row collection behind the Proxy tab's structured allowlist grid. _loading
+        // suppresses the dirty chain while the item manager fills rows from a stored definition -
+        // a fill is not a user edit.
+        private readonly ProxyAllowlistEditor _allowlist = new ProxyAllowlistEditor();
+        private bool _loadingProxyTargets;
+
         internal event EventHandler ConfigurationChanged;
 
         public WorkspaceConfigPage()
@@ -55,6 +61,27 @@ namespace WebContent.Admin
             lblProxyTargetsHint.Text = Strings.ProxyTargetsHint;
             lblProxyTestUrl.Text = Strings.ProxyTestFetchLabel + ":";
             lblProxyTestHint.Text = Strings.ProxyTestFetchHint;
+            btnProxyTargetAdd.Content = Strings.ProxyAddTargetButton;
+            txtProxyWildcardWarning.Text = Strings.ProxyWildcardWarning;
+
+            // #81: the structured allowlist grid. Headers come from Strings like every other
+            // label; the column ORDER is pinned by WorkspaceTabShellGuardTests, which also keeps
+            // the indexer assignments here honest.
+            dgProxyTargets.ItemsSource = _allowlist.Rows;
+            if (dgProxyTargets.Columns.Count >= 5)
+            {
+                dgProxyTargets.Columns[0].Header = Strings.ProxyColumnScheme;
+                dgProxyTargets.Columns[1].Header = Strings.ProxyColumnHost;
+                dgProxyTargets.Columns[2].Header = Strings.ProxyColumnPort;
+                dgProxyTargets.Columns[3].Header = Strings.ProxyColumnAcceptUntrusted;
+                dgProxyTargets.Columns[4].Header = Strings.ProxyColumnProblem;
+            }
+
+            // Every row edit re-keys the warning banner, the row counter, and the row's localized
+            // Problem text, and marks the pane dirty; rows entering/leaving the collection ride
+            // the same handler via subscription bookkeeping.
+            _allowlist.Rows.CollectionChanged += OnProxyRowsCollectionChanged;
+            UpdateProxyRowCounter();
 
             // #76: the pull loop exists only while the Status tab is the one being looked at. No
             // push channel, no persistence, and no timer running for a page nobody is reading.
@@ -160,13 +187,39 @@ namespace WebContent.Admin
         }
 
         /// <summary>
-        /// The allowlisted proxy targets, one origin per line as the admin types them
-        /// (ticket #52). The item manager validates and canonicalizes the lines on save.
+        /// #81: the rows behind the structured allowlist grid. The item manager fills them from
+        /// the stored definition (either #73 shape) and reads them back on Save; the free-text
+        /// one-line-per-entry property is gone with the text box it served.
         /// </summary>
-        public string ProxyTargetsText
+        // internal, not public: the row/record types are assembly-internal (they cross only to
+        // WorkspaceUserControl and WorkspaceItemManager, and the unit tests compile them in by link).
+        internal System.Collections.Generic.IReadOnlyList<ProxyTargetEditorRow> ProxyTargetRows => _allowlist.Rows;
+
+        /// <summary>
+        /// #81: fills the grid from stored proxy target records (legacy <c>host</c> and structured
+        /// <c>pattern</c> shapes both render, forever). Returns how many stored records could not
+        /// be rendered so the item manager can log them; the fill never marks the pane dirty.
+        /// </summary>
+        internal int LoadProxyTargets(System.Collections.Generic.IEnumerable<ProxyTargetConfiguration> stored)
         {
-            get => txtProxyTargets.Text;
-            set => txtProxyTargets.Text = value ?? string.Empty;
+            _loadingProxyTargets = true;
+            int dropped;
+            try
+            {
+                dropped = _allowlist.Load(stored);
+                foreach (var row in _allowlist.Rows)
+                {
+                    SyncProxyRowErrorText(row);
+                }
+            }
+            finally
+            {
+                _loadingProxyTargets = false;
+            }
+
+            UpdateProxyWildcardWarning();
+            UpdateProxyRowCounter();
+            return dropped;
         }
 
         public void ClearUserControl()
@@ -184,7 +237,17 @@ namespace WebContent.Admin
             chkIsolateBrowserInstances.IsChecked = false;
             chkEnableDevTools.IsChecked = false;
             chkProxyEnabled.IsChecked = false;
-            txtProxyTargets.Text = string.Empty;
+            _loadingProxyTargets = true;
+            try
+            {
+                _allowlist.Clear();
+            }
+            finally
+            {
+                _loadingProxyTargets = false;
+            }
+            proxyWildcardWarning.Visibility = Visibility.Collapsed;
+            UpdateProxyRowCounter();
             txtProxyTestUrl.Text = string.Empty;
             lblProxyTestResult.Text = string.Empty;
             lblProxyTestResult.Visibility = Visibility.Collapsed;
@@ -463,9 +526,112 @@ namespace WebContent.Admin
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        private void OnProxyTargetsTextChanged(object sender, TextChangedEventArgs e)
+        // ---- #81: structured allowlist grid wiring --------------------------------------
+
+        private void OnProxyRowsCollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         {
-            ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            if (e.OldItems != null)
+            {
+                foreach (ProxyTargetEditorRow row in e.OldItems)
+                {
+                    row.PropertyChanged -= OnProxyRowPropertyChanged;
+                }
+            }
+
+            if (e.NewItems != null)
+            {
+                foreach (ProxyTargetEditorRow row in e.NewItems)
+                {
+                    SyncProxyRowErrorText(row);
+                    row.PropertyChanged += OnProxyRowPropertyChanged;
+                }
+            }
+
+            UpdateProxyWildcardWarning();
+            UpdateProxyRowCounter();
+            if (!_loadingProxyTargets)
+            {
+                ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private void OnProxyRowPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(ProxyTargetEditorRow.ErrorCode))
+            {
+                SyncProxyRowErrorText((ProxyTargetEditorRow)sender);
+            }
+
+            UpdateProxyWildcardWarning();
+            if (!_loadingProxyTargets)
+            {
+                ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private void OnProxyTargetAdd(object sender, RoutedEventArgs e)
+        {
+            _allowlist.AddBlankRow();
+        }
+
+        private void OnProxyRowRemove(object sender, RoutedEventArgs e)
+        {
+            var row = (sender as FrameworkElement)?.DataContext as ProxyTargetEditorRow;
+            if (row != null)
+            {
+                _allowlist.Remove(row);
+            }
+        }
+
+        /// <summary>
+        /// The row model carries a machine-readable error code; the Problem cell shows the
+        /// localized sentence for it. Kept on the row (not a converter) so the grid XAML stays
+        /// BAML-trivial - the #76 tri-state lesson: anything exotic in this page's XAML takes
+        /// the WHOLE config page down at load time.
+        /// </summary>
+        private void SyncProxyRowErrorText(ProxyTargetEditorRow row)
+        {
+            switch (row.ErrorCode)
+            {
+                case ProxyTargetRowError.HostRequired:
+                    row.ErrorText = Strings.ProxyRowErrorHostRequired;
+                    break;
+                case ProxyTargetRowError.PortInvalid:
+                    row.ErrorText = Strings.ProxyRowErrorPortInvalid;
+                    break;
+                case ProxyTargetRowError.HostOrPatternInvalid:
+                    row.ErrorText = string.Format(
+                        CultureInfo.InvariantCulture,
+                        Strings.ProxyRowErrorHostInvalid,
+                        (row.Host ?? string.Empty).Trim());
+                    break;
+                default:
+                    row.ErrorText = string.Empty;
+                    break;
+            }
+        }
+
+        private void UpdateProxyWildcardWarning()
+        {
+            if (proxyWildcardWarning == null)
+            {
+                return;
+            }
+
+            proxyWildcardWarning.Visibility = _allowlist.HasFullHostWildcard ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void UpdateProxyRowCounter()
+        {
+            if (lblProxyRowCounter == null)
+            {
+                return;
+            }
+
+            lblProxyRowCounter.Text = string.Format(
+                CultureInfo.InvariantCulture,
+                Strings.ProxyRowCounterFormat,
+                _allowlist.Count);
         }
 
         /// <summary>
