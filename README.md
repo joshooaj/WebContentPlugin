@@ -65,8 +65,8 @@ WebView2 Runtime if necessary, and place the plugin files in `C:\Program Files\V
 
 ### HTTPS targets: deployment certificate authority (one-time setup)
 
-A workspace proxy allowlist may include `https://` targets (optionally flagged
-`accept-untrusted` to tolerate a device's self-signed certificate — the flag is per target, never global).
+A workspace proxy allowlist may include `https://` targets (tick **Accept untrusted** on the row
+to tolerate a device's self-signed certificate — the flag is per target, never global).
 To make those pages render without browser certificate errors, the plugin uses one long-lived certificate
 authority per deployment (see `docs/adr/0003-event-server-mints-loopback-leaf-certs.md`):
 
@@ -146,12 +146,16 @@ back to a direct connection.
 On the workspace's details page in the **Management Client** under
 **Cascadia Technology > Web Content Workspaces**:
 
-1. Tick **Route web traffic through the VMS server proxy** in the **Proxy** section.
-2. List the allowed origins, one per line, in **Proxy targets:** — for example
-   `http://10.0.0.5:8080` or `https://cam1.example.com:8443 accept-untrusted` (the
+1. Open the workspace's **Proxy** tab and tick **Route web traffic through the VMS server proxy**.
+2. Fill the **Proxy targets** grid — one row per allowed origin: pick the **scheme**, enter the
+   **host** (a wildcard may be `*.foo.example.com`, which covers that domain's subdomains but never
+   the apex, or a lone `*`), and add a **port** only when the target is not on the scheme default.
+   Tick **Accept untrusted** on the row whose device serves a self-signed certificate (the
    untrusted-certificate override is per target, never global; see the certificate authority
-   section above before using `https://` targets).
-3. Save. Invalid target lines are refused at save time. A proxied workspace with no valid targets
+   section above before using `https://` targets). **Add target** and the per-row **Remove** button
+   change the row count; a lone `*` row raises a warning banner while it is in the grid.
+3. Save. A row the matcher rejects is flagged in its **Problem** column and the whole save is
+   refused by name — nothing is silently dropped. A proxied workspace with no valid targets
    stays proxied and refuses everything — the allowlist is never bypassed by direct access.
 
 The toggle takes effect when the workspace tab is (re)opened in Smart Client; the Smart Client

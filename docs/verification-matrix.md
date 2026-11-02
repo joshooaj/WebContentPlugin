@@ -45,6 +45,7 @@ is not evidence the plugin never ran.
 | MC workspace config tab shell (Settings \| Proxy \| Diagnostics \| Status; Status behind the SecurityActions edit-rights gate) | #74 | `WorkspaceTabShellGuardTests` (the XAML declares exactly the four tabs in shell order with stable AutomationIds; Status defaults `Collapsed` so the gate fails closed before any fill; EVERY pre-existing settings/proxy control still lives on the Settings tab under the same AutomationId the ux probes read; placeholder tabs contain zero write-capable input and carry a probe-assertable placeholder marker), `WorkspaceTabPolicy` decision table (Status renders only on an explicit `Granted` — `Denied`/`LookupFailed` hide the whole tab) | See MC-11 below - **admin half live row PASSED 2026-11-02** (run `20261102-012719`): four tabs render on the live MC with Status granted to the admin, walking the placeholder tabs never enables Save, and the Settings fields read back identically; the View-only denial half stays manual |
 | Proxy diagnostics substrate (block reports, session lifecycle, Event Server aggregation, status query) | #69 | `ProxyDiagnosticsAggregatorTests` (blocked ring dedup + accumulating counts + recency eviction at the 200-origin cap, new-entry-only transition signal; session open/heartbeat/close and the idle sweep; fetch/tunnel traffic counters and req/min; workspaces stay isolated), `ProxySessionRegistryTests` (client-side per-view registry: open/close, heartbeat payloads, bounded), `ProxyBlockReporterTests` (report carries the workspace identity + canonical origin; blank or workspace-less reports drop; a throwing send seam never reaches the browser flow), `ProxyDiagnosticsWireTests` (every diagnostics payload round-trips as one JSON string; an unset session is an explicit null member; a frame shaped by another build is refused, never half-bound), `ProxyForwardConnectionTests` (each client-visible refusal reaches the reporter — local 403, tunnel-open fault, dead fetch channel — while an ES-answered refusal is never re-reported, so counts do not double), `ProxyFetchContractGuardTests` (four new payloads stay plugin-namespace `[Serializable]` public-field types inside the whitelist; the new ids declared in `PluginDefinedMessageIds`) | See ES-2 below - **load half observed live 2026-11-02**: the restarted Event Server logs `Proxy fetcher ready (..., diagnostics=WebContent.Proxy.BlockReport/WebContent.Proxy.SessionEvent/WebContent.Proxy.StatusRequest)` on a drop hash-identical to the Smart Client machine's. The ingress markers (session open, block recorded) need a proxied Smart Client session, which only an interactive desktop can drive |
 | MC Status tab: live proxy sessions (polling tied to the open tab, read-only, role-gated by the #74 grant) | #76 | `ProxyStatusViewTests` (failure postures: a lost query is never rendered as an empty table, the Event Server's own code survives, a blank code falls back to `ServerUnavailable`; zero sessions is an honest success with no rows; rows arrive as pre-formatted display strings with `(unknown)` placeholders; rate differencing over the ES's cumulative counters needs two sightings, impossible deltas (non-later snapshot, backwards counters, unknown ids) answer zero, `Reset` drops the baseline; culture-invariant byte/rate/per-minute/duration formatting incl. NaN/Infinity/negative clamps), `WorkspaceTabShellGuardTests` (the Status tab is no longer a placeholder: exactly one `IsReadOnly` DataGrid with add/delete off, every button on the tab wired to `OnStatusRefresh`, zero configuration input controls - walking it can never dirty the pane; probe-selectable surface ids pinned) | See MC-12 below - **live row PASSED 2026-11-02** (run `20261102-074407`): opening the Status tab starts the pull loop (MIP.log markers at cadence), this machine's proxied Smart Client view renders as a session row within the cadence, leaving the tab flattens the markers, re-selecting resumes, and Save never enabled through the whole probe |
+| MC structured allowlist grid on the Proxy tab (scheme/host/port/accept-untrusted rows, inline refusal, wildcard banner) | #81 | `ProxyAllowlistEditorTests` (row validation IS the shared grammar — mid-label wildcard, `*x`, `*.`, path, inner space, port out of range, port-with-blank-host all refused while exact hosts/IPv6/`*.tail`/the lone `*` pass; blank rows are not entries; canonicalization of case and scheme-default ports; only the lone `*` is the full-host hatch; both stored shapes render forever with corrupt records dropped and counted; a legacy `host`-shape workspace opens and saves back to structured `pattern` records without losing entries or flags; invalid rows refuse the build BY NAME and never vanish; duplicate rows collapse with any flagged duplicate flagging the entry; touching the flag never changes validation), `WorkspaceTabShellGuardTests` (the Proxy tab carries the grid with the six pinned columns in order and every per-row AutomationId, the warning banner starts `Collapsed`, rows are added/removed only by explicit buttons with `CanUserAddRows`/`CanUserDeleteRows` off, the proxy section is asserted ABSENT from the Settings tab, and neither `txtProxyTargets` nor any admin-facing `accept-untrusted` token survives in the page or its strings) | See MC-14 below |
 | Proxy allowlist wildcards: ONE shared matcher for all three gates, structured entry shape, wildcard SSRF floor | #73 | `ProxyPolicyTests` (wildcard grammar: leftmost-label `*.tail` + the lone `*` hatch only - mid-label wildcards, `*x`, `*.`, bad labels, non-http schemes rejected; matching: subdomains covered, apex never, label-boundary safe, scheme/port exact, case-insensitive; SSRF floor: literal IPv4 (dotted-quad + numeric shorthand), IPv6 (bracketed/colon), `localhost`, and the VMS's own hosts are never wildcard-matched while explicit exact entries may still name them; seeded pseudo-random host/IPv4 property pins over 300+200 rounds), `ProxyAllowlistGateAgreementTests` (the same (entries, request-origin) matrix drives the Event Server fetch gate, the client forward gate, and the leaf-mint gate to identical verdicts; legacy `host` records and new `pattern` records gate identically), `ProxyServerAllowlistTests` (pattern and legacy shapes gate identically at the ES; VMS floor fed through a resolver seam and kept across resolver faults; the accept-untrusted flag rides wildcard entries under the same floor), `ProxyForwardPolicyTests` (client gate consumes the shared matcher in every posture), `ProxyWorkspaceProfileTests` (pattern entries and the floor hosts travel together through the seeded profile property), `ProxyConfigurationTests` (the stored entry gains `pattern`; readers accept BOTH shapes forever, no migration write-back - a read never rewrites the stored shape), `WorkspaceTabShellGuardTests` (boolean-attribute pins learned the hard way in the MC-13 live walk) | See MC-13 below - **live rows PASSED 2026-11-02** (run `20261102-073648`): wildcard/hatch lines save and read back verbatim through the live Management Client (structured `pattern` shape round-trip); `http://*.neverssl.com` admits `http://online.neverssl.com/` (a `HTTP 200 - 3961 bytes` banking in run `20261102-071520`) while the apex refuses `NotAllowed` in 0.0s; the `http://*` hatch admits the apex (200 in run `20261102-073010`) yet the literal IP and the VMS's own host both refuse `NotAllowed` in 0.0s - refused before any socket opens; allowlist restored to its four production lines with verified readback |
 
 ## Manual host checks
@@ -105,10 +106,10 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
 
 ### MC-9 Proxy config roundtrip and refusal (#52)
 
-1. In Management Client, enable "Route web traffic through the VMS server proxy" on a workspace and add one target line (e.g. `https://10.0.0.5:8443`); Save.
+1. In Management Client, open the workspace's **Proxy** tab (#81), enable "Route web traffic through the VMS server proxy" and add one target row (scheme `https`, host `10.0.0.5`, port `8443`); Save.
 2. In Smart Client, open the workspace tab's properties page. Expected: the Proxy section reports the enabled state and lists the allowlisted target (canonical form).
-3. Toggle the proxy off, Save, and check the target list is still present in the stored definition (off-toggle preserves allowlisted targets; MC-9 pin for the wipe bug found in review).
-4. With the proxy enabled, enter an invalid target line (`ftp://x`, `not a url`) and Save: refused with a message naming the line; MC log marker: `Rejected save for workspace '<name>' (FQID: ...): invalid proxy target`. Enabled with no targets at all is refused likewise (`proxy enabled but no target allowlisted`).
+3. Toggle the proxy off, Save, and check the target rows are still there (off-toggle preserves allowlisted targets; MC-9 pin for the wipe bug found in review).
+4. With the proxy enabled, type an invalid entry into a grid row (a mid-label wildcard `foo.*.bar.com`, or a valid host with port `99999`) and Save: the row is flagged inline, the save is refused with a notice naming the row(s), and the rows are not dropped; MC log marker: `Rejected save for workspace '<name>' (FQID: ...): invalid proxy target row(s): …`. Enabled with no target rows at all is refused likewise (`proxy enabled but no target allowlisted`). MC-14 drives the grid half of this live.
 
 ### ES-1 Event Server fetcher load and answer (#53)
 
@@ -193,11 +194,13 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
 
 1. Restart Management Client with the new drop. Select a Web Content workspace. Expected: the
    detail pane is a four-tab shell — **Settings | Proxy | Diagnostics | Status** — opening on
-   Settings; every former field (name, home address, display/behavior/privacy/advanced toggles,
-   proxy toggle + targets, test-fetch harness) is on Settings and behaves exactly as before
-   (MC-9/MC-10 steps still pass without any tab click).
-2. Proxy/Diagnostics tabs render their placeholder notice only (Status is live since #76 — MC-12). Click through all tabs:
-   the shell's **Save must never become enabled** (placeholder tabs hold no inputs and fire no
+   Settings; every settings field (name, home address, display/behavior/privacy/advanced toggles)
+   is on Settings and behaves exactly as before (MC-9 steps still pass without any tab click).
+   Since #81 the proxy routing toggle, the allowlist grid and the test-fetch harness live on the
+   **Proxy** tab instead — Settings must realize no proxy control at all.
+2. The Proxy tab is live since #81 (structured allowlist grid — MC-14); Diagnostics still renders
+   its placeholder notice only (Status is live since #76 — MC-12). Click through all tabs:
+   the shell's **Save must never become enabled** (selecting a tab holds no inputs and fires no
    change events); returning to Settings shows the same values as before the walk.
 3. Status-tab role gate: with a full administrator the Status tab is visible. Assign a test role
    WITHOUT 'Manage Web Content Workspace' (but with View) and log in as that user: the workspace
@@ -216,7 +219,9 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    system), Settings kept every control on the default tab (txtName 'Demo Workspace', the four
    live allowlist lines read back identically after the walk), each placeholder tab rendered its
    marker, and **Save stayed disabled through the whole tab walk**. Screenshots confirm the shell
-   visually in the MC detail pane.
+   visually in the MC detail pane. Re-run after the #81 grid migration: green run
+   `20261102-105728` on drop `F1F5D7E8…` - the Proxy-tab half of the walk now reads the
+   structured grid.
 
 ### MC-12 MC Status tab live proxy sessions (#76)
 
@@ -305,7 +310,10 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    `http://vms.joshooaj.com/` both refused `NotAllowed` 0.0s — the syntax floor and the
    EnvironmentManager floor each refusing before any socket opened. The allowlist ended restored
    to its four production lines (the run also cleaned a `http://*` left behind by a run the
-   desktop-disconnect killed mid-restore).
+   desktop-disconnect killed mid-restore). Re-walked after the #81 grid migration on the same
+   day: green run `20261102-105816` on drop `F1F5D7E8…` — every allowlist line is now typed
+   through the structured grid (there is no free-text box left to type into) and the ES gate
+   verdicts are unchanged.
 
    LIVE FINDING from this walk: the deployed #76 `dgStatusSessions` carried
    `CanUserResizeRows="Disabled"` — a WinForms tri-state string on a WPF-BOOLEAN property — so
@@ -315,6 +323,58 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    anything #73 changed. Fixed in the `fix(mc): dgStatusSessions carried tri-state…` commit; the
    shell guard now pins every WPF-boolean `CanUser*` attribute on every DataGrid of the page to
    a real bool, and the #76/#74 MC rows should be re-walked on the fixed drop.
+
+### MC-14 Structured allowlist grid on the Proxy tab (#81)
+
+1. Restart Management Client on the new drop and open a Web Content workspace item. Select the
+   **Proxy** tab: the whole proxy section lives there now — the routing toggle, the allowlist
+   **grid** (Scheme | Host | Port | Accept untrusted | Problem | Remove), the full-host-wildcard
+   warning banner (collapsed until a `*` row is in the grid), the hint line, and the #53 fetch
+   harness. The Settings tab carries no proxy control at all, and the old free-text **Proxy
+   targets** box is gone: the stored allowlist renders one entry per row, from either stored shape
+   (legacy `host` records and #73 `pattern` records both render).
+2. **Add target**, type a rejected entry (`https://foo.*.bar.com`, or a valid host with port
+   `99999`): the row highlights and its **Problem** cell says why. Press Save: the save is
+   REFUSED — a notice names the offending rows, the Management Client MIP.log gains
+   `Rejected save for workspace '<name>' (FQID: …): invalid proxy target row(s): <rows>`, the rows
+   stay in the grid flagged (never silently dropped), and re-selecting the item shows the stored
+   allowlist exactly as it was — nothing partial reached storage.
+3. Fix the rows and Save; re-select the item so the pane is rebuilt FROM THE STORED ITEM. The entry
+   reads back with its scheme, port and **Accept untrusted** ticked — the flag lives in the stored
+   record, never in a typed token. Add `http://*`: the amber warning banner comes up while that row
+   is in the grid and goes back down when the row's **Remove** button drops it. Restore the
+   workspace's own rows and verify.
+4. Automatable: `McAllowlistGridProbeTests.ProbeStructuredAllowlistGridEditsRefusesAndStores`
+   (probe category — drives all of the above through the live MC: the absent free-text box, the
+   inline Problem cells, the refusal notice text, the MIP.log marker delta keyed on the probe's own
+   bad host, the flag round-trip read only from a RELOADED pane, the banner on/off pair, and the
+   per-row Remove affordance; restores the workspace's own allowlist with verified readback);
+   artifacts `mc-grid-refused-rows.png`, `mc-grid-restored.png` +
+   `mc-allowlist-grid-probe-results.txt` under `%TEMP%\webcontent-mc-allowlist-grid-probe\<run>`.
+
+   Record (MC-14) - **live row PASSED 2026-11-02**, green run `20261102-105226` on drop
+   `F1F5D7E8…` (hash-verified against `output\WebContent`): no `txtProxyTargets` control exists in
+   the live pane and the hint teaches no typed token; both refused rows (`foo.*.bar.com`, port
+   `99999`) carried inline Problem cells (`'foo.*.bar.com' is not a valid host or wildcard
+   pattern.'`, `Port must be a number between 0 and 65535; …`), and the save was refused with the
+   notice `Invalid address: https://foo.*.bar.com; http://ok.gridprobe.invalid:99999 is not a
+   valid proxy target. Fix the highlighted row or remove it before saving.` - each row quoted in
+   exactly the shape the ROW MODEL holds, which is also the pre-save proof that the scheme
+   dropdown reached the row. The MIP.log refusal marker moved 17 -> 18 keyed on the probe's own
+   bad host; the refused rows stayed in the grid flagged; the follow-up save's audit line
+   (`Stored proxy targets for workspace 'Demo Workspace': routing on; …`) carried only the fixed
+   set, and the reloaded pane agreed. The `accept-untrusted` flag round-tripped: stored as
+   `https://gridprobe.invalid:8443 accept-untrusted`, read back ticked from the RELOADED pane and
+   stated by the audit line. `http://*` raised the warning banner (read via the banner's TextBlock
+   - the Border itself has no UIA peer), and the row's Remove button dropped both row and banner.
+   The workspace's own four lines were restored with audit-line + reloaded-pane double
+   verification. The live walk caught three defects the unit layer could not see: the scheme
+   ComboBox and the accept-untrusted CheckBox lost their edits to the DataGrid's deferred source
+   update until the bindings said `UpdateSourceTrigger=PropertyChanged` (the admin saw the picked
+   value while the row stored the old one - now pinned by a guard test over every `Mode=TwoWay`
+   binding in the grid); the storage de-dupes so probe leftovers double up (the harness now
+   treats its own host/hatch rows as not-baseline); and the wildcard banner probe must read the
+   TextBlock, not the peerless Border.
 
 ### SC-1 End-to-end proxied page load (#54)
 
