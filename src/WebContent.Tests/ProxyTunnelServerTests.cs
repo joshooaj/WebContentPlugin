@@ -26,8 +26,13 @@ namespace WebContent.Tests
     public class ProxyTunnelServerTests : IDisposable
     {
         private WsTarget _target;
+        private WsTarget _neighbour;
 
-        public void Dispose() => _target?.Dispose();
+        public void Dispose()
+        {
+            _target?.Dispose();
+            _neighbour?.Dispose();
+        }
 
         private static ProxyTunnelLimits TestLimits()
         {
@@ -132,8 +137,9 @@ namespace WebContent.Tests
 
         // #60: an https-scheme tunnel target (a wss upgrade inside a terminated TLS tunnel) gets
         // a TLS leg to the target with FULL chain validation by default. The in-process TLS ws
-        // target stands in for the vendor device; the test-only validation resolver stands in
-        // for the follow-on ticket's accept-untrusted override, never for a production bypass.
+        // target stands in for the vendor device; the hand-written validation resolver below
+        // stands in for the seam only - #61's production override is allowlist-backed and is
+        // pinned by the wired-resolver rows further down.
 
         [Fact]
         public async Task OpensTheWssTunnelOverATlsLegAndPumpsThroughIt()
@@ -250,6 +256,110 @@ namespace WebContent.Tests
             Assert.Equal(0, server.ActiveTunnels);
         }
 
+        // #61: the production resolver shape - the allowlist's per-target accept-untrusted flag
+        // wired straight into the tunnel server. These rows pin both postures end to end against
+        // the self-signed TlsWsTarget, and pin that the flag NEVER acts globally: it decides one
+        // SslStream, for one target origin, on one open.
+
+        [Fact]
+        public async Task OpensTheWssTunnelWhenTheWiredAllowlistsEntryCarriesTheOverride()
+        {
+            _target = new TlsWsTarget(upgrade: true);
+            var allowlist = AllowlistOf(
+                TargetJson("https", "127.0.0.1", _target.Port, acceptUntrusted: true));
+            var server = new ProxyTunnelServer(
+                TestLimits(), message => { }, uri => allowlist.TunnelTlsValidationCallback(uri));
+
+            var opened = await server.OpenAsync(OpenPayload("/ws/live", scheme: "https"), Capture);
+
+            Assert.True(opened.Success, opened.ErrorMessage);
+            Assert.Equal(101, opened.StatusCode);
+
+            // The flag admitted the self-signed chain on this leg; the handshake and frames ride
+            // the TLS stream exactly like the trusted posture.
+            await WaitForJournal(_target, "GET /ws/live HTTP/1.1");
+            var frame = new byte[] { 0x81, 0x05, (byte)'h', (byte)'e', (byte)'l', (byte)'l', (byte)'o' };
+            server.OnClientData(new ProxyTunnelPayload
+            {
+                CorrelationId = _tunnelId,
+                DataBase64 = Convert.ToBase64String(frame),
+            });
+
+            var echoed = await WaitForDataFrame();
+            Assert.Equal(frame, Convert.FromBase64String(echoed.DataBase64));
+        }
+
+        [Fact]
+        public async Task RefusesTheWssTunnelWhenTheWiredResolverHasNoOverrideForTheTarget()
+        {
+            // Same self-signed target, same wired resolver - but the entry carries no flag. The
+            // wiring must resolve to null (default validation) and fail with the SAME explicit
+            // named-side TLS error as the bare production posture, never a silent pass.
+            _target = new TlsWsTarget(upgrade: true);
+            var allowlist = AllowlistOf(
+                TargetJson("https", "127.0.0.1", _target.Port, acceptUntrusted: false));
+            var server = new ProxyTunnelServer(
+                TestLimits(), message => { }, uri => allowlist.TunnelTlsValidationCallback(uri));
+
+            var opened = await server.OpenAsync(OpenPayload("/ws/live", scheme: "https"), Capture);
+
+            Assert.False(opened.Success);
+            Assert.Equal(ProxyFetchErrorCodes.TlsValidation, opened.ErrorCode);
+            Assert.Contains("127.0.0.1:" + _target.Port, opened.ErrorMessage);
+            Assert.Contains("Event Server", opened.ErrorMessage);
+            Assert.Equal(0, server.ActiveTunnels);
+        }
+
+        [Fact]
+        public async Task TheWiredOverrideIsScopedToItsOwnOriginNeverAGlobalPass()
+        {
+            // Two self-signed TLS targets, only one flagged: the flag must open ONE tunnel and
+            // leave the neighbour's TLS leg at full-chain validation. A resolver that accepted
+            // globally could not survive this row.
+            _target = new TlsWsTarget(upgrade: true);
+            _neighbour = new TlsWsTarget(upgrade: true);
+            var allowlist = AllowlistOf(
+                TargetJson("https", "127.0.0.1", _target.Port, acceptUntrusted: true),
+                TargetJson("https", "127.0.0.1", _neighbour.Port, acceptUntrusted: false));
+            var server = new ProxyTunnelServer(
+                TestLimits(), message => { }, uri => allowlist.TunnelTlsValidationCallback(uri));
+
+            var flagged = await server.OpenAsync(OpenPayload("/ws/live", "flagged-tunnel", scheme: "https"), Capture);
+            Assert.True(flagged.Success, flagged.ErrorMessage);
+
+            var neighbour = await server.OpenAsync(
+                OpenPayload("/ws/live", "neighbour-tunnel", scheme: "https", port: _neighbour.Port), Capture);
+
+            Assert.False(neighbour.Success);
+            Assert.Equal(ProxyFetchErrorCodes.TlsValidation, neighbour.ErrorCode);
+            Assert.Contains("127.0.0.1:" + _neighbour.Port, neighbour.ErrorMessage);
+
+            // The neighbour target saw the TLS dial but never the upgrade replay.
+            Assert.DoesNotContain(_neighbour.JournalSnapshot(), entry => entry.Contains("GET /ws/live", StringComparison.Ordinal));
+            Assert.Equal(1, server.ActiveTunnels);
+        }
+
+        private static string TargetJson(string scheme, string host, int port, bool acceptUntrusted) =>
+            $"{{\"scheme\":\"{scheme}\",\"host\":\"{host}\",\"port\":{port},\"acceptUntrusted\":{(acceptUntrusted ? "true" : "false")}}}";
+
+        /// <summary>The ES allowlist shape fed straight to the tunnel resolver: proxied workspace
+        /// property snapshots, exactly what ProxyFetchBackgroundPlugin's resolver seam yields.</summary>
+        private static ProxyServerAllowlist AllowlistOf(params string[] targetJsonObjects)
+        {
+            var targetsJson = "[" + string.Join(",", targetJsonObjects) + "]";
+            return new ProxyServerAllowlist(
+                () => new List<Dictionary<string, string>>
+                {
+                    new Dictionary<string, string>
+                    {
+                        ["WorkspaceConfig"] =
+                            "{\"version\":1,\"layout\":\"1x1\",\"items\":[{\"type\":\"WebContent\",\"position\":0,\"settings\":" +
+                            "{\"homeAddress\":\"http://x/\",\"proxyEnabled\":true,\"proxyTargets\":" + targetsJson + "}}]}",
+                    },
+                },
+                message => { });
+        }
+
         [Fact]
         public async Task RejectsADuplicateTunnelIdOnTheEventServerGate()
         {
@@ -333,12 +443,12 @@ namespace WebContent.Tests
             return new ProxyTunnelServer(TestLimits(), message => { });
         }
 
-        private ProxyTunnelPayload OpenPayload(string path, string tunnelId = null, string scheme = "http")
+        private ProxyTunnelPayload OpenPayload(string path, string tunnelId = null, string scheme = "http", int port = 0)
         {
             return new ProxyTunnelPayload
             {
                 CorrelationId = tunnelId ?? _tunnelId,
-                Url = $"{scheme}://127.0.0.1:{_target.Port}{path}",
+                Url = $"{scheme}://127.0.0.1:{(port == 0 ? _target.Port : port)}{path}",
                 Headers = new List<ProxyFetchHeader>
                 {
                     new ProxyFetchHeader { Name = "Upgrade", Value = "websocket" },
@@ -560,8 +670,8 @@ namespace WebContent.Tests
         /// <summary>
         /// #60: the same vendor endpoint behind TLS - what an https-scheme tunnel target looks
         /// like to the Event Server dialer. The certificate is self-signed: default chain
-        /// validation MUST refuse it (fail-closed), and only the test-only validation resolver
-        /// (standing in for the follow-on ticket's per-target override) admits the pump tests.
+        /// validation MUST refuse it (fail-closed), and only the #61 accept-untrusted override -
+        /// hand-written below or allowlist-wired in the #61 rows - admits the pump tests.
         /// </summary>
         private sealed class TlsWsTarget : WsTarget
         {

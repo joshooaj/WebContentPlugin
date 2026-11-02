@@ -10,12 +10,16 @@ namespace WebContent.UxTests;
 /// loopback listener terminates the tunnel TLS (ES-minted leaf) -> in-tunnel upgrade GET is
 /// recognized as a websocket tunnel (NOT refused 501) -> MIP messaging tunnel -> Event Server
 /// dials a fresh TLS leg to the target, replays the rebuilt handshake, admits only the 101,
-/// then pumps decrypted frames both ways. The two rows pin both TLS postures on the Event
+/// then pumps decrypted frames both ways. The rows pin the TLS postures on the Event
 /// Server's leg: with the probe certificate imported into the Event Server's LocalMachine\Root
-/// store (WssTargetTrust) the round trip echoes the token; with an untrusted chain the Event
-/// Server refuses before the upgrade ever reaches the target (the target journal shows the TLS
-/// leg dialed but never the WS handshake) and the page reports a failed websocket, never an
-/// echo. The allowlist posture is scheme-exact: the entry is the https origin itself.
+/// store (WssTargetTrust) the round trip echoes the token; with an untrusted chain and no flag
+/// the Event Server refuses before the upgrade ever reaches the target (the target journal
+/// shows the TLS leg dialed but never the WS handshake) and the page reports a failed
+/// websocket, never an echo. #61 adds the third posture: the SAME untrusted origin, but the
+/// workspace allowlist entry carries the per-target accept-untrusted override - the tunnel TLS
+/// leg then admits the self-signed chain and the round trip echoes, proving the flag reaches
+/// the tunnel scoped to exactly its own origin. The allowlist posture is scheme-exact: the
+/// entry is the https origin itself.
 /// Artifacts land in webcontent-sc-proxy-probe\&lt;run&gt; (sc-wss-probe-*.png / .txt).
 /// </summary>
 public class ScProxyWssProbeTests
@@ -99,6 +103,47 @@ public class ScProxyWssProbeTests
             $"the upgrade reached the target despite the Event Server refusing its TLS chain:{Environment.NewLine}{outcome.Log}");
     }
 
+    [Fact]
+    [Trait("Category", "probe")]
+    public async Task ProbeProxiedWssAcceptUntrustedOverrideAdmitsSelfSignedTarget()
+    {
+        // #61 row: the SAME self-signed origin the fail-closed row names, certificate deliberately
+        // NOT imported anywhere - but the workspace allowlist entry now carries the per-target
+        // accept-untrusted override. The Event Server's tunnel TLS leg must take the flag (not
+        // chain trust) scoped to this origin, and the round trip echoes exactly like the trusted
+        // row. The fail-closed row above is the twin without the flag, and every row re-Ensures
+        // its own entry state, so the flag never leaks between rows. (The Event Server refreshes
+        // its allowlist union at most once per 60 s; the minutes between rows' Management Client
+        // phases comfortably exceed that window, and the page fetch itself re-triggers the
+        // refresh before the tunnel opens.)
+        var page = Environment.GetEnvironmentVariable("UX_WSS_PAGE_TARGET") ?? DefaultPageTarget;
+        var target = Environment.GetEnvironmentVariable("UX_WSS_UNTRUSTED_TARGET") ?? DefaultUntrustedWssTarget;
+
+        var outcome = await RunWssProbeAsync(
+            pageTarget: page,
+            wssTarget: target,
+            allowlistEntry: target + " accept-untrusted",
+            importProbeCertificate: false,
+            artifactPrefix: "sc-wss-probe-accept-untrusted");
+
+        Assert.True(outcome.Failure == null, $"probe run failed: {outcome.Failure}{Environment.NewLine}{outcome.Log}");
+        Assert.NotNull(outcome.Title);
+        Assert.False(titleIsProxyError(outcome.Title), $"browser showed the proxy error page instead of the wss page: '{outcome.Title}'");
+        Assert.NotNull(outcome.WsStatus);
+        Assert.True(
+            outcome.WsStatus.StartsWith("WS-OK:", StringComparison.Ordinal),
+            $"the accept-untrusted override did not admit the self-signed wss target: '{outcome.WsStatus}'{Environment.NewLine}{outcome.Log}");
+        Assert.True(
+            outcome.ServerJournal.Any(entry => entry.Contains("TLS-HANDSHAKE", StringComparison.Ordinal)),
+            $"the wss server never completed a TLS handshake with the Event Server{Environment.NewLine}{outcome.Log}");
+        Assert.True(
+            outcome.ServerJournal.Any(entry => entry.Contains("WS-HANDSHAKE", StringComparison.Ordinal)),
+            $"the wss server never recorded the upgrade handshake{Environment.NewLine}{outcome.Log}");
+        Assert.True(
+            outcome.ServerJournal.Any(entry => entry.Contains("WS-ECHO", StringComparison.Ordinal)),
+            $"the wss server never echoed a frame back through the tunnel{Environment.NewLine}{outcome.Log}");
+    }
+
     private static bool titleIsProxyError(string title) =>
         title != null && title.StartsWith("Web Content proxy:", StringComparison.OrdinalIgnoreCase);
 
@@ -115,7 +160,8 @@ public class ScProxyWssProbeTests
         string pageTarget,
         string wssTarget,
         bool importProbeCertificate,
-        string artifactPrefix)
+        string artifactPrefix,
+        string allowlistEntry = null)
     {
         var config = UxConfig.Load();
         Artifacts.Init(Path.Combine(Path.GetTempPath(), "webcontent-sc-proxy-probe"));
@@ -134,8 +180,11 @@ public class ScProxyWssProbeTests
             // Phase 1: BOTH origins must sit in the workspace allowlist before the browser asks:
             // the plain http origin for the page, the https origin itself for the wss posture
             // (an http twin alone is a 403 for the upgrade; the entry scheme IS the posture).
+            // #61: the allowlist entry may carry the accept-untrusted flag suffix while the
+            // target uri stays bare - Ensure replaces any older row for the same origin, so a
+            // previous row's flag state never leaks into this row's verdict.
             ProxyTargetProvisioning.Ensure(config, pageTarget, log);
-            ProxyTargetProvisioning.Ensure(config, wssTarget, log);
+            ProxyTargetProvisioning.Ensure(config, allowlistEntry ?? wssTarget, log);
 
             // Phase 2: serve both sites on THIS machine; the Event Server proves server-network
             // reachability by dialing the https origin for the tunnel TLS leg while the browser
@@ -155,7 +204,9 @@ public class ScProxyWssProbeTests
             }
             else
             {
-                log.AppendLine("fail-closed row: deliberately NOT importing the probe certificate (chain validation must refuse it)");
+                log.AppendLine(allowlistEntry != null && allowlistEntry.EndsWith("accept-untrusted", StringComparison.Ordinal)
+                    ? "override row: probe certificate deliberately NOT imported - only the entry's accept-untrusted flag may admit it"
+                    : "fail-closed row: deliberately NOT importing the probe certificate (chain validation must refuse it)");
             }
 
             pageServer = new WebSocketEchoServer(pageUri.Port, useTls: false, probePageHtml: BuildWssProbePage(wssTarget));

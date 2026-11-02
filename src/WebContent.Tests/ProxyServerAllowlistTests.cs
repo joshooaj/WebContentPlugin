@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Net.Security;
 using Xunit;
 
 namespace WebContent.Tests
@@ -252,6 +253,69 @@ namespace WebContent.Tests
             Assert.True(allowlist.AcceptsUntrustedCertificate(new Uri("https://a.cams.test/live")));
             Assert.False(allowlist.AcceptsUntrustedCertificate(new Uri("https://a.cams.test:9443/live")));
             Assert.False(allowlist.AcceptsUntrustedCertificate(new Uri("https://cams.test/")));
+        }
+
+        // #61: the wss tunnel leg's validation posture is decided by the SAME scoped flag lookup
+        // the fetch path uses - the callback factory just hands it to one SslStream. Null means
+        // SslStream's default full-chain validation (the #60 posture), so every unflagged posture
+        // must resolve to null, never to a rejecting-or-accepting hand-written callback.
+
+        [Fact]
+        public void TunnelTlsValidationCallbackIsNullForEveryUnflaggedPosture()
+        {
+            var allowlist = new ProxyServerAllowlist(
+                () => new List<Dictionary<string, string>>
+                {
+                    WorkspaceProperties(true,
+                        Target("https", "cam1.test", 8443),
+                        Target("https", "cam2.test", 8443, false),
+                        Target("http", "cam3.test", 80, true)),
+                },
+                Sink);
+
+            // No flag, an explicit false, and a flag on the http TWIN of a different origin:
+            // the tunnel leg keeps full chain validation for all of them.
+            Assert.Null(allowlist.TunnelTlsValidationCallback(new Uri("https://cam1.test:8443/live")));
+            Assert.Null(allowlist.TunnelTlsValidationCallback(new Uri("https://cam2.test:8443/live")));
+            Assert.Null(allowlist.TunnelTlsValidationCallback(new Uri("https://cam3.test:80/live")));
+
+            // Closed gate (config never resolved): fail closed = default validation.
+            var closed = new ProxyServerAllowlist(
+                () => throw new InvalidOperationException("Configuration service is not available."),
+                Sink);
+            Assert.Null(closed.TunnelTlsValidationCallback(new Uri("https://cam1.test:8443/live")));
+        }
+
+        [Fact]
+        public void TunnelTlsValidationCallbackAcceptsChainErrorsOnlyForTheFlaggedOrigin()
+        {
+            var allowlist = new ProxyServerAllowlist(
+                () => new List<Dictionary<string, string>>
+                {
+                    WorkspaceProperties(true,
+                        Target("https", "cam1.test", 8443, true),
+                        Target("https", "cam1.test", 9443, false),
+                        PatternTarget("https", "*.cams.test", 0, true)),
+                },
+                Sink);
+
+            var callback = allowlist.TunnelTlsValidationCallback(new Uri("https://cam1.test:8443/live"));
+            Assert.NotNull(callback);
+
+            // The #56 AcceptUntrusted posture, pinned at the callback level: an untrusted chain
+            // passes on THIS leg only - the unflagged neighbour on the same host pair gets null,
+            // so its SslStream keeps default full-chain validation.
+            Assert.True(callback(null, null, null, SslPolicyErrors.RemoteCertificateChainErrors));
+            Assert.Null(allowlist.TunnelTlsValidationCallback(new Uri("https://cam1.test:9443/live")));
+            Assert.Null(allowlist.TunnelTlsValidationCallback(new Uri("https://other.test:8443/live")));
+
+            // A flagged wildcard entry carries the flag to its subdomains under the same
+            // scheme/port exactness (#73) - and the apex, which no wildcard admits, stays default.
+            var wildcarded = allowlist.TunnelTlsValidationCallback(new Uri("https://a.cams.test/live"));
+            Assert.NotNull(wildcarded);
+            Assert.True(wildcarded(null, null, null, SslPolicyErrors.RemoteCertificateNameMismatch));
+            Assert.Null(allowlist.TunnelTlsValidationCallback(new Uri("https://cams.test/live")));
+            Assert.Null(allowlist.TunnelTlsValidationCallback(new Uri("https://a.cams.test:9443/live")));
         }
     }
 }
