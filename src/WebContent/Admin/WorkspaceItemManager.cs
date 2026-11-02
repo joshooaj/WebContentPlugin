@@ -100,7 +100,10 @@ namespace WebContent.Admin
 
         public override void ClearUserControl()
         {
-            _userControl?.ClearUserControl();
+            if (_userControl == null) return;
+            _userControl.ClearUserControl();
+            // #74: no item context after a clear, so the Status role gate cannot grant anything.
+            _userControl.SetStatusTabVisible(false);
         }
 
         public override void ReleaseUserControl()
@@ -114,6 +117,12 @@ namespace WebContent.Admin
 
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
+
+            // #74 role gate: the Status tab renders only when this user holds the workspace's
+            // Manage security action; every denial or failed lookup hides the whole tab.
+            _userControl.SetStatusTabVisible(
+                WorkspaceTabPolicy.ShowStatusTab(WorkspaceManagePermissionEvaluator.Check(item)));
+
             var properties = item?.Properties;
             var configError = WorkspaceConfiguration.DetectError(properties);
 

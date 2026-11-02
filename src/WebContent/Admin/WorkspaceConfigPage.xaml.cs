@@ -10,6 +10,10 @@ namespace WebContent.Admin
     /// <summary>
     /// The WPF workspace configuration page, hosted inside the WinForms
     /// <see cref="WorkspaceUserControl"/> wrapper through an ElementHost.
+    /// Since #74 the page is a four-tab shell (Settings | Proxy | Diagnostics | Status): the
+    /// Settings tab carries the configuration content, the Proxy/Diagnostics/Status tabs are
+    /// landing panels for the epic tickets and hold no input controls, and the Status tab is
+    /// rendered only behind the workspace's SecurityActions edit-rights gate.
     /// All field labels come from <see cref="Strings"/> so the Smart Client
     /// properties page and the Management Client admin page share wording.
     /// </summary>
@@ -167,6 +171,10 @@ namespace WebContent.Admin
             lblProxyTestResult.Visibility = Visibility.Collapsed;
             configError.Visibility = Visibility.Collapsed;
             chkHideAddress.IsEnabled = true;
+            // #74 shell: every fresh fill opens on Settings, and with no item context the
+            // Status role gate has nothing to grant — the tab stays hidden until a fill says otherwise.
+            workspaceTabs.SelectedItem = tabSettings;
+            tabStatus.Visibility = Visibility.Collapsed;
         }
 
         public void FillContent()
@@ -183,6 +191,20 @@ namespace WebContent.Admin
         public void ClearConfigurationError()
         {
             configError.Visibility = Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// #74 role gate: the Status tab renders only when the current Management Client user
+        /// passes the workspace item's SecurityActions Manage (edit-rights) check. Hiding it also
+        /// deselects it if it was somehow the active tab.
+        /// </summary>
+        public void SetStatusTabVisible(bool visible)
+        {
+            tabStatus.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (!visible && ReferenceEquals(workspaceTabs.SelectedItem, tabStatus))
+            {
+                workspaceTabs.SelectedItem = tabSettings;
+            }
         }
 
         private void OnUserChanged(object sender, RoutedEventArgs e)

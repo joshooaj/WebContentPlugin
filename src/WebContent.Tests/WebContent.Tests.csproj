@@ -27,6 +27,7 @@
     <Compile Include="..\WebContent\Client\WorkspaceProperties.cs" Link="WorkspaceProperties.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceSessionState.cs" Link="WorkspaceSessionState.cs" />
     <Compile Include="..\WebContent\Admin\WorkspaceNameValidation.cs" Link="WorkspaceNameValidation.cs" />
+    <Compile Include="..\WebContent\Admin\WorkspaceTabPolicy.cs" Link="WorkspaceTabPolicy.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceViewItemSync.cs" Link="WorkspaceViewItemSync.cs" />
     <Compile Include="..\WebContent\WebContentConfiguration.cs" Link="WebContentConfiguration.cs" />
     <Compile Include="..\WebContent\ProxyPolicy.cs" Link="ProxyPolicy.cs" />

@@ -164,6 +164,14 @@ namespace WebContent.Admin
             _page.ClearConfigurationError();
         }
 
+        /// <summary>
+        /// #74: forwards the Status tab role-gate decision to the WPF page.
+        /// </summary>
+        internal void SetStatusTabVisible(bool visible)
+        {
+            _page.SetStatusTabVisible(visible);
+        }
+
         private void OnPageChanged(object sender, EventArgs e)
         {
             ConfigurationChangedByUser?.Invoke(this, EventArgs.Empty);

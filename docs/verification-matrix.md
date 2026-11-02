@@ -42,6 +42,7 @@ is not evidence the plugin never ran.
 | Explicit proxy error pages in the view, no direct fallback (#58) | #58 | `ProxyForwardConnectionTests` (each failure kind renders its own page with the failing side named: `ServerUnavailable` → 503 page naming the VMS proxy component and forbidding direct fallback; server-side `NotAllowed` → 403 allowlist posture distinct from target failure; `Unreachable` → 502 "VMS server could not reach the target"; `Timeout` frame → 504 target-leg; `TooLarge` → page naming the size cap), `ProxyFetchCorrelationTests` (deadline silence = `ServerUnavailable`, never the target-leg `Timeout` code; `Fail` completes the exchange with the channel reason) | See SC-5 below - **all live rows PASSED 2026-11-01 (records 3 + 4 + 5)**: stopped Event Server + reload renders `Web Content proxy: 503` naming the component with the `ServerUnavailable` MIPLog marker (run `20261101-082437`), and an off-allowlist start URL renders the 403 page as the workspace's first document with the home address restored afterwards (run `20261101-084616`). Recovery is asserted in the same row, not narrated: a fresh Smart Client session after the restart gets the real document back (run `20261101-130629`). Both-machine drop in place (record 3) |
 | Server-side deployment + rollout docs for proxied connections (#59) | #59 | `scripts/deploy-event-server-plugin.ps1` refuses a drop whose `plugin.def` lacks the `Service` environment before touching the server; stop-wait/stop, copy, per-file SHA-256 verification against the source, restart-wait, and the two rollout follow-ups (client restart, fetcher-ready marker) are printed by the script itself | See DP-1 below: the script validated live end-to-end against the Event Server machine (11 files hash-identical, `Proxy fetcher ready` after restart); README/log-path/version claims checked against the lab; fresh-both-machine blocked-egress smoke PASSED with both machines at the same hash-verified drop |
 | wss:// websockets tunnelled through a terminated TLS tunnel (Event Server dials a validated TLS leg, replays the rebuilt handshake, admits only 101) | #60 | `ProxyForwardPolicyTests` (the entry scheme IS the posture: an in-tunnel upgrade GET against an allowlisted https origin — or absolute wss:// against an https entry — becomes `WebSocketTunnel`, never 501; an http twin alone is 403 for the upgrade; the `WebSocketTunnelRefused` posture is deleted outright), `ProxyForwardConnectionTests` (in-tunnel upgrade opens the byte tunnel, the target's verbatim 101 rides back ON the terminated tunnel, then both directions pump decrypted frames over the tunnel stream; open failure renders an explicit 502 page on the tunnel and the tunnel keeps serving), `ProxyTunnelServerTests` (in-process `TlsWsTarget` with a self-signed SAN certificate: an https-scheme tunnel target gets a TLS leg authenticated against the target host before the handshake is replayed, 101-only admission, frames echo over both pumps; untrusted chain → explicit `TlsValidation` error naming the origin and the Event Server as the failing side; production resolver is null = SslStream full chain validation), `ProxyWebSocketHandshakeTests` (rebuilt handshake pins the https origin's Host for https-scheme tunnel targets) | See SC-6 below - **both live rows PASSED 2026-11-01** (runs `20261101-174151` + `20261101-174657`): with the probe certificate imported into the Event Server's trust store, a wss-echo page in a proxied Smart Client browser shows `WS-OK:<token>` while the wss server journals TLS-HANDSHAKE + WS-HANDSHAKE + WS-ECHO; the fail-closed row's target journals the TLS leg dialed + negotiated but never the upgrade - the Event Server refused the chain there |
+| MC workspace config tab shell (Settings \| Proxy \| Diagnostics \| Status; Status behind the SecurityActions edit-rights gate) | #74 | `WorkspaceTabShellGuardTests` (the XAML declares exactly the four tabs in shell order with stable AutomationIds; Status defaults `Collapsed` so the gate fails closed before any fill; EVERY pre-existing settings/proxy control still lives on the Settings tab under the same AutomationId the ux probes read; placeholder tabs contain zero write-capable input and carry a probe-assertable placeholder marker), `WorkspaceTabPolicy` decision table (Status renders only on an explicit `Granted` — `Denied`/`LookupFailed` hide the whole tab) | See MC-11 below: the shell renders and opens on Settings, walking the placeholder tabs never enables Save, and a View-only user does not see the Status tab at all |
 
 ## Manual host checks
 
@@ -149,6 +150,27 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    deliberately not logged (fetches become high-frequency once views use the proxy).
 4. If the Event Server has no plugin loaded, the harness shows the not-connected message without
    sending anything.
+
+### MC-11 Workspace config tab shell (#74)
+
+1. Restart Management Client with the new drop. Select a Web Content workspace. Expected: the
+   detail pane is a four-tab shell — **Settings | Proxy | Diagnostics | Status** — opening on
+   Settings; every former field (name, home address, display/behavior/privacy/advanced toggles,
+   proxy toggle + targets, test-fetch harness) is on Settings and behaves exactly as before
+   (MC-9/MC-10 steps still pass without any tab click).
+2. Proxy/Diagnostics/Status tabs render their placeholder notice only. Click through all tabs:
+   the shell's **Save must never become enabled** (placeholder tabs hold no inputs and fire no
+   change events); returning to Settings shows the same values as before the walk.
+3. Status-tab role gate: with a full administrator the Status tab is visible. Assign a test role
+   WITHOUT 'Manage Web Content Workspace' (but with View) and log in as that user: the workspace
+   opens (read rights) but the **Status tab is absent entirely**. Denied/failed permission
+   lookups hide the tab (fail closed); MC log marker when denied:
+   `does not grant the Manage security action to this user`.
+4. Automatable (admin half): `McWorkspaceTabsProbeTests.ProbeWorkspaceTabsShellRendersAndStaysReadOnly`
+   (probe category, read-only — it never clicks Save and never mutates live state); artifacts
+   `mc-tabs-{settings,proxy,diagnostics,status,final}.png` + `mc-tabs-probe-results.txt` under
+   `%TEMP%\webcontent-mc-tabs-probe\<run>`. The view-only denial half stays manual (needs a
+   second role/user).
 
 ### SC-1 End-to-end proxied page load (#54)
 
