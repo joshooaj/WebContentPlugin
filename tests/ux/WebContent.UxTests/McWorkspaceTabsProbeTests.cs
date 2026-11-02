@@ -13,10 +13,11 @@ namespace WebContent.UxTests;
 /// Ticket #74 probe: the Management Client workspace config page renders as the four-tab shell
 /// (Settings | Proxy | Diagnostics | Status), the Settings tab keeps every existing control on
 /// the default tab (no navigation needed - the proxy-provisioning probes must stay intact), and
-/// walking the placeholder tabs never dirties the pane: Save must stay disabled through the
-/// whole walk ("no config writes from placeholder tabs"). The Status tab is expected visible
-/// because the probe user is a full administrator (holds Manage); the view-only denial half of
-/// the role gate is pinned by MC-11 in the verification matrix. Read-only: never clicks Save.
+/// walking the placeholder (Proxy/Diagnostics) and read-only (Status, live since #76) tabs never
+/// dirties the pane: Save must stay disabled through the whole walk ("no config writes from
+/// placeholder tabs"). The Status tab is expected visible because the probe user is a full
+/// administrator (holds Manage); the view-only denial half of the role gate is pinned by MC-11
+/// in the verification matrix. Read-only: never clicks Save.
 /// </summary>
 public class McWorkspaceTabsProbeTests
 {
@@ -80,9 +81,13 @@ public class McWorkspaceTabsProbeTests
             log.AppendLine("diagnostics tab placeholder rendered");
             Artifacts.Window(mcMain, "mc-tabs-diagnostics");
 
+            // Status is live since #76: no placeholder - the shell check here is that selecting it
+            // renders the read-only session surface (grid + summary) without dirtying the pane.
+            // The live-content assertions live in McProxyStatusProbeTests.
             SelectTabByAutomationId(mcMain, "tabStatus");
-            ManagementClientUi.ExpectControl(mcMain, "txtStatusTabPlaceholder", 10);
-            log.AppendLine("status tab placeholder rendered (admin holds Manage)");
+            ManagementClientUi.ExpectControl(mcMain, "dgStatusSessions", 10);
+            ManagementClientUi.ExpectControl(mcMain, "txtStatusSummary", 5);
+            log.AppendLine("status tab live surface rendered - session grid present (admin holds Manage)");
             Artifacts.Window(mcMain, "mc-tabs-status");
 
             // 4. No config writes from the shell walk: after selecting three tabs and returning,
