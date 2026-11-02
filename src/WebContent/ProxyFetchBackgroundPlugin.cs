@@ -764,7 +764,15 @@ namespace WebContent
 
             try
             {
-                diagnostics.RecordBlock(report.WorkspaceItemId, report.Origin, report.Reason, report.Count, DateTime.UtcNow);
+                if (diagnostics.RecordBlock(report.WorkspaceItemId, report.Origin, report.Reason, report.Count, DateTime.UtcNow))
+                {
+                    // One line per newly blocked origin (workspace+origin+reason); the dedup
+                    // refreshes that follow stay quiet, so a refusal storm cannot bury the log.
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(ProxyFetchBackgroundPlugin),
+                        $"Proxy block recorded: workspace='{report.WorkspaceItemId}' origin='{report.Origin}' reason={report.Reason} client='{report.ClientMachine}'");
+                }
             }
             catch (Exception exception)
             {
@@ -808,7 +816,12 @@ namespace WebContent
                             return null;
                         }
 
-                        diagnostics.OpenSession(payload.SessionId, payload.WorkspaceItemId, ResolveEndpointUser(message), payload.ClientMachine, now);
+                        var openUser = ResolveEndpointUser(message);
+                        diagnostics.OpenSession(payload.SessionId, payload.WorkspaceItemId, openUser, payload.ClientMachine, now);
+                        EnvironmentManager.Instance.Log(
+                            false,
+                            nameof(ProxyFetchBackgroundPlugin),
+                            $"Proxy diagnostics session open: workspace='{payload.WorkspaceItemId}' user='{openUser ?? "(unknown)"}' machine='{payload.ClientMachine}'");
                         break;
 
                     case ProxySessionEventKinds.Heartbeat:

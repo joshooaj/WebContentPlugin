@@ -60,14 +60,16 @@ namespace WebContent
 
         /// <summary>
         /// Record one blocked origin for a workspace: same origin+reason accumulates count and
-        /// refreshes last-seen; a new entry past the cap evicts the oldest first-seen one.
-        /// Blank fields drop the report — the ring only holds usable entries.
+        /// moves to the fresh end of the recency order; a new entry past the cap evicts the least
+        /// recently seen one first. Blank fields drop the report — the ring only holds usable
+        /// entries. Returns true only when the report created a NEW ring entry, which is the
+        /// transition the caller logs: a refusal storm stays quiet, a newly blocked origin shows up.
         /// </summary>
-        internal void RecordBlock(string workspaceItemId, string origin, string reason, int count, DateTime utcNow)
+        internal bool RecordBlock(string workspaceItemId, string origin, string reason, int count, DateTime utcNow)
         {
             if (string.IsNullOrEmpty(workspaceItemId) || string.IsNullOrEmpty(origin) || string.IsNullOrEmpty(reason))
             {
-                return;
+                return false;
             }
 
             var taken = count > 0 ? count : 1;
@@ -86,7 +88,7 @@ namespace WebContent
                     // blocked origin cannot age out of the view while stale ones linger.
                     state.InsertionOrder.Remove(existing);
                     state.InsertionOrder.AddLast(existing);
-                    return;
+                    return false;
                 }
 
                 var entry = new BlockedEntry
@@ -105,6 +107,8 @@ namespace WebContent
                     state.InsertionOrder.RemoveFirst();
                     state.Blocked.Remove(oldest.DedupKey);
                 }
+
+                return true;
             }
         }
 

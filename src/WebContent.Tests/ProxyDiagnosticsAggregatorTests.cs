@@ -58,6 +58,18 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void OnlyANewRingEntryIsReportedAsATransition()
+        {
+            // The Event Server logs the transition it cares about (an origin newly on the ring) and
+            // stays quiet on every dedup refresh; the return value is what makes that possible.
+            var aggregator = new ProxyDiagnosticsAggregator();
+            Assert.True(aggregator.RecordBlock(WorkspaceA.ToString(), "http://one.test:80", ProxyBlockReasons.NotAllowed, 1, T0));
+            Assert.False(aggregator.RecordBlock(WorkspaceA.ToString(), "http://one.test:80", ProxyBlockReasons.NotAllowed, 5, T0.AddMinutes(1)));
+            Assert.True(aggregator.RecordBlock(WorkspaceA.ToString(), "http://one.test:80", ProxyBlockReasons.Timeout, 1, T0.AddMinutes(2)));
+            Assert.False(aggregator.RecordBlock("", "http://one.test:80", ProxyBlockReasons.NotAllowed, 1, T0));
+        }
+
+        [Fact]
         public void RefreshingAnEntryAccumulatesIntoTheRecencyOrder()
         {
             var aggregator = new ProxyDiagnosticsAggregator();
