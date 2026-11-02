@@ -51,6 +51,17 @@ namespace WebContent
         internal const string SessionEventId = "WebContent.Proxy.SessionEvent";
         internal const string StatusRequestId = "WebContent.Proxy.StatusRequest";
         internal const string StatusResponseId = "WebContent.Proxy.StatusResponse";
+
+        /// <summary>
+        /// Ticket #75: the Management Client's pull of the deployment CA's PUBLIC certificate,
+        /// for distribution to client machines (AD/GPO into LocalMachine\Root). Request/response
+        /// pair unicasted like every other proxy exchange. Public material only — the CA's
+        /// private key never leaves the Event Server machine (ADR-0003), and this exchange never
+        /// creates or mutates anything, so it answers from any provisioning provenance (MSI
+        /// action, the legacy script, or the lazy first-use creation).
+        /// </summary>
+        internal const string CaExportRequestId = "WebContent.Proxy.CaExportRequest";
+        internal const string CaExportResponseId = "WebContent.Proxy.CaExportResponse";
     }
 
     /// <summary>
@@ -695,5 +706,41 @@ namespace WebContent
         public string Reason;
         public long Count;
         public DateTime LastSeenUtc;
+    }
+
+    /// <summary>
+    /// Ticket #75: the MC pull of this Event Server machine's deployment CA public certificate.
+    /// No workspace context: the CA is machine-level, resolved from the same authority the leaf
+    /// issuer loads (LocalMachine\Personal, fixed CN) regardless of who created it.
+    /// </summary>
+    [Serializable]
+    public class ProxyCaExportRequestPayload
+    {
+        public string CorrelationId;
+    }
+
+    /// <summary>
+    /// Ticket #75: the export answer. Success carries the CA DER (base64 — public part only),
+    /// its thumbprint, and the validity window for the admin's confirmation copy. DER is a
+    /// ~1 KB certificate inside the proven single-frame messaging headroom (see
+    /// <see cref="ProxyCaExportLimits"/>), so no chunk framing is needed. Absent/expired CA
+    /// answers NoAuthority with an actionable message, never an empty success.
+    /// </summary>
+    [Serializable]
+    public class ProxyCaExportResponsePayload
+    {
+        public string CorrelationId;
+        public bool Success;
+
+        public string AuthorityDerBase64;
+        public string AuthorityThumbprint;
+
+        /// <summary>Validity window of the exported certificate (display/audit copy).</summary>
+        public DateTime NotBeforeUtc;
+        public DateTime NotAfterUtc;
+
+        // Failure fields.
+        public string ErrorCode;
+        public string ErrorMessage;
     }
 }

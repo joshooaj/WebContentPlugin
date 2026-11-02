@@ -94,6 +94,10 @@ namespace WebContent
             ProxyMessageIds.SessionEventId,
             ProxyMessageIds.StatusRequestId,
             ProxyMessageIds.StatusResponseId,
+
+            // #75: deployment CA public-certificate export (Management Client root page).
+            ProxyMessageIds.CaExportRequestId,
+            ProxyMessageIds.CaExportResponseId,
         };
 
         public override List<WorkSpacePlugin> WorkSpacePlugins

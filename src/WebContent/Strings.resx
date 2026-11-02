@@ -339,4 +339,28 @@
   <data name="BlockedResourcesHeader" xml:space="preserve">
     <value>Blocked page resources (this page load):</value>
   </data>
+  <data name="ProxyCaExportRunning" xml:space="preserve">
+    <value>Asking the Event Server for its proxy authority certificate…</value>
+  </data>
+  <data name="ProxyCaExportNotConnected" xml:space="preserve">
+    <value>No answer from the Event Server: this Management Client has no proxy messaging channel to it. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment.</value>
+  </data>
+  <data name="ProxyCaExportMissing" xml:space="preserve">
+    <value>The proxy authority certificate does not exist yet on the Event Server. It is created the first time a proxied HTTPS target is used, or you can provision it once on the Event Server machine - see the plugin README.</value>
+  </data>
+  <data name="ProxyCaExportFailedFormat" xml:space="preserve">
+    <value>Proxy certificate export failed ({0}) - {1}</value>
+  </data>
+  <data name="ProxyCaExportSaveTitle" xml:space="preserve">
+    <value>Save the proxy authority certificate</value>
+  </data>
+  <data name="ProxyCaExportSaveFilter" xml:space="preserve">
+    <value>X.509 certificate (DER)|*.cer</value>
+  </data>
+  <data name="ProxyCaExportCancelled" xml:space="preserve">
+    <value>Export cancelled - nothing was written.</value>
+  </data>
+  <data name="ProxyCaExportSavedFormat" xml:space="preserve">
+    <value>Saved {0} (thumbprint {1}). Distribute it to Smart Client machines' LocalMachine\Root trusted-root store - the recommended path is Active Directory Group Policy; see the plugin README.</value>
+  </data>
 </root>

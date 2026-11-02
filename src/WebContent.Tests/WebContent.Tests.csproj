@@ -55,6 +55,9 @@
     <Compile Include="..\WebContent\ProxyBlockReporter.cs" Link="ProxyBlockReporter.cs" />
     <Compile Include="..\WebContent\ProxyBlockTally.cs" Link="ProxyBlockTally.cs" />
     <Compile Include="..\WebContent\ProxyStatusCorrelation.cs" Link="ProxyStatusCorrelation.cs" />
+    <Compile Include="..\WebContent\ProxyCaExportCorrelation.cs" Link="ProxyCaExportCorrelation.cs" />
+    <Compile Include="..\WebContent\ProxyCaExportResponder.cs" Link="ProxyCaExportResponder.cs" />
+    <Compile Include="..\WebContent\Admin\ProxyCaExportView.cs" Link="ProxyCaExportView.cs" />
     <Compile Include="..\WebContent\ProxyWebSocketHandshake.cs" Link="ProxyWebSocketHandshake.cs" />
     <Compile Include="..\WebContent\ProxyForwardConnection.cs" Link="ProxyForwardConnection.cs" />
     <Compile Include="..\WebContent\ProxyTunnelServer.cs" Link="ProxyTunnelServer.cs" />

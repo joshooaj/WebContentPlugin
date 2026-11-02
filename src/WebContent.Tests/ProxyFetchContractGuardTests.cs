@@ -36,6 +36,8 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyStatusResponsePayload))]
         [InlineData(typeof(ProxySessionStatusEntry))]
         [InlineData(typeof(ProxyBlockEntry))]
+        [InlineData(typeof(ProxyCaExportRequestPayload))]
+        [InlineData(typeof(ProxyCaExportResponsePayload))]
         public void EveryPayloadFieldStaysInsideTheMessageWhitelist(Type payloadType)
         {
             foreach (var field in payloadType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -79,6 +81,21 @@ namespace WebContent.Tests
             Assert.Equal("WebContent.Proxy.SessionEvent", ProxyMessageIds.SessionEventId);
             Assert.EndsWith("Request", ProxyMessageIds.StatusRequestId, StringComparison.Ordinal);
             Assert.EndsWith("Response", ProxyMessageIds.StatusResponseId, StringComparison.Ordinal);
+
+            // #75 certificate export pair: same shape rule, and the ids are declared on the
+            // plugin definition so tooling sees them as plugin-owned traffic.
+            Assert.EndsWith("Request", ProxyMessageIds.CaExportRequestId, StringComparison.Ordinal);
+            Assert.EndsWith("Response", ProxyMessageIds.CaExportResponseId, StringComparison.Ordinal);
+        }
+
+        [Theory]
+        [InlineData("CaExportRequestId")]
+        [InlineData("CaExportResponseId")]
+        public void TheCertificateExportIdsAreDeclaredOnThePluginDefinition(string fieldName)
+        {
+            var definition = System.IO.File.ReadAllText(System.IO.Path.Combine(
+                RepoLocator.FindRepoRoot(), "src", "WebContent", "WebContentPluginDefinition.cs"));
+            Assert.Contains($"ProxyMessageIds.{fieldName},", definition);
         }
 
         private static bool IsWhitelistSafe(Type type, Assembly pluginAssembly)

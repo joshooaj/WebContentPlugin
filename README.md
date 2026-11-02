@@ -83,16 +83,30 @@ authority per deployment (see `docs/adr/0003-event-server-mints-loopback-leaf-ce
    Personal store, grants the service account read access to the private key so leaf minting works at
    runtime, and exports the certificate to `C:/Users/Public/WebContent-Proxy-Authority.cer`. The private
    key never leaves that machine.
-2. **Each Smart Client machine trusts the CA once, elevated.** Copy the exported
-   `WebContent-Proxy-Authority.cer` from the Event Server machine's `C:/Users/Public` folder, then on every
-   Smart Client machine run:
+2. **Each Smart Client machine trusts the CA once, elevated.** Get the public certificate onto each
+   Smart Client machine and import it into the machine's trusted-root store. The exported file is the
+   same one either provisioning path leaves behind (`C:/Users/Public/WebContent-Proxy-Authority.cer`),
+   and at any later time it can be pulled fresh from the Management Client: under **Cascadia
+   Technology > Web Content Workspaces**, the **Export proxy certificate** button saves the CA's
+   public certificate (`*.cer`, DER) — read from the Event Server over MIP messaging, with no
+   private key in sight, and it works no matter how the CA was created (script, lazy first-use, or a
+   future installer action).
+
+   - **Recommended for more than one machine: push it with Active Directory Group Policy.** Import
+     the exported `.cer` into a GPO at *Computer Configuration > Policies > Windows Settings >
+     Security Settings > Public Key Policies > Trusted Root Certification Authorities*. Every
+     domain-joined Smart Client machine picks the CA up on its next policy refresh — no per-machine
+     logon, and new machines get it automatically.
+   - One machine at a time, copy the exported `.cer` to it and run:
 
    ```powershell
    Import-Certificate -FilePath C:\Users\Public\WebContent-Proxy-Authority.cer -CertStoreLocation Cert:\LocalMachine\Root
    ```
 
    Until that import is done, proxied HTTPS pages load but show a browser certificate error — the plugin
-   never bypasses certificate validation on its own, and its log names this exact import step.
+   never bypasses certificate validation on its own, and its log names this exact import step. If the
+   button answers that the proxy authority certificate does not exist yet, no CA has been created on the
+   Event Server machine — complete step 1 first.
 
 To remove the plugin completely, also delete the CA: from `LocalMachine\My` on the Event Server machine
 (`Remove-Item Cert:\LocalMachine\My\<thumbprint>`) and from `LocalMachine\Root` on each Smart Client machine.

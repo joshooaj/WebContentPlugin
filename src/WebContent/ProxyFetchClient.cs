@@ -36,10 +36,12 @@ namespace WebContent
         private object _tunnelDataFrameFilterRegistration;
         private object _tunnelCloseFrameFilterRegistration;
         private object _statusResponseFilterRegistration;
+        private object _caExportResponseFilterRegistration;
         private ProxyFetchCorrelation _correlation;
         private ProxyLeafCorrelation _leafCorrelation;
         private ProxyTunnelCorrelation _tunnels;
         private ProxyStatusCorrelation _statusCorrelation;
+        private ProxyCaExportCorrelation _caExportCorrelation;
         private Timer _tunnelReaper;
 
         /// <summary>#69: keeps live proxied-view sessions visible to the Event Server between its
@@ -116,6 +118,13 @@ namespace WebContent
                     new CommunicationIdFilter(ProxyMessageIds.StatusResponseId));
                 _sessionHeartbeat = new Timer(_ => HeartbeatSessions(), null, HeartbeatPeriod, HeartbeatPeriod);
 
+                // #75: deployment CA public-certificate pull (the MC root page's Export button).
+                // Single unicast response frame, correlated like the status query.
+                _caExportCorrelation = new ProxyCaExportCorrelation();
+                _caExportResponseFilterRegistration = _communication.RegisterCommunicationFilter(
+                    OnCaExportResponse,
+                    new CommunicationIdFilter(ProxyMessageIds.CaExportResponseId));
+
                 // Diagnostic (trace only): our own requests are filter-routed back to the sender's
                 // endpoint queue. Inspecting that echo tests whether THIS process deserializes our
                 // payload types at all: an intact echo isolates payload stripping to the response
@@ -142,7 +151,7 @@ namespace WebContent
             var communication = _communication;
             if (communication != null)
             {
-                foreach (var registration in new[] { _responseFilterRegistration, _leafResponseFilterRegistration, _echoFilterRegistration, _tunnelOpenResponseFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _statusResponseFilterRegistration })
+                foreach (var registration in new[] { _responseFilterRegistration, _leafResponseFilterRegistration, _echoFilterRegistration, _tunnelOpenResponseFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _statusResponseFilterRegistration, _caExportResponseFilterRegistration })
                 {
                     if (registration == null)
                     {
@@ -167,6 +176,7 @@ namespace WebContent
             _tunnelDataFrameFilterRegistration = null;
             _tunnelCloseFrameFilterRegistration = null;
             _statusResponseFilterRegistration = null;
+            _caExportResponseFilterRegistration = null;
 
             // #69: stop beating; the registry itself survives - a re-Setup resumes heartbeats for
             // sessions whose listeners are still alive, and the Event Server idle-sweeps the rest.
@@ -194,6 +204,7 @@ namespace WebContent
             _correlation = null;
             _leafCorrelation = null;
             _statusCorrelation = null;
+            _caExportCorrelation = null;
 
             // Deliberately no MessageCommunicationManager.Stop: the messaging session is
             // process-wide and may be shared by other plugins (no MIP sample ever stops it).
@@ -480,6 +491,86 @@ namespace WebContent
             catch (Exception exception)
             {
                 EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy status response frame failed: {exception.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Ticket #75: pull the deployment CA's public certificate from the Event Server (the MC
+        /// root page's "Export proxy certificate" button). Never throws: an unconnected channel
+        /// or an unanswered pull completes as a ServerUnavailable failure the page renders
+        /// distinctly from the Event Server's own "certificate does not exist yet" refusal.
+        /// </summary>
+        internal Task<ProxyCaExportResponsePayload> RequestProxyCertificateAsync(TimeSpan? deadline = null)
+        {
+            var communication = _communication;
+            var correlation = _caExportCorrelation;
+            if (communication == null || correlation == null)
+            {
+                return Task.FromResult(new ProxyCaExportResponsePayload
+                {
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.ServerUnavailable,
+                    ErrorMessage = "This process has no proxy messaging channel to the VMS Event Server.",
+                });
+            }
+
+            var correlationId = Guid.NewGuid().ToString("N");
+            var completion = correlation.Begin(correlationId, deadline ?? DefaultDeadline);
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(
+                        ProxyMessageIds.CaExportRequestId,
+                        ProxyFetchWireCodec.ToWire(new ProxyCaExportRequestPayload
+                        {
+                            CorrelationId = correlationId,
+                        })),
+                    null,
+                    null,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                correlation.Feed(new ProxyCaExportResponsePayload
+                {
+                    CorrelationId = correlationId,
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.ServerUnavailable,
+                    ErrorMessage = $"The proxy certificate export could not be sent: {exception.Message}",
+                });
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy certificate export request not sent: {exception.Message}");
+            }
+
+            return completion;
+        }
+
+        private object OnCaExportResponse(Message message, FQID destination, FQID source)
+        {
+            try
+            {
+                if (message == null || message.Data == null)
+                {
+                    return null;
+                }
+
+                var payload = ProxyFetchWireCodec.CaExportResponseFromWire(message.Data);
+                if (payload == null)
+                {
+                    return null;
+                }
+
+                var correlation = _caExportCorrelation;
+                if (correlation != null)
+                {
+                    correlation.Feed(payload);
+                }
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchClient), $"Proxy certificate export response frame failed: {exception.Message}");
             }
 
             return null;

@@ -40,12 +40,14 @@ namespace WebContent
         private object _blockReportFilterRegistration;
         private object _sessionEventFilterRegistration;
         private object _statusRequestFilterRegistration;
+        private object _caExportRequestFilterRegistration;
         private object _onlineTableFilterRegistration;
         private object _newEndPointFilterRegistration;
         private object _newEventIndicationRegistration;
         private SemaphoreSlim _fetchSlots;
         private ProxyServerAllowlist _allowlist;
         private ProxyLeafIssuer _leafIssuer;
+        private ProxyCaExportResponder _caExportResponder;
         private ProxyTunnelServer _tunnels;
 
         /// <summary>
@@ -172,6 +174,18 @@ namespace WebContent
                     OnProxyStatusRequest,
                     new CommunicationIdFilter(ProxyMessageIds.StatusRequestId));
 
+                // Ticket #75: the Management Client's pull of the deployment CA's PUBLIC
+                // certificate for client-machine distribution. Read-only against
+                // LocalMachine\Personal and provenance-independent (MSI action, legacy script,
+                // or lazy first-use mint all land the CA in the same store); the private key
+                // never participates, so answering needs no store write access.
+                _caExportResponder = new ProxyCaExportResponder(
+                    ProxyCaExportResponder.FindDeploymentAuthorityCertificates,
+                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                _caExportRequestFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
+                    OnProxyCaExportRequest,
+                    new CommunicationIdFilter(ProxyMessageIds.CaExportRequestId));
+
                 // #69 user attribution: mirror the platform's endpoint identity table so a session's
                 // XProtect login name comes from the messaging sender identity the platform itself
                 // stamped. The initial WhoAreOnlineRequest fills the table for already-connected
@@ -216,7 +230,7 @@ namespace WebContent
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(ProxyFetchBackgroundPlugin),
-                    $"Proxy fetcher ready (concurrency={MaxConcurrentFetches}, request id={ProxyMessageIds.FetchRequestId}, diagnostics={ProxyMessageIds.BlockReportId}/{ProxyMessageIds.SessionEventId}/{ProxyMessageIds.StatusRequestId}, triggers={ProxyTriggerPolicy.EventType}).");
+                    $"Proxy fetcher ready (concurrency={MaxConcurrentFetches}, request id={ProxyMessageIds.FetchRequestId}, diagnostics={ProxyMessageIds.BlockReportId}/{ProxyMessageIds.SessionEventId}/{ProxyMessageIds.StatusRequestId}, export={ProxyMessageIds.CaExportRequestId}, triggers={ProxyTriggerPolicy.EventType}).");
             }
             catch (Exception exception)
             {
@@ -265,7 +279,7 @@ namespace WebContent
 
             if (_messageCommunication != null)
             {
-                foreach (var registration in new[] { _tunnelOpenFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _blockReportFilterRegistration, _sessionEventFilterRegistration, _statusRequestFilterRegistration, _onlineTableFilterRegistration, _newEndPointFilterRegistration, _newEventIndicationRegistration })
+                foreach (var registration in new[] { _tunnelOpenFilterRegistration, _tunnelDataFrameFilterRegistration, _tunnelCloseFrameFilterRegistration, _blockReportFilterRegistration, _sessionEventFilterRegistration, _statusRequestFilterRegistration, _caExportRequestFilterRegistration, _onlineTableFilterRegistration, _newEndPointFilterRegistration, _newEventIndicationRegistration })
                 {
                     if (registration == null)
                     {
@@ -289,6 +303,8 @@ namespace WebContent
             _blockReportFilterRegistration = null;
             _sessionEventFilterRegistration = null;
             _statusRequestFilterRegistration = null;
+            _caExportRequestFilterRegistration = null;
+            _caExportResponder = null;
             _onlineTableFilterRegistration = null;
             _newEndPointFilterRegistration = null;
             _newEventIndicationRegistration = null;
@@ -957,6 +973,76 @@ namespace WebContent
             catch (Exception exception)
             {
                 EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), $"Proxy status response {payload.CorrelationId} not sent: {exception.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Ticket #75: answer one Management Client pull of the deployment CA's public
+        /// certificate. The lookup is a store read - fast enough for the messaging receive
+        /// thread, like the leaf mint. The answer is unicasted to the requester endpoint: a
+        /// null destination would deliver the certificate to every host subscribed to the
+        /// export response id. Export never creates the CA and never reads a private key - an
+        /// absent CA is a refusal the admin can act on, not an empty success.
+        /// </summary>
+        private object OnProxyCaExportRequest(Message message, FQID destination, FQID source)
+        {
+            var payload = ProxyFetchWireCodec.CaExportRequestFromWire(message?.Data);
+            if (payload == null || string.IsNullOrEmpty(payload.CorrelationId))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), "Proxy certificate export request carried no usable payload; refused.");
+                return null;
+            }
+
+            var requester = ResolveRequester(source, message);
+            if (requester == null)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Proxy certificate export request {payload.CorrelationId} carried no requester endpoint; its response is logged rather than broadcast.");
+                return null;
+            }
+
+            var communication = _messageCommunication;
+            if (communication == null)
+            {
+                return null;
+            }
+
+            ProxyCaExportResponsePayload response;
+            try
+            {
+                // Respond is written not to throw; anything escaping still answers as a failure
+                // frame rather than leaving the Management Client to time out.
+                response = _caExportResponder.Respond(payload);
+            }
+            catch (Exception exception)
+            {
+                response = new ProxyCaExportResponsePayload
+                {
+                    CorrelationId = payload.CorrelationId,
+                    Success = false,
+                    ErrorCode = ProxyFetchErrorCodes.Error,
+                    ErrorMessage = exception.Message,
+                };
+            }
+
+            try
+            {
+                communication.TransmitMessage(
+                    new Message(ProxyMessageIds.CaExportResponseId, ProxyFetchWireCodec.ToWire(response)),
+                    requester,
+                    null,
+                    null);
+            }
+            catch (Exception transmitException)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Proxy certificate export response {response.CorrelationId} not sent: {transmitException.Message}");
             }
 
             return null;

@@ -50,6 +50,13 @@ namespace WebContent
         private static readonly DataContractJsonSerializer StatusResponseSerializer =
             new DataContractJsonSerializer(typeof(ProxyStatusResponsePayload));
 
+        // Ticket #75: deployment CA public-certificate export payloads.
+        private static readonly DataContractJsonSerializer CaExportRequestSerializer =
+            new DataContractJsonSerializer(typeof(ProxyCaExportRequestPayload));
+
+        private static readonly DataContractJsonSerializer CaExportResponseSerializer =
+            new DataContractJsonSerializer(typeof(ProxyCaExportResponsePayload));
+
         /// <summary>Encode a request payload for Message.Data.</summary>
         internal static string ToWire(ProxyFetchRequestPayload payload)
         {
@@ -216,6 +223,40 @@ namespace WebContent
             }
 
             return Deserialize<ProxyStatusResponsePayload>(json, StatusResponseSerializer);
+        }
+
+        /// <summary>Encode a deployment CA export request (#75) for Message.Data.</summary>
+        internal static string ToWire(ProxyCaExportRequestPayload request)
+        {
+            return Serialize(request, CaExportRequestSerializer);
+        }
+
+        internal static ProxyCaExportRequestPayload CaExportRequestFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyCaExportRequestPayload>(json, CaExportRequestSerializer);
+        }
+
+        /// <summary>Encode a deployment CA export answer (#75) for Message.Data.</summary>
+        internal static string ToWire(ProxyCaExportResponsePayload response)
+        {
+            return Serialize(response, CaExportResponseSerializer);
+        }
+
+        internal static ProxyCaExportResponsePayload CaExportResponseFromWire(object data)
+        {
+            var json = data as string;
+            if (json == null)
+            {
+                return null;
+            }
+
+            return Deserialize<ProxyCaExportResponsePayload>(json, CaExportResponseSerializer);
         }
 
         private static string Serialize(object payload, DataContractJsonSerializer serializer)

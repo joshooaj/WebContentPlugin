@@ -716,5 +716,77 @@ namespace WebContent {
                 return ResourceManager.GetString("BlockedResourcesHeader", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Asking the Event Server for its proxy authority certificate….
+        /// </summary>
+        internal static string ProxyCaExportRunning {
+            get {
+                return ResourceManager.GetString("ProxyCaExportRunning", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No answer from the Event Server: this Management Client has no proxy messaging channel to it. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment..
+        /// </summary>
+        internal static string ProxyCaExportNotConnected {
+            get {
+                return ResourceManager.GetString("ProxyCaExportNotConnected", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy authority certificate does not exist yet on the Event Server. It is created the first time a proxied HTTPS target is used, or you can provision it once on the Event Server machine - see the plugin README..
+        /// </summary>
+        internal static string ProxyCaExportMissing {
+            get {
+                return ResourceManager.GetString("ProxyCaExportMissing", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy certificate export failed ({0}) - {1}.
+        /// </summary>
+        internal static string ProxyCaExportFailedFormat {
+            get {
+                return ResourceManager.GetString("ProxyCaExportFailedFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Save the proxy authority certificate.
+        /// </summary>
+        internal static string ProxyCaExportSaveTitle {
+            get {
+                return ResourceManager.GetString("ProxyCaExportSaveTitle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to X.509 certificate (DER)|*.cer.
+        /// </summary>
+        internal static string ProxyCaExportSaveFilter {
+            get {
+                return ResourceManager.GetString("ProxyCaExportSaveFilter", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Export cancelled - nothing was written..
+        /// </summary>
+        internal static string ProxyCaExportCancelled {
+            get {
+                return ResourceManager.GetString("ProxyCaExportCancelled", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Saved {0} (thumbprint {1}). Distribute it to Smart Client machines&apos; LocalMachine\Root trusted-root store - the recommended path is Active Directory Group Policy; see the plugin README..
+        /// </summary>
+        internal static string ProxyCaExportSavedFormat {
+            get {
+                return ResourceManager.GetString("ProxyCaExportSavedFormat", resourceCulture);
+            }
+        }
     }
 }
