@@ -8,10 +8,12 @@ named log marker. An area is **verified** only when all of its rows pass.
 
 | Gate | Command | Pass criterion |
 |---|---|---|
-| Regression suite (all automated rows) | `dotnet test src/WebContent.Tests` | exit 0, zero failed |
-| One-command gate script | `.\verify.ps1` (add `-IncludePluginBuild` on a VS2022 machine) | exit 0, prints `Release gate: PASS` |
+| Plugin build | `Invoke-psake -taskList Build` (raw equivalent: `dotnet build src/WebContent/WebContent.csproj -c Debug`) | exit 0, no sbom-tool warnings (the GenerateSbom target passes `-D true`, so stale `_manifest` dirs self-overwrite) |
+| Regression suite (all automated rows) | `Invoke-psake -taskList Test` (builds first; raw equivalent: `dotnet test src/WebContent.Tests`) | exit 0, zero failed |
+| UI probe suite (live-host rows) | `Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ProbeProxied' }`; bare `TestUI` runs the whole `tests/ux` project | probes go red on failure, never silently skip; needs the deployed drop on both machines and the per-row env flags |
+| One-command gate script | `.\verify.ps1` (add `-IncludePluginBuild` to also run the plugin build) | exit 0, prints `Release gate: PASS` |
 | CI | `Tests` job in `.github/workflows/ci.yml` (runs on PRs and pushes) | job green before merge to `main`; the installer only publishes from `main` |
-| Plugin build | `msbuild src/WebContent/WebContent.csproj /t:Build /p:Configuration=Debug /p:Platform=x64` | exit 0, no sbom-tool warnings (PostBuildEvent passes `-D true`, so stale `_manifest` dirs self-overwrite) |
+| Deploy | `Invoke-psake -taskList DeployLocally, DeployToVms` (see `AGENTS.md`) | local drop hash-identical to `output\WebContent\`; ES restarts and logs its ready marker |
 | Manual host checks | Steps below, run against a deployed plugin per `AGENTS.md` | each row's expected outcome and log marker observed |
 
 Manual-check logs: Smart Client → `%ProgramData%\Milestone\XProtect Smart Client\MIPLog.txt`
@@ -43,8 +45,9 @@ is not evidence the plugin never ran.
 
 ## Manual host checks
 
-Run after deploying new build output per `AGENTS.md` (kill `client`/`VideoOS.Administration`
-hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
+Run after deploying new build output (`Invoke-psake -taskList Build, DeployLocally, DeployToVms`;
+the deploy tasks kill the `client`/`VideoOS.Administration` hosts and restart the Event Server
+service, and the local copy needs no elevation). Verify each deployed file by hash, not timestamp.
 
 ### MC-1 View open/close/reopen cycles (#10, #15)
 
@@ -105,8 +108,9 @@ hosts first; copy to the MIPPlugins root; verify by file hash, not timestamp).
 
 ### ES-1 Event Server fetcher load and answer (#53)
 
-1. Deploy the new drop per `AGENTS.md`, then restart the XProtect Event Server service (it only
-   loads MIP plugins at service start; plugin.def gained the `Service` load environment).
+1. Deploy the new drop with `Invoke-psake -taskList DeployToVms` (it stops and restarts
+   `MilestoneEventServerService` around the copy; the service only loads MIP plugins at service
+   start; plugin.def gained the `Service` load environment).
 2. Expected marker in the Event Server's `Logs\MIP.log` (ProgramData for the Event Server):
    `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest)`. A startup
    failure logs `Proxy fetcher failed to start: ...` instead.
@@ -427,7 +431,7 @@ the view (title `Web Content proxy: <status>`) whose body names which side faile
 
    ```powershell
    $env:WEBCONTENT_ES_STOP = '1'   # only for the outage row; it stops/starts the live Event Server
-   dotnet test tests/ux/WebContent.UxTests --filter "FullyQualifiedName~ScProxyErrorProbeTests"
+   Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ScProxyErrorProbeTests' }
    ```
 
    Harness hardening landed while diagnosing it (`LoginFlow`, `ManagementClientUi`): the password is
@@ -590,7 +594,7 @@ Defaults are the lab's server-network addresses; override with `UX_WSS_PAGE_TARG
 the `VMS_ADDRESS` host):
 
 ```powershell
-dotnet test tests/ux/WebContent.UxTests --filter "FullyQualifiedName~ScProxyWssProbeTests"
+Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ScProxyWssProbeTests' }
 ```
 
 **Live rows PASSED 2026-11-01** (Event Server deployed via `scripts/deploy-event-server-plugin.ps1

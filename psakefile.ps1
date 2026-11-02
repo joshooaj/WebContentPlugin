@@ -1,3 +1,10 @@
+param(
+    # Xunit test filter. Example: 'FullyQualifiedName~ProbeProxied'
+    [Parameter()]
+    [string]
+    $TestFilter
+)
+
 Properties {
     $script:ProjectRoot = $PSScriptRoot
     $script:BuildOutput = Join-Path $script:ProjectRoot 'output/WebContent'
@@ -7,6 +14,7 @@ Properties {
     $script:MIPPluginsPath = 'C:\Program Files\VideoOS\MIPPlugins'
     $script:RelatedServices = @(, 'MilestoneEventServerService')
     $script:RelatedProcesses = 'Client', 'VideoOS.Administration'
+    $script:UITestFilter = $TestFilter
 }
 
 $scriptDirectory = Join-Path $PSScriptRoot 'scripts'
@@ -61,4 +69,23 @@ Task DeployToVms {
         Processes   = $script:RelatedProcesses
     }
     Deploy-MipPlugin @deployParams
+}
+
+Task Test -Depends Build {
+    Exec {
+        & dotnet test (Join-Path $script:ProjectRoot 'src/WebContent.Tests/WebContent.Tests.csproj')
+    }
+}
+
+Task TestUI {
+    Exec {
+        $testArgs = @(
+            'test',
+            (Join-Path $script:ProjectRoot 'tests/ux/WebContent.UxTests/WebContent.UxTests.csproj')
+        )
+        if (![string]::IsNullOrEmpty($script:UITestFilter)) {
+            $testArgs += '--filter', $script:UITestFilter
+        }
+        & dotnet @testArgs
+    }
 }

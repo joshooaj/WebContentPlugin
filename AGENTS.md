@@ -4,13 +4,15 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
 
 ## Build
 
-- Task runner is `psakefile.ps1` (psake module — `Install-Module psake`). Tasks: `ToolRestore` (`dotnet tool restore`), `Build` (depends on ToolRestore), `Lint` (`dotnet format --verify-no-changes`), `DeployLocally`, `DeployToVms`; `Deploy` = DeployLocally + DeployToVms.
+- Task runner is `psakefile.ps1` (psake module — `Install-Module psake`). Tasks: `ToolRestore` (`dotnet tool restore`), `Build` (depends on ToolRestore), `Lint` (`dotnet format --verify-no-changes`), `Test` (depends on Build), `TestUI`, `DeployLocally`, `DeployToVms`; `Deploy` = DeployLocally + DeployToVms.
 
   ```powershell
   Invoke-psake -taskList Build, Deploy          # build + deploy to local machine and the VMS server
   Invoke-psake -taskList Build, DeployLocally   # local-only (when the Event Server plugin is unaffected)
   Invoke-psake -taskList Build, DeployToVms     # VMS server only
   Invoke-psake -taskList Lint                   # dotnet format --verify-no-changes
+  Invoke-psake -taskList Test                   # unit suite (builds first)
+  Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ProbeProxied' }  # filtered UI probes
   ```
 
   All native commands run inside psake `Exec`, so a non-zero exit code fails the task — check `$psake.build_success` (or the exit code), not just the console. `Lint` is expected to fail right now: the repo carries a pre-existing `dotnet format` backlog (whitespace/final-newline/imports-ordering across ~40 files under `src/WebContent`), surfaced deliberately by the `Exec` wrapper. A red `Lint` is not a regression to chase when touching unrelated code; don't chain it onto deploy runs until the backlog is settled.
@@ -28,7 +30,8 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
 
 ## Test
 
-- `dotnet test src/WebContent.Tests` works (xunit). The test project is not in `src/WebContent.sln`; point at the csproj.
+- `Invoke-psake -taskList Test` runs the unit suite (builds first); `dotnet test src/WebContent.Tests` works too (xunit). The test project is not in `src/WebContent.sln`; point at the csproj.
+- `Invoke-psake -taskList TestUI` runs the whole `tests/ux/WebContent.UxTests` project, live probes included; pass `-parameters @{ TestFilter = 'FullyQualifiedName~...' }` to select rows. Do not run the UI suite casually: probes drive real desktop apps against the live VMS and some rows mutate live state (see `docs/verification-matrix.md`).
 - The test project links pure source files via `<Compile Include="..\WebContent\..." Link>` and never project-references the plugin csproj. Register every new testable class in both places: `Compile` item in `WebContent.csproj` and `Compile` link in `WebContent.Tests.csproj`. Land it in one only and the plugin or the tests silently miss the class.
 
 ## Deploy for live-host testing
