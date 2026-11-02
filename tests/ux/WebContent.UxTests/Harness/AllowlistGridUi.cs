@@ -603,15 +603,13 @@ public static class AllowlistGridUi
     /// <summary>Remove one row by index, waiting for the row count to drop.</summary>
     public static void RemoveRowAt(Window mcMain, int index)
     {
-        var buttons = CellElements(mcMain, RemoveCellId);
-        if (index < 0 || index >= buttons.Count)
-            throw new InvalidOperationException($"no remove button at grid row {index} (rows={buttons.Count}).");
-
         var before = RowCount(mcMain);
+        if (index < 0 || index >= before)
+            throw new InvalidOperationException($"no grid row {index} to remove (rows={before}).");
+
         for (var attempt = 0; attempt < 5 && RowCount(mcMain) == before; attempt++)
         {
-            buttons = CellElements(mcMain, RemoveCellId);
-            var button = buttons[index];
+            var button = CellElement(mcMain, RemoveCellId, index);
             try { button.Patterns.Invoke.Pattern.Invoke(); }
             catch { button.Click(); }
             Thread.Sleep(600);
@@ -678,7 +676,7 @@ public static class AllowlistGridUi
     {
         for (var attempt = 0; attempt < 4; attempt++)
         {
-            var cell = CellElements(mcMain, automationId)[index];
+            var cell = CellElement(mcMain, automationId, index);
             try
             {
                 if (cell.Patterns.Value.IsSupported)
@@ -687,13 +685,13 @@ public static class AllowlistGridUi
             catch { }
 
             Thread.Sleep(400);
-            if (string.Equals(ReadValue(CellElements(mcMain, automationId)[index]), value, StringComparison.Ordinal))
+            if (string.Equals(ReadValue(CellElement(mcMain, automationId, index)), value, StringComparison.Ordinal))
                 return;
 
             // Keyboard route, focus-gated like the harness rules demand: verified focus on THIS
             // cell (its id matches every row's, so the focus gate must also re-verify by the
             // cell handle), select-all, clipboard paste.
-            cell = CellElements(mcMain, automationId)[index];
+            cell = CellElement(mcMain, automationId, index);
             if (ManagementClientUi.FocusVerified(mcMain, cell, automationId) && LoginFlow.TryClipboardSetText(value))
             {
                 FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
@@ -702,7 +700,7 @@ public static class AllowlistGridUi
                 FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
                                                              FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_V);
                 Thread.Sleep(400);
-                if (string.Equals(ReadValue(CellElements(mcMain, automationId)[index]), value, StringComparison.Ordinal))
+                if (string.Equals(ReadValue(CellElement(mcMain, automationId, index)), value, StringComparison.Ordinal))
                     return;
             }
 
@@ -710,7 +708,7 @@ public static class AllowlistGridUi
         }
 
         throw new InvalidOperationException(
-            $"grid cell '{automationId}' row {index} never read back as '{value}' (reads '{ReadValue(CellElements(mcMain, automationId)[index])}').");
+            $"grid cell '{automationId}' row {index} never read back as '{value}' (reads '{ReadValue(CellElement(mcMain, automationId, index))}').");
     }
 
     private static void SetSchemeCell(Window mcMain, int index, string scheme)
@@ -721,13 +719,13 @@ public static class AllowlistGridUi
         // through the UIA selection routes displayed http and stored https). The authority is what
         // the save writes - the refusal dialog's row text and the "Stored proxy targets ..." audit
         // line in the MC MIP.log.
-        var combo = ResolveCombo(CellElements(mcMain, SchemeCellId)[index]);
+        var combo = ResolveCombo(CellElement(mcMain, SchemeCellId, index));
         SelectSchemeByClick(combo, scheme);
         SelectSchemeByKeyboard(mcMain, combo, index, scheme);
-        if (!string.Equals(ReadComboValue(ResolveCombo(CellElements(mcMain, SchemeCellId)[index])), scheme, StringComparison.OrdinalIgnoreCase))
-            SelectSchemeByPattern(ResolveCombo(CellElements(mcMain, SchemeCellId)[index]), scheme);
+        if (!string.Equals(ReadComboValue(ResolveCombo(CellElement(mcMain, SchemeCellId, index))), scheme, StringComparison.OrdinalIgnoreCase))
+            SelectSchemeByPattern(ResolveCombo(CellElement(mcMain, SchemeCellId, index)), scheme);
 
-        var final = ReadComboValue(ResolveCombo(CellElements(mcMain, SchemeCellId)[index]));
+        var final = ReadComboValue(ResolveCombo(CellElement(mcMain, SchemeCellId, index)));
         if (!string.Equals(final, scheme, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"scheme combo row {index} never read back as '{scheme}' (reads '{final}').");
     }
@@ -828,7 +826,7 @@ public static class AllowlistGridUi
         var desired = on ? ToggleState.On : ToggleState.Off;
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            var cell = CellElements(mcMain, automationId)[index];
+            var cell = CellElement(mcMain, automationId, index);
             if (!cell.Patterns.Toggle.IsSupported) { cell.Click(); Thread.Sleep(500); continue; }
             if (cell.Patterns.Toggle.Pattern.ToggleState.Value == desired) return;
             try { cell.Patterns.Toggle.Pattern.Toggle(); }
@@ -836,15 +834,58 @@ public static class AllowlistGridUi
             Thread.Sleep(500);
         }
 
-        var state = CellElements(mcMain, automationId)[index].Patterns.Toggle.Pattern.ToggleState.Value;
+        var state = CellElement(mcMain, automationId, index).Patterns.Toggle.Pattern.ToggleState.Value;
         if (state != desired)
             throw new InvalidOperationException($"toggle cell '{automationId}' row {index} never reached {(on ? "On" : "Off")} (state {state}).");
     }
 
     // ---- UIA readers -------------------------------------------------------------------------
 
-    private static List<AutomationElement> CellElements(Window mcMain, string automationId) =>
-        mcMain.FindAllDescendants(cf => cf.ByAutomationId(automationId)).ToList();
+    /// <summary>The single grid-cell funnel. A raw FindAll can transiently throw a UIA
+    /// COMException (E_UNEXPECTED 0x8000FFFF mid-row-remove, also seen as ELEMENTNOTAVAILABLE
+    /// 0x80040201 on a stale element) while the WPF DataGrid re-virtualizes underneath the
+    /// tree walk (#61 live run tripped exactly this inside RemoveAllRows). Bounded retry with
+    /// backoff, then an honest re-throw - never a silent empty list that would let a
+    /// remove/add loop proceed against the wrong row count.</summary>
+    private static List<AutomationElement> CellElements(Window mcMain, string automationId)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return mcMain.FindAllDescendants(cf => cf.ByAutomationId(automationId)).ToList();
+            }
+            catch (System.Runtime.InteropServices.COMException) when (attempt < 4)
+            {
+                Thread.Sleep(500 * (attempt + 1));
+            }
+        }
+    }
+
+    /// <summary>Cell for row {index}, WAITING for that row's cell of this column to be realized:
+    /// a row's host cell can exist while a sibling cell (scheme combo, remove button) is still
+    /// virtualized away, and a typing step that indexes straight into the short list crashed with
+    /// ArgumentOutOfRangeException on the #61 live run. Honest timeout once the wait expires.</summary>
+    private static AutomationElement CellElement(Window mcMain, string automationId, int index)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            var cells = CellElements(mcMain, automationId);
+            if (index >= 0 && index < cells.Count)
+            {
+                return cells[index];
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new InvalidOperationException(
+                    $"grid cell '{automationId}' row {index} never realized ({cells.Count} realized in that column).");
+            }
+
+            Thread.Sleep(400);
+        }
+    }
 
     private static string ReadValue(AutomationElement element)
     {
