@@ -260,6 +260,14 @@ namespace WebContent
         /// </summary>
         [DataMember(Name = "proxyTargets")]
         public List<ProxyTargetConfiguration> ProxyTargets { get; set; }
+
+        /// <summary>
+        /// Ticket #65: admin-defined rule-trigger rows for this workspace. Null for definitions
+        /// saved before #65 (readers are tolerant of the section's absence) or where the admin
+        /// added none — no rows means the workspace's proxy traffic never raises events.
+        /// </summary>
+        [DataMember(Name = "proxyTriggers", EmitDefaultValue = false)]
+        public List<ProxyTriggerConfiguration> ProxyTriggers { get; set; }
     }
 
     [DataContract]
@@ -301,5 +309,28 @@ namespace WebContent
         /// which is what keeps old and new stored shapes equivalent.
         /// </summary>
         internal string EffectivePattern => !string.IsNullOrWhiteSpace(Pattern) ? Pattern : Host;
+    }
+
+    /// <summary>
+    /// Ticket #65: one admin-defined proxy rule-trigger row stored in the workspace's
+    /// <c>proxyTriggers</c> section. Raw, unvalidated text on the wire — the Event Server's
+    /// <see cref="ProxyTriggerPolicy"/> is the single grammar authority on every read, and the
+    /// #78 MC grid must validate against the same policy before saving. A reader must never
+    /// decide match semantics from this shape alone.
+    /// </summary>
+    [DataContract]
+    internal class ProxyTriggerConfiguration
+    {
+        /// <summary>Full-URL glob: scheme://host[:port][/path-glob], wildcards per grammar.</summary>
+        [DataMember(Name = "url")]
+        public string Url { get; set; }
+
+        /// <summary>Single uppercase verb, or absent/"*" for any method.</summary>
+        [DataMember(Name = "method", EmitDefaultValue = false)]
+        public string Method { get; set; }
+
+        /// <summary>"1xx".."5xx" class or an exact code, or absent for any response status.</summary>
+        [DataMember(Name = "status", EmitDefaultValue = false)]
+        public string Status { get; set; }
     }
 }

@@ -140,5 +140,68 @@ namespace WebContent.Tests
             Assert.DoesNotContain("\"pattern\"", json);
             Assert.Equal("portal.test", WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings().ProxyTargets[0].EffectivePattern);
         }
+
+        // #65: the per-workspace proxyTriggers section. Raw rows on the wire - grammar is decided
+        // only by ProxyTriggerPolicy on read - and the section's absence (every pre-#65
+        // definition) reads as null without an error.
+
+        private const string TriggerSectionBlob =
+            "{\"version\":1,\"layout\":\"1x1\",\"items\":[{\"type\":\"WebContent\",\"position\":0," +
+            "\"settings\":{\"homeAddress\":\"https://x/\",\"proxyEnabled\":true,\"proxyTriggers\":[" +
+            "{\"url\":\"https://*.onvif.org/*\",\"method\":\"GET\",\"status\":\"4xx\"}," +
+            "{\"url\":\"https://10.0.0.5:9225/snapshot\"}]}}]}";
+
+        [Fact]
+        public void TriggerRowsSurviveTheSerializedRoundtrip()
+        {
+            var config = WorkspaceConfiguration.CreateDefault("https://camera-ui.example/");
+            var settings = config.GetFirstWebContentSettings();
+            settings.ProxyTriggers = new List<ProxyTriggerConfiguration>
+            {
+                new ProxyTriggerConfiguration { Url = "https://*.onvif.org/*", Method = "GET", Status = "4xx" },
+                new ProxyTriggerConfiguration { Url = "https://10.0.0.5:9225/snapshot" },
+            };
+
+            var json = config.Serialize();
+            // DCJS escapes '/' in string values, so the raw-wire assertion carries the escaped
+            // form; the semantic assertions below read the re-parsed shape.
+            Assert.Contains("\"url\":\"https:\\/\\/*.onvif.org\\/*\"", json);
+            Assert.Contains("\"method\":\"GET\"", json);
+            Assert.Contains("\"status\":\"4xx\"", json);
+
+            var reparsed = WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings();
+            Assert.Equal(2, reparsed.ProxyTriggers.Count);
+            Assert.Equal("https://*.onvif.org/*", reparsed.ProxyTriggers[0].Url);
+            Assert.Equal("GET", reparsed.ProxyTriggers[0].Method);
+            Assert.Equal("4xx", reparsed.ProxyTriggers[0].Status);
+            Assert.Equal("https://10.0.0.5:9225/snapshot", reparsed.ProxyTriggers[1].Url);
+            Assert.Null(reparsed.ProxyTriggers[1].Method);
+            Assert.Null(reparsed.ProxyTriggers[1].Status);
+        }
+
+        [Fact]
+        public void AbsentTriggerSectionReadsAsNullAndEmptyMethodStatusMembersAreOptional()
+        {
+            // The readers' tolerance contract: a definition that predates #65 loads exactly as
+            // before - ProxyTriggers null, no parse error, and the rest of the settings intact.
+            var preTrigger = WorkspaceConfiguration.Deserialize(LegacyShapeBlob).GetFirstWebContentSettings();
+            Assert.Null(preTrigger.ProxyTriggers);
+
+            var settings = WorkspaceConfiguration.Deserialize(TriggerSectionBlob).GetFirstWebContentSettings();
+            Assert.Equal(2, settings.ProxyTriggers.Count);
+            Assert.Equal("https://10.0.0.5:9225/snapshot", settings.ProxyTriggers[1].Url);
+            Assert.Null(settings.ProxyTriggers[1].Method);
+        }
+
+        [Fact]
+        public void AWorkspaceWithoutTriggerRowsDoesNotWriteTheSectionAtAll()
+        {
+            // EmitDefaultValue=false: pre-#65 stored shapes are never rewritten into blobs that
+            // grow an empty section just because a newer plugin serialized them.
+            var config = WorkspaceConfiguration.Deserialize(LegacyShapeBlob);
+            var json = config.Serialize();
+
+            Assert.DoesNotContain("proxyTriggers", json);
+        }
     }
 }
