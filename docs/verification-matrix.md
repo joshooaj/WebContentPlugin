@@ -729,6 +729,55 @@ Event Server TLS leg -> target 101 -> decrypted frames both ways, end to end. Ar
 Found and fixed during the run: `WssTargetTrust` treated the bare `VMS_ADDRESS` hostname as a
 uri and died before the import (`7813b73`).
 
+### SC-7 Setup-mode blocked-resources indicator (#83)
+
+Automatable, unit: `ProxyBlockTallyTests` — the per-view tally in front of the #69
+`ProxyBlockReporter`: one entry per origin+reason with hit counts (canonical origin display,
+"(N hits)" label), most-recently-seen-first snapshot promoted on re-sighting, bounded at 200
+entries with least-recently-seen eviction, `Reset` (per navigation) clears + raises `Changed`
+once and no-ops quietly when empty, null/empty refusals count nothing, a throwing ES forwarder
+(dead channel) never reaches the browser flow and never costs a local count, forwarder swap to
+null (listener stop) detaches cleanly, and the production composition (tally → `ProxyBlockReporter`)
+sends exactly one `ProxyBlockReportPayload` per refusal while also counting locally.
+
+Live: `ScProxyBlockedIndicatorProbeTests.ProbeSetupModeBlockedResourcesIndicator` (probe
+category; artifacts under `%TEMP%\webcontent-sc-proxy-probe\<run>\`) — `BlockedResourcePageServer`
+serves `/blocked-page/` (document + two `<img>`s + a `<script>` from the deliberately
+never-allowlisted origin `http://<host>:18131`) and a `/clean/` twin, both from the
+already-allowlisted page origin `http://<host>:18125` (no Management Client phase;
+`UX_REQUIRE_MC_PROVISIONING=1` restores the guarded Ensure). The run drives Smart Client on UIA
+patterns + CDP only — no SendInput: navigation is `page.GotoAsync` (also keeps the probe url off
+the workspace), the last-shown workspace must already be the proxied one (pattern-select fallback
+via `SmartClientUi.TrySelectWorkspaceWithoutInput`), captures use `Artifacts.WindowPrint`
+(PrintWindow; `CopyFromScreen` throws "handle is invalid" or hangs outright on a disconnected
+session). Rows: page renders (title proves the allowlist entry survived); the indicator is NOT
+rendered in runtime mode despite the client-side refusals; entering setup mode shows
+"N resources blocked" (`blockedIndicatorText`); invoking the button lists `blockedResourceOrigin`
+(canonical, matching the listener's refusal), `blockedResourceReason` ("not allowed by the
+workspace allowlist"), `blockedResourceCount`; the clean twin navigation resets the tally (row
+and indicator gone); runtime re-blocking stays invisible and re-entering setup mode re-shows the
+tally.
+
+**Live rows pending (2026-11-02)**: the Smart Client refuses to START on this machine's
+disconnected desktop session — `ClientLog.txt` "Video player validation failed ... Error creating
+Direct3D9Ex object!" and a `Cannot start` dialog ("There is a unknown issue."), reproduced three
+consecutive attempts (05:29/05:31/05:34, `ReconTests.Probe_SmartClientStartupOnDisconnectedDesktop`
+captures the dialog text); the plugin drop itself is fine (loaded cleanly in the connected-session
+runs earlier that day, ES hash-verified). Reconnect the console (`tscon 1 /dest:console` needs
+elevation an unattended Medium-IL session cannot get) and re-run:
+
+```powershell
+Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ProbeSetupModeBlockedResourcesIndicator' }
+```
+
+Companion recon fact `ReconTests.Probe_ManagementClientTreeSelectionWithoutInput` (diagnostic,
+never asserts) settled the MC-phase question while MC starts fine on the same session: the plugin
+rows (`Cascadia Technology`, `Web Content Workspaces`) are already realized, but the tree items
+expose NO ExpandCollapse pattern and LegacyIAccessible `DoDefaultAction` only SELECTS (never
+toggles expansion) — workspace children never realize without a real double-click, so any
+MC-provisioning phase is input-injection-dependent by nature (FlaUI SendInput fails with
+ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all work).
+
 ## Known high-risk regressions → pinned by
 
 | Regression (remediation it would undo) | Pinned by |
@@ -761,6 +810,7 @@ uri and died before the import (`7813b73`).
 | A stopped/restarting Event Server surfacing as a silent 30-second hang or a generic 502 indistinguishable from a target failure, so the admin cannot tell "proxy component absent" from "target down" (#58) | `ProxyFetchCorrelationTests` (deadline silence = `ServerUnavailable`; `Fail` carries the channel reason), `ProxyForwardConnectionTests` (503 component page, 403 vs 502 vs 504 posture table, size-cap page), SC-5 |
 | The tunnel TLS leg trusting any chain (every wss device invisibly unvalidated), or the wss posture drifting onto an http twin entry so a strict https origin never admits the upgrade (#60) | `ProxyTunnelServerTests` (production resolver is null = SslStream full chain validation; untrusted chain → explicit `TlsValidation` naming the origin and the Event Server side; the accept-all resolver is a test-only seam), `ProxyForwardPolicyTests` (https entry required for the upgrade — http twin alone 403; no `WebSocketTunnelRefused` posture exists), SC-6 |
 | The Status tab hammering the Event Server after its tab closes (polling follows the pane, not the selection), or bitrate columns inventing spikes out of first sightings / backwards counters (#76) | `ProxyStatusViewTests` (rate needs two sightings, non-later snapshot / backwards counters / unknown ids → zero, `Reset` drops the baseline), `WorkspaceTabShellGuardTests` (Status tab has no config input — it can never dirty the pane), MC-12 (marker count flat across tab-away, resumes on reopen) |
+| Client-side proxy refusals vanishing with the debug log, so an integrator fixing "camera won't load" gets no per-view record of which origin the allowlist refused (#83) | `ProxyBlockTallyTests` (per-origin+reason counts, navigation reset, bounded eviction, dead-forwarder isolation, one ES payload + one local row per refusal), SC-7 |
 
 ## Scope notes (deliberate)
 
