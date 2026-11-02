@@ -32,6 +32,7 @@
     <Compile Include="..\WebContent\Admin\WorkspaceTabPolicy.cs" Link="WorkspaceTabPolicy.cs" />
     <Compile Include="..\WebContent\Admin\ProxyStatusView.cs" Link="ProxyStatusView.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceViewItemSync.cs" Link="WorkspaceViewItemSync.cs" />
+    <Compile Include="..\WebContent\Admin\ProxyAllowlistEditor.cs" Link="ProxyAllowlistEditor.cs" />
     <Compile Include="..\WebContent\WebContentConfiguration.cs" Link="WebContentConfiguration.cs" />
     <Compile Include="..\WebContent\ProxyPolicy.cs" Link="ProxyPolicy.cs" />
     <Compile Include="..\WebContent\ProxyFetchContract.cs" Link="ProxyFetchContract.cs" />

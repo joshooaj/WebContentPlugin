@@ -14,6 +14,10 @@ namespace WebContent.Tests
     /// (fail closed); the XAML guards pin the tab order/identity, that every existing settings
     /// control moved verbatim onto Settings, and that the placeholder tabs carry no input
     /// control that could write configuration ("no config writes from placeholder tabs").
+    /// #81 took the Proxy tab live, and the same guards now pin the structured allowlist grid
+    /// (column order + per-row AutomationIds, the collapsed-by-default wildcard banner, rows
+    /// added/removed only by explicit buttons), that the proxy section left the Settings tab, and
+    /// that the free-text allowlist box and its accept-untrusted token are gone from the admin UI.
     /// </summary>
     public class WorkspaceTabShellGuardTests
     {
@@ -59,34 +63,157 @@ namespace WebContent.Tests
                 .ToHashSet();
 
             // Every control the item manager fills/saves and the ux probes reach by AutomationId:
-            // the shell must not have dropped or renamed any of them.
+            // the shell must not have dropped or renamed any of them. #81 moved the whole proxy
+            // section off Settings onto the Proxy tab (pinned on its own below), so the proxy
+            // ids are now asserted ABSENT here: the free-text txtProxyTargets box must not come
+            // back alongside the grid, and Settings cannot grow proxy UI of its own.
             foreach (var required in new[]
             {
                 "configError", "txtName", "txtHomeAddress",
                 "chkHideToolbar", "chkHideAddress", "lblZoomLevel", "txtZoomLevel", "zoomSlider",
                 "chkRememberLastAddress", "chkAllowBackgroundBrowser", "chkAllowAudioNotifications", "chkMuteAudio",
                 "chkClearBrowsingDataOnExit", "chkIsolateBrowserInstances", "chkEnableDevTools",
-                "chkProxyEnabled", "lblProxyTargets", "txtProxyTargets", "lblProxyTargetsHint",
-                "lblProxyTestUrl", "txtProxyTestUrl", "btnProxyTestFetch", "lblProxyTestHint", "lblProxyTestResult",
             })
             {
                 Assert.True(controlNames.Contains(required), $"Settings tab lost control '{required}'.");
             }
+
+            foreach (var moved in new[]
+            {
+                "chkProxyEnabled", "lblProxyTargets", "txtProxyTargets", "lblProxyTargetsHint",
+                "lblProxyTestUrl", "txtProxyTestUrl", "btnProxyTestFetch", "lblProxyTestHint", "lblProxyTestResult",
+            })
+            {
+                Assert.True(!controlNames.Contains(moved), $"Settings tab carries proxy control '{moved}' - the proxy section lives on the Proxy tab (#81).");
+            }
+        }
+
+        [Fact]
+        public void ProxyTabCarriesTheStructuredAllowlistEditorGrid()
+        {
+            // #81: the Proxy tab is live - routing toggle, the structured grid, the wildcard
+            // warning banner, add/remove affordances, and the fetch harness. The AutomationIds
+            // below are the probe surface; the grid's per-row AutomationIds (proxyRow*) are the
+            // ids the ux harness resolves cells by, scoped under each row.
+            var proxy = ConfigPageTabs().Single(t => Name(t) == "tabProxy");
+            var controlNames = proxy.Descendants()
+                .Select(e => e.Attribute(Xaml + "Name")?.Value)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .ToHashSet();
+
+            foreach (var required in new[]
+            {
+                "chkProxyEnabled", "lblProxyTargets", "proxyWildcardWarning", "txtProxyWildcardWarning",
+                "dgProxyTargets", "btnProxyTargetAdd", "lblProxyTargetsHint",
+                "lblProxyTestUrl", "txtProxyTestUrl", "btnProxyTestFetch", "lblProxyTestHint", "lblProxyTestResult",
+            })
+            {
+                Assert.True(controlNames.Contains(required), $"Proxy tab lost probe-surface control '{required}'.");
+            }
+
+            var grid = proxy.Descendants().Single(e => e.Name.LocalName == "DataGrid");
+            Assert.Equal("dgProxyTargets", grid.Attribute(Xaml + "Name")?.Value);
+
+            // The grid edits rows through live template-column editors (no grid edit mode), and
+            // every editing control carries its scoped AutomationId.
+            var expectedColumns = new[]
+            {
+                ("Scheme", "proxyRowScheme"),
+                ("Host", "proxyRowHost"),
+                ("Port", "proxyRowPort"),
+                ("Accept untrusted", "proxyRowUntrusted"),
+                ("Problem", "proxyRowProblem"),
+                ("Remove", "proxyRowRemove"),
+            };
+            var columns = grid.Descendants()
+                .Where(e => e.Name.LocalName.EndsWith("Column", System.StringComparison.Ordinal))
+                .ToList();
+            Assert.Equal(expectedColumns.Length, columns.Count);
+            for (var i = 0; i < expectedColumns.Length; i++)
+            {
+                Assert.Equal(expectedColumns[i].Item1, columns[i].Attribute("Header")?.Value);
+                var cell = columns[i].Descendants()
+                    .Single(e => e.Attribute("AutomationProperties.AutomationId")?.Value == expectedColumns[i].Item2);
+                Assert.NotNull(cell);
+            }
+
+            // The warning banner starts collapsed; the page code keys its visibility solely off
+            // a row being the full-host hatch.
+            var warning = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == "proxyWildcardWarning");
+            Assert.Equal("Collapsed", warning.Attribute("Visibility")?.Value);
+
+            // Add/remove: rows are added only by the explicit button, removed only by the
+            // per-row button - never by grid row-editing affordances.
+            Assert.Equal("False", grid.Attribute("CanUserAddRows")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserDeleteRows")?.Value);
+            var addButton = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == "btnProxyTargetAdd");
+            Assert.Equal("OnProxyTargetAdd", addButton.Attribute("Click")?.Value);
+        }
+
+        [Fact]
+        public void ProxyGridCellBindingsPushToTheRowImmediately()
+        {
+            // #81, learned the hard way live: a DataGrid defers the source update of a cell-content
+            // binding that does not ask for UpdateSourceTrigger=PropertyChanged. The editor then
+            // shows the picked scheme / the ticked checkbox while the row silently keeps the old
+            // value - the storage audit line and a reloaded pane both catch it, after the edit has
+            // already looked successful. Every writeable binding inside the grid's templates must
+            // say PropertyChanged; the read-only Problem cell (no Mode=TwoWay) is exempt.
+            var proxy = ConfigPageTabs().Single(t => Name(t) == "tabProxy");
+            var grid = proxy.Descendants().Single(e => e.Name.LocalName == "DataGrid");
+
+            string Tighten(string value) => new(value.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
+
+            var offenders = grid.Descendants()
+                .SelectMany(e => e.Attributes())
+                .Where(a => a.Value.Contains("{Binding", System.StringComparison.Ordinal))
+                .Where(a => Tighten(a.Value).Contains("mode=twoway", System.StringComparison.OrdinalIgnoreCase))
+                .Where(a => !Tighten(a.Value).Contains("updatesourcetrigger=propertychanged", System.StringComparison.OrdinalIgnoreCase))
+                .Select(a => $"{a.Name.LocalName}=\"{a.Value}\"")
+                .ToList();
+
+            Assert.True(offenders.Count == 0,
+                "grid cell bindings that defer their source update (add UpdateSourceTrigger=PropertyChanged): " +
+                string.Join("; ", offenders));
+        }
+
+        [Fact]
+        public void TheFreeTextAllowlistEditorIsGoneAndItsTokenIsNotUserFacing()
+        {
+            // #81 AC: "the accept-untrusted free-text token is no longer user-facing anywhere in
+            // the MC UI (reader tolerance for stored legacy tokens remains)". Structurally pinned:
+            // the free-text box and the Proxy-tab placeholder are absent from the page, and no
+            // admin-facing string teaches a typed token any more - the flag is a grid column.
+            // Reader tolerance stays pinned where it lives: ProxyPolicyTests pins the legacy
+            // line grammar, ProxyAllowlistEditorTests pins legacy stored records rendering.
+            var document = XDocument.Load(PagePath);
+            Assert.DoesNotContain(document.Descendants(), e => Name(e) == "txtProxyTargets");
+            Assert.DoesNotContain(document.Descendants(), e => Name(e) == "txtProxyTabPlaceholder");
+
+            var strings = XDocument.Load(StringsPath);
+            string Value(string name) => strings.Descendants("data")
+                .Single(d => d.Attribute("name")?.Value == name)
+                .Element("value")?.Value ?? string.Empty;
+
+            Assert.DoesNotContain("accept-untrusted", Value("ProxyTargetsHint"), System.StringComparison.Ordinal);
+            Assert.DoesNotContain("accept-untrusted", Value("InvalidProxyTargetMessage"), System.StringComparison.Ordinal);
+            Assert.DoesNotContain("accept-untrusted", Value("ProxyWildcardWarning"), System.StringComparison.Ordinal);
+            Assert.False(string.IsNullOrWhiteSpace(Value("ProxyColumnAcceptUntrusted")));
         }
 
         [Fact]
         public void PlaceholderTabsCarryNoConfigWriteControls()
         {
-            // The AC "no config writes from placeholder tabs" pinned structurally: an interactive
-            // input on Proxy/Diagnostics could fire the dirty chain or land in the save. Status is
-            // no longer a placeholder (#76) and is guarded on its own below.
+            // #81 took the Proxy tab live, so Diagnostics (#84) is the only placeholder left: an
+            // interactive input there could fire the dirty chain or land in the save. Status is
+            // guarded on its own below.
             var writeCapable = new[]
             {
                 "TextBox", "CheckBox", "Button", "Slider", "ComboBox", "ListBox",
                 "RadioButton", "PasswordBox", "DataGrid", "TreeView", "Menu",
             };
 
-            foreach (var placeholder in new[] { "tabProxy", "tabDiagnostics" })
+            foreach (var placeholder in new[] { "tabDiagnostics" })
             {
                 var tab = ConfigPageTabs().Single(t => Name(t) == placeholder);
                 var offenders = tab.Descendants()
@@ -154,10 +281,15 @@ namespace WebContent.Tests
             }
         }
 
+        private static string PagePath =>
+            Path.Combine(RepoLocator.FindRepoRoot(), "src", "WebContent", "Admin", "WorkspaceConfigPage.xaml");
+
+        private static string StringsPath =>
+            Path.Combine(RepoLocator.FindRepoRoot(), "src", "WebContent", "Strings.resx");
+
         private static System.Collections.Generic.List<XElement> ConfigPageTabs()
         {
-            var path = Path.Combine(RepoLocator.FindRepoRoot(), "src", "WebContent", "Admin", "WorkspaceConfigPage.xaml");
-            var document = XDocument.Load(path);
+            var document = XDocument.Load(PagePath);
             return document.Descendants(Presentation + "TabItem").ToList();
         }
 
