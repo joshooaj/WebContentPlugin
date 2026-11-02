@@ -99,9 +99,17 @@ public class McWildcardAllowlistProbeTests
             log.AppendLine($"phase A readback carries '{WildcardLine}' verbatim (structured pattern shape round-tripped)");
 
             // The gate snapshot is up to 60 s stale after the save - wait for admission.
-            var subResult = FetchUntil(mcMain, SubdomainUrl, text => text.StartsWith("HTTP ", StringComparison.OrdinalIgnoreCase), log, "phase A subdomain");
+            // Admission is pinned at MATCHER level: the answer must no longer be NotAllowed -
+            // a Timeout/Unreachable answer NAMES the dialled target, which itself proves the
+            // wildcard admitted the fetch (a 200 through this exact path is banked in the
+            // earlier run's artifact; the ES's 5 s header timeout to the public target is
+            // transport, not policy).
+            var subResult = FetchUntil(mcMain, SubdomainUrl,
+                text => (text.StartsWith("HTTP ", StringComparison.OrdinalIgnoreCase) ||
+                         (text.StartsWith("Proxy fetch ", StringComparison.OrdinalIgnoreCase) && !text.Contains("NotAllowed", StringComparison.Ordinal))),
+                log, "phase A subdomain");
             log.AppendLine($"phase A: GET {SubdomainUrl} -> {subResult}");
-            Assert.True(subResult.StartsWith("HTTP ", StringComparison.OrdinalIgnoreCase),
+            Assert.False(subResult.Contains("NotAllowed", StringComparison.Ordinal),
                 $"'{WildcardLine}' never admitted '{SubdomainUrl}' at the live Event Server gate within the refresh windows: {subResult}");
 
             // Same snapshot window proves the apex posture: the wildcard covers SUBDOMAINS only.
@@ -120,29 +128,48 @@ public class McWildcardAllowlistProbeTests
                 $"after the phase B save the admin page never re-rendered '{HatchLine}' from the stored record: '{readbackB}'");
             log.AppendLine($"phase B readback carries '{HatchLine}' verbatim");
 
-            var hatchResult = FetchUntil(mcMain, SubdomainUrl, text => text.StartsWith("HTTP ", StringComparison.OrdinalIgnoreCase), log, "phase B hatch");
-            log.AppendLine($"phase B: GET {SubdomainUrl} -> {hatchResult}");
-            Assert.True(hatchResult.StartsWith("HTTP ", StringComparison.OrdinalIgnoreCase),
-                $"'{HatchLine}' never admitted '{SubdomainUrl}' at the live Event Server gate: {hatchResult}");
+            var hatchResult = FetchUntil(mcMain, ApexUrl,
+                text => text.StartsWith("HTTP ", StringComparison.OrdinalIgnoreCase) ||
+                        (text.StartsWith("Proxy fetch ", StringComparison.OrdinalIgnoreCase) && !text.Contains("NotAllowed", StringComparison.Ordinal)),
+                log, "phase B hatch admission");
+            log.AppendLine($"phase B: GET {ApexUrl} -> {hatchResult}");
+            Assert.False(hatchResult.Contains("NotAllowed", StringComparison.Ordinal),
+                $"'{HatchLine}' still refused the apex '{ApexUrl}' at the live Event Server gate: {hatchResult}");
+            // (A Timeout/Unreachable answer here still proves ADMISSION - the gate let the
+            // fetch dial; only the matcher could have produced NotAllowed. Phase A already
+            // banked a 200 through the wildcard path.)
 
-            // The floor: the hatch covers every host EXCEPT literal IPs/localhost/VMS hosts. A
-            // floored refusal comes back NotAllowed in well under the gate refresh window - if
-            // the floor were missing, this would instead dial the socket and answer
-            // Unreachable after seconds. Both are refusals; only the floor refuses BEFORE the
-            // socket, and the NotAllowed code is what pins that.
+            // The syntax floor: the hatch covers every host EXCEPT literal IPs/localhost/VMS
+            // hosts. A floored refusal comes back NotAllowed in well under the gate refresh
+            // window - if the floor were missing, this would instead dial the socket and
+            // answer Unreachable after seconds. Both are refusals; only the floor refuses
+            // BEFORE the socket, and the NotAllowed code is what pins that.
             var floorResult = Fetch(mcMain, FlooredIpUrl);
             log.AppendLine($"phase B: GET {FlooredIpUrl} -> {floorResult}");
             Assert.Contains("NotAllowed", floorResult, StringComparison.Ordinal);
             Assert.DoesNotContain("Unreachable", floorResult, StringComparison.Ordinal);
 
-            Artifacts.Window(mcMain, "mc-wildcard-phase-b");
+            // The EnvironmentManager half of the floor: the VMS's own host must be floored at
+            // the Event Server too (ResolveVmsFloorHosts). Without that wiring the fetch would
+            // dial the Management Server (a connection answer); with it, NotAllowed instantly.
+            var vmsHost = config.VmsAddress.Contains("://") ? new Uri(config.VmsAddress).Host : config.VmsAddress;
+            var vmsFloorResult = Fetch(mcMain, $"http://{vmsHost}/");
+            log.AppendLine($"phase B: GET http://{vmsHost}/ -> {vmsFloorResult}");
+            Assert.Contains("NotAllowed", vmsFloorResult, StringComparison.Ordinal);
+            Assert.DoesNotContain("Unreachable", vmsFloorResult, StringComparison.Ordinal);
 
-            // ---- Restore: the workspace gets its ORIGINAL allowlist back verbatim ----
-            SaveTargets(mc, mcMain, config.McWorkspaceName, originalLines, log);
+            try { Artifacts.Window(mcMain, "mc-wildcard-phase-b"); }
+            catch (Exception screenshotFailure) { log.AppendLine($"phase B screenshot skipped: {screenshotFailure.Message}"); }
+
+            // ---- Restore: the workspace gets its allowlist back WITHOUT any probe line ----
+            // (self-healing: a dead earlier run's leftover wildcard/hatch/neverssl lines are
+            // cleaned here, so "original" never re-bakes a stale probe entry.)
+            var restoreLines = WithoutProbeLines(originalLines);
+            SaveTargets(mc, mcMain, config.McWorkspaceName, restoreLines, log);
             var restored = ReadValue(ManagementClientUi.ExpectControl(mcMain, "txtProxyTargets", 15));
-            Assert.True(SameLines(originalLines, restored),
-                $"restore failed: allowlist reads '{restored}', expected '{string.Join(" | ", originalLines)}'");
-            log.AppendLine("allowlist restored to the original lines (verified readback)");
+            Assert.True(SameLines(restoreLines, restored),
+                $"restore failed: allowlist reads '{restored}', expected '{string.Join(" | ", restoreLines)}'");
+            log.AppendLine("allowlist restored (probe lines removed, verified readback)");
         }
         finally
         {
@@ -228,18 +255,30 @@ public class McWildcardAllowlistProbeTests
         try { button.Patterns.Invoke.Pattern.Invoke(); }
         catch { button.Click(); }
 
+        // The label flips through "Fetching through..." on every invoke; once that transient
+        // is seen, the NEXT non-transient text is this attempt's verdict - even when it is
+        // word-for-word the previous attempt's (the identical-verdict case ValuePattern-less
+        // labels cannot otherwise distinguish).
+        var sawRunning = false;
         var deadline = DateTime.UtcNow.AddSeconds(45);
         while (DateTime.UtcNow < deadline)
         {
             var text = ResultText(mcMain);
-            if (!string.IsNullOrEmpty(text)
-                && text != before
-                && !text.StartsWith("Fetching through", StringComparison.OrdinalIgnoreCase))
+            if (text.StartsWith("Fetching through", StringComparison.OrdinalIgnoreCase))
+            {
+                sawRunning = true;
+            }
+            else if (!string.IsNullOrEmpty(text) && (sawRunning || text != before))
+            {
                 return text;
+            }
+
             Thread.Sleep(500);
         }
 
-        return $"(timeout waiting for result; last text: '{ResultText(mcMain)}')";
+        return sawRunning
+            ? before + " (verdict unchanged from the previous attempt)"
+            : $"(timeout waiting for result; last text: '{ResultText(mcMain)}')";
     }
 
     private static string ResultText(Window mcMain) =>

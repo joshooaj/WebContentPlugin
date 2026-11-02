@@ -45,6 +45,7 @@ is not evidence the plugin never ran.
 | MC workspace config tab shell (Settings \| Proxy \| Diagnostics \| Status; Status behind the SecurityActions edit-rights gate) | #74 | `WorkspaceTabShellGuardTests` (the XAML declares exactly the four tabs in shell order with stable AutomationIds; Status defaults `Collapsed` so the gate fails closed before any fill; EVERY pre-existing settings/proxy control still lives on the Settings tab under the same AutomationId the ux probes read; placeholder tabs contain zero write-capable input and carry a probe-assertable placeholder marker), `WorkspaceTabPolicy` decision table (Status renders only on an explicit `Granted` — `Denied`/`LookupFailed` hide the whole tab) | See MC-11 below - **admin half live row PASSED 2026-11-02** (run `20261102-012719`): four tabs render on the live MC with Status granted to the admin, walking the placeholder tabs never enables Save, and the Settings fields read back identically; the View-only denial half stays manual |
 | Proxy diagnostics substrate (block reports, session lifecycle, Event Server aggregation, status query) | #69 | `ProxyDiagnosticsAggregatorTests` (blocked ring dedup + accumulating counts + recency eviction at the 200-origin cap, new-entry-only transition signal; session open/heartbeat/close and the idle sweep; fetch/tunnel traffic counters and req/min; workspaces stay isolated), `ProxySessionRegistryTests` (client-side per-view registry: open/close, heartbeat payloads, bounded), `ProxyBlockReporterTests` (report carries the workspace identity + canonical origin; blank or workspace-less reports drop; a throwing send seam never reaches the browser flow), `ProxyDiagnosticsWireTests` (every diagnostics payload round-trips as one JSON string; an unset session is an explicit null member; a frame shaped by another build is refused, never half-bound), `ProxyForwardConnectionTests` (each client-visible refusal reaches the reporter — local 403, tunnel-open fault, dead fetch channel — while an ES-answered refusal is never re-reported, so counts do not double), `ProxyFetchContractGuardTests` (four new payloads stay plugin-namespace `[Serializable]` public-field types inside the whitelist; the new ids declared in `PluginDefinedMessageIds`) | See ES-2 below - **load half observed live 2026-11-02**: the restarted Event Server logs `Proxy fetcher ready (..., diagnostics=WebContent.Proxy.BlockReport/WebContent.Proxy.SessionEvent/WebContent.Proxy.StatusRequest)` on a drop hash-identical to the Smart Client machine's. The ingress markers (session open, block recorded) need a proxied Smart Client session, which only an interactive desktop can drive |
 | MC Status tab: live proxy sessions (polling tied to the open tab, read-only, role-gated by the #74 grant) | #76 | `ProxyStatusViewTests` (failure postures: a lost query is never rendered as an empty table, the Event Server's own code survives, a blank code falls back to `ServerUnavailable`; zero sessions is an honest success with no rows; rows arrive as pre-formatted display strings with `(unknown)` placeholders; rate differencing over the ES's cumulative counters needs two sightings, impossible deltas (non-later snapshot, backwards counters, unknown ids) answer zero, `Reset` drops the baseline; culture-invariant byte/rate/per-minute/duration formatting incl. NaN/Infinity/negative clamps), `WorkspaceTabShellGuardTests` (the Status tab is no longer a placeholder: exactly one `IsReadOnly` DataGrid with add/delete off, every button on the tab wired to `OnStatusRefresh`, zero configuration input controls - walking it can never dirty the pane; probe-selectable surface ids pinned) | See MC-12 below - **live row pending a connected desktop (2026-11-02)**: units green, drop deployed to the Management Client machine (`C32CE7B5…`), the Event Server untouched (its #69 drop already answers `StatusRequest`); the first probe attempt died at the first mouse call on a disconnected session, before any live state was touched |
+| Proxy allowlist wildcards: ONE shared matcher for all three gates, structured entry shape, wildcard SSRF floor | #73 | `ProxyPolicyTests` (wildcard grammar: leftmost-label `*.tail` + the lone `*` hatch only - mid-label wildcards, `*x`, `*.`, bad labels, non-http schemes rejected; matching: subdomains covered, apex never, label-boundary safe, scheme/port exact, case-insensitive; SSRF floor: literal IPv4 (dotted-quad + numeric shorthand), IPv6 (bracketed/colon), `localhost`, and the VMS's own hosts are never wildcard-matched while explicit exact entries may still name them; seeded pseudo-random host/IPv4 property pins over 300+200 rounds), `ProxyAllowlistGateAgreementTests` (the same (entries, request-origin) matrix drives the Event Server fetch gate, the client forward gate, and the leaf-mint gate to identical verdicts; legacy `host` records and new `pattern` records gate identically), `ProxyServerAllowlistTests` (pattern and legacy shapes gate identically at the ES; VMS floor fed through a resolver seam and kept across resolver faults; the accept-untrusted flag rides wildcard entries under the same floor), `ProxyForwardPolicyTests` (client gate consumes the shared matcher in every posture), `ProxyWorkspaceProfileTests` (pattern entries and the floor hosts travel together through the seeded profile property), `ProxyConfigurationTests` (the stored entry gains `pattern`; readers accept BOTH shapes forever, no migration write-back - a read never rewrites the stored shape), `WorkspaceTabShellGuardTests` (boolean-attribute pins learned the hard way in the MC-13 live walk) | See MC-13 below - **live rows PASSED 2026-11-02** (run `20261102-073648`): wildcard/hatch lines save and read back verbatim through the live Management Client (structured `pattern` shape round-trip); `http://*.neverssl.com` admits `http://online.neverssl.com/` (a `HTTP 200 - 3961 bytes` banking in run `20261102-071520`) while the apex refuses `NotAllowed` in 0.0s; the `http://*` hatch admits the apex (200 in run `20261102-073010`) yet the literal IP and the VMS's own host both refuse `NotAllowed` in 0.0s - refused before any socket opens; allowlist restored to its four production lines with verified readback |
 
 ## Manual host checks
 
@@ -259,6 +260,54 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~McProxyStatusProbeTests' }
    Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~McWorkspaceTabsProbeTests' }   # its Status step now expects the live grid
    ```
+
+### MC-13 Proxy allowlist wildcards live at the Event Server gate (#73)
+
+1. Restart Management Client with the new drop (both machines need it: the ES gate and the MC
+   save path both changed). Allowlist a wildcard line on a proxy-enabled workspace, e.g.
+   `http://*.neverssl.com`, and Save. The page must re-render the line **verbatim** — that
+   readback is the structured `pattern` storage record round-tripping (older builds store it as
+   `host`; readers accept both forever).
+2. Use the workspace page's "Test proxy fetch" row. The Event Server's allowlist snapshot
+   re-resolves at most once per 60 s window, so the first fetch after a save can still answer
+   with the PREVIOUS list — a stale-snapshot `NotAllowed` that flips to admission after the
+   window is normal; pin verdicts only from post-window fetches.
+3. Wildcard posture with only `http://*.neverssl.com` allowlisted: `http://online.neverssl.com/`
+   is admitted (a 200, or a `Timeout`/`Unreachable` that NAMES the dialled target — the
+   dial itself proves admission, only the matcher can answer `NotAllowed`), while the apex
+   `http://neverssl.com/` refuses `NotAllowed` in 0.0s (the wildcard covers subdomains, never
+   the apex itself).
+4. Hatch + SSRF floor posture with `http://*` allowlisted: normal hosts are admitted (the apex
+   from step 3 flips from `NotAllowed` to fetchable — one entry, two verdicts, one refresh
+   window apart), while `http://10.20.30.40/` (literal IP) and `http://vms.joshooaj.com/`
+   (the VMS's own host, from `EnvironmentManager`) both refuse `NotAllowed` in 0.0s. The 0.0s
+   matters: a missing floor would DIAL and answer `Unreachable` after seconds. Restore the
+   workspace's production lines afterwards.
+5. Automatable: `McWildcardAllowlistProbeTests.ProbeWildcardAndHatchAtTheLiveEventServerGate`
+   (probe category — drives the whole protocol above through the live MC, self-healing: it strips
+   any earlier dead run's probe lines on save and always restores the production lines with
+   verified readback); artifacts `mc-wildcard-phase-b.png` + `mc-wildcard-probe-results.txt`
+   under `%TEMP%\webcontent-mc-wildcard-probe\<run>`.
+
+   Record (MC-13) - **live rows PASSED 2026-11-02** (green run `20261102-073648`, both machines
+   on drop `3D90CE93…` hash-verified): phase A readback carried `http://*.neverssl.com` verbatim;
+   the subdomain was admitted (with the `HTTP 200 - 3961 bytes` success shape banked in run
+   `20261102-071520` before the public target began throttling the Event Server's 5 s header
+   window), the apex refused `NotAllowed` 0.0s; phase B readback carried `http://*` verbatim,
+   the apex then fetched `HTTP 200` (run `20261102-073010`), and `http://10.20.30.40/` plus
+   `http://vms.joshooaj.com/` both refused `NotAllowed` 0.0s — the syntax floor and the
+   EnvironmentManager floor each refusing before any socket opened. The allowlist ended restored
+   to its four production lines (the run also cleaned a `http://*` left behind by a run the
+   desktop-disconnect killed mid-restore).
+
+   LIVE FINDING from this walk: the deployed #76 `dgStatusSessions` carried
+   `CanUserResizeRows="Disabled"` — a WinForms tri-state string on a WPF-BOOLEAN property — so
+   `GenerateDetailUserControl` threw (`FormatException: Disabled is not a valid value for
+   Boolean`) and the ENTIRE workspace config page failed to load: no Settings controls at all,
+   which is why the first two MC-13 attempts died at `txtProxyTargets`/tree-walk steps, not at
+   anything #73 changed. Fixed in the `fix(mc): dgStatusSessions carried tri-state…` commit; the
+   shell guard now pins every WPF-boolean `CanUser*` attribute on every DataGrid of the page to
+   a real bool, and the #76/#74 MC rows should be re-walked on the fixed drop.
 
 ### SC-1 End-to-end proxied page load (#54)
 
@@ -811,6 +860,8 @@ ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all 
 | The tunnel TLS leg trusting any chain (every wss device invisibly unvalidated), or the wss posture drifting onto an http twin entry so a strict https origin never admits the upgrade (#60) | `ProxyTunnelServerTests` (production resolver is null = SslStream full chain validation; untrusted chain → explicit `TlsValidation` naming the origin and the Event Server side; the accept-all resolver is a test-only seam), `ProxyForwardPolicyTests` (https entry required for the upgrade — http twin alone 403; no `WebSocketTunnelRefused` posture exists), SC-6 |
 | The Status tab hammering the Event Server after its tab closes (polling follows the pane, not the selection), or bitrate columns inventing spikes out of first sightings / backwards counters (#76) | `ProxyStatusViewTests` (rate needs two sightings, non-later snapshot / backwards counters / unknown ids → zero, `Reset` drops the baseline), `WorkspaceTabShellGuardTests` (Status tab has no config input — it can never dirty the pane), MC-12 (marker count flat across tab-away, resumes on reopen) |
 | Client-side proxy refusals vanishing with the debug log, so an integrator fixing "camera won't load" gets no per-view record of which origin the allowlist refused (#83) | `ProxyBlockTallyTests` (per-origin+reason counts, navigation reset, bounded eviction, dead-forwarder isolation, one ES payload + one local row per refusal), SC-7 |
+| A wildcard allowlist entry reaching the apex, a literal IP, `localhost`, or the VMS's own hosts - SSRF widening of every gate AND the mint policy at once (#73) | `ProxyPolicyTests` (seeded apex/subdomain/floor invariants over random hosts and IPv4s), `ProxyAllowlistGateAgreementTests` (ES fetch, client forward, and leaf mint reach identical verdicts on one matrix), MC-13 |
+| A tri-state string on a WPF-boolean DataGrid attribute taking the whole Management Client config page down at BAML parse time (#76, found in the MC-13 walk) | `WorkspaceTabShellGuardTests` (every `CanUser*` on every page DataGrid pinned to a real bool), MC-13 |
 
 ## Scope notes (deliberate)
 
