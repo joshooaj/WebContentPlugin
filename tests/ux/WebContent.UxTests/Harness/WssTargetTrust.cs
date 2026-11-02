@@ -29,7 +29,12 @@ public static class WssTargetTrust
 
     public static void ImportOnEventServer(UxConfig config, X509Certificate2 certificate, StringBuilder log)
     {
-        var host = Environment.GetEnvironmentVariable("UX_ES_HOST") ?? new Uri(config.VmsAddress).Host;
+        // Same host resolution as EventServerControl: UX_ES_HOST or VMS_ADDRESS, which in the
+        // lab .env is a bare hostname - only parse as a uri when it actually carries a scheme.
+        var address = Environment.GetEnvironmentVariable("UX_ES_HOST") ?? config.VmsAddress;
+        var host = address.Contains("://", StringComparison.Ordinal) && Uri.TryCreate(address, UriKind.Absolute, out var addressUri)
+            ? addressUri.Host
+            : address;
         log.AppendLine($"importing the probe certificate (thumbprint {certificate.Thumbprint}) into LocalMachine\\Root on {host}...");
 
         // Public DER only: the trust store needs the certificate, never the private key.
