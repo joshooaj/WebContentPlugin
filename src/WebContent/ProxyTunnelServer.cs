@@ -24,10 +24,10 @@ namespace WebContent
     /// Ticket #60 widened the target schemes: a plain ws:// upgrade tunnels to an http-scheme
     /// target over a raw socket; a wss:// upgrade (an upgrade inside a terminated https tunnel,
     /// or an absolute wss GET) gets a TLS leg — the handshake rides an SslStream the dialer
-    /// validates with FULL chain validation by default, and the pumps then carry decrypted
-    /// websocket frames. The per-target accept-untrusted override on this leg is a follow-on
-    /// ticket; <see cref="_tlsValidationResolver"/> is the seam it will use and stays null in
-    /// production until then.
+    /// validates with FULL chain validation unless the target's own allowlist entry carries the
+    /// per-target accept-untrusted override (#61, wired through <see cref="_tlsValidationResolver"/>
+    /// — scoped to this tunnel's SslStream, never global), and the pumps then carry decrypted
+    /// websocket frames.
     ///
     /// Event-Server protection: a hard concurrency cap (a tunnel is a parked socket plus two
     /// pumps), a per-message byte cap, and idle reclamation that also catches half-open tunnels
@@ -61,9 +61,10 @@ namespace WebContent
         private readonly Action<string> _log;
 
         /// <summary>
-        /// Per-target TLS validation override for the https tunnel leg. Null (production, #60)
-        /// means SslStream's default FULL chain validation. The follow-on ticket wires it to the
-        /// allowlist's per-target accept-untrusted flag — never a process-wide bypass.
+        /// Per-target TLS validation override for the https tunnel leg (#61). The Event Server
+        /// wires this to the allowlist's per-target accept-untrusted flag: a flagged target gets
+        /// the accept-untrusted posture on THIS tunnel's own SslStream, anything else resolves to
+        /// null = SslStream's default FULL chain validation. Never a process-wide bypass.
         /// </summary>
         private readonly Func<Uri, RemoteCertificateValidationCallback> _tlsValidationResolver;
 
@@ -153,11 +154,12 @@ namespace WebContent
                 await connectTask;
                 Stream stream = socket.GetStream();
 
-                // #60: an https-scheme tunnel target (a wss upgrade) gets a TLS leg with the same
-                // full-chain-validation posture as the https fetcher. The rebuilt handshake and
-                // every frame byte ride this SslStream; the browser's frames reach it already
-                // decrypted by the loopback tunnel termination, so this is the target's real wss
-                // leg - exactly the leg ADR-0002 keeps the security decision on.
+                // #60/#61: an https-scheme tunnel target (a wss upgrade) gets a TLS leg with the
+                // same per-target posture as the https fetcher: full-chain validation unless THIS
+                // target's allowlist entry carries the accept-untrusted override. The rebuilt
+                // handshake and every frame byte ride this SslStream; the browser's frames reach
+                // it already decrypted by the loopback tunnel termination, so this is the
+                // target's real wss leg - exactly the leg ADR-0002 keeps the security decision on.
                 if (target.Scheme == Uri.UriSchemeHttps)
                 {
                     var ssl = new SslStream(

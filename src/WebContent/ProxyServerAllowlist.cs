@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Net.Security;
 
 namespace WebContent
 {
@@ -107,6 +108,32 @@ namespace WebContent
                 return _snapshot != null &&
                        ProxyPolicy.IsRequestAllowed(_snapshot.UntrustedOrigins, target, _floorHosts);
             }
+        }
+
+        /// <summary>
+        /// Ticket #61: the certificate-validation posture for the Event Server's wss tunnel leg
+        /// (see <see cref="ProxyTunnelServer"/>). Returns the validation callback to attach to
+        /// THIS tunnel's own SslStream: the accept-untrusted posture (#56) only when the allowlist
+        /// entry for exactly this origin carries the flag — the identical scoped decision the fetch
+        /// path makes — and null otherwise, which is SslStream's default FULL chain validation,
+        /// the exact #60 production posture. A flag for one target never reaches a neighbouring
+        /// origin, a non-https tunnel target, the browser-side loopback termination, or the
+        /// process-wide ServicePointManager. A closed gate, an unresolved config, or version skew
+        /// that hides the flag all resolve to null: fail-closed.
+        /// </summary>
+        internal RemoteCertificateValidationCallback TunnelTlsValidationCallback(Uri target)
+        {
+            if (target == null || target.Scheme != Uri.UriSchemeHttps)
+            {
+                return null;
+            }
+
+            if (!AcceptsUntrustedCertificate(target))
+            {
+                return null;
+            }
+
+            return (sender, certificate, chain, sslPolicyErrors) => true;
         }
 
         private void EnsureCurrent()

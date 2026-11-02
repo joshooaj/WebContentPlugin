@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Net.Security;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -124,16 +125,18 @@ namespace WebContent
                     OnProxyLeafRequest,
                     new CommunicationIdFilter(ProxyMessageIds.LeafRequestId));
 
-                // Ticket #57/#60: the Event Server half of the websocket CONNECT tunnel. The client
+                // Ticket #57/#60/#61: the Event Server half of the websocket CONNECT tunnel. The client
                 // has already allowlist-gated the upgrade; this side re-gates against its own
                 // allowlist union, replays the handshake to the target (raw socket for http-scheme
-                // targets, validated TLS leg for https-scheme wss targets), admits only a 101, and
+                // targets, TLS leg for https-scheme wss targets), admits only a 101, and
                 // pumps raw bytes both directions. The open runs on the thread pool (connect +
-                // handshake is seconds long), so the receive thread stays free.
+                // handshake is seconds long), so the receive thread stays free. #61: the TLS leg
+                // honours the same per-target accept-untrusted override as the fetch path — the
+                // resolver hands the tunnel its own SslStream's callback, never a global bypass.
                 _tunnels = new ProxyTunnelServer(
                     ProxyTunnelLimits.Default(),
                     message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message),
-                    null,
+                    ResolveTunnelTlsValidation,
                     (sessionId, clientBytes, targetBytes) => RecordTunnelTrafficSafe(sessionId, clientBytes, targetBytes));
                 _tunnelOpenFilterRegistration = _messageCommunication.RegisterCommunicationFilter(
                     OnProxyTunnelOpen,
@@ -742,6 +745,21 @@ namespace WebContent
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// #61: the per-target certificate posture for the wss tunnel's TLS leg. The allowlist's
+        /// accept-untrusted decision for exactly this canonical origin (the same scoped #56
+        /// decision the fetch path applies at line "OnProxyFetchRequest") becomes the validation
+        /// callback on THIS tunnel's own SslStream; everything else — no flag, an http-scheme
+        /// target, a closed gate, or version skew hiding the flag — resolves to null, SslStream's
+        /// default full chain validation. Never a process-wide bypass, never the browser-side
+        /// loopback termination.
+        /// </summary>
+        private RemoteCertificateValidationCallback ResolveTunnelTlsValidation(Uri target)
+        {
+            var allowlist = _allowlist;
+            return allowlist == null ? null : allowlist.TunnelTlsValidationCallback(target);
         }
 
         /// <summary>
