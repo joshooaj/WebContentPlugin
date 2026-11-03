@@ -71,9 +71,12 @@ namespace WebContent.Tests
         [Fact]
         public void RestartConditionCarriesTheChoiceAndThePresenceGate()
         {
+            // #77 moved the restart one slot later (After="CreateProxyAuthority") so the
+            // service comes back on a provisioned CA; the presence + choice condition is
+            // exactly the #82 shape.
             var wxs = Collapsed(SetupWxs());
             Assert.Contains(
-                "<Custom Action=\"RestartEventServerService\" After=\"InstallFiles\" Condition=\"NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND RESTART_EVENT_SERVER=&quot;1&quot;\" />",
+                "<Custom Action=\"RestartEventServerService\" After=\"CreateProxyAuthority\" Condition=\"NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND RESTART_EVENT_SERVER=&quot;1&quot;\" />",
                 wxs);
         }
 

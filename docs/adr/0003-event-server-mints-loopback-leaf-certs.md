@@ -1,7 +1,10 @@
 # 0003 — Event Server mints the loopback leaf certs; deployment CA trusted via LocalMachine stores
 
 Date: 2026-10-31
-Status: Accepted
+Status: Accepted; amended 2026-11-03 by #77 (see **Amendment** below — CA *creation*
+moved into the Event Server-side MSI as a gated install-time custom action; Decision §1's
+provisioning-script sentence and §4's "not a WiX custom action" objection are superseded,
+everything else stands).
 Amends: ADR-0002 (the CA/trust lifecycle in its Decision §1 and Consequences; the
 loopback-termination, fetch-pipeline, and per-target override parts of ADR-0002 stand).
 
@@ -73,3 +76,34 @@ Split the CA's two halves by trust boundary:
   leaf import, and local exchange-key ownership.
 - A machine that has not run the trust step shows Chromium certificate errors for proxied https
   targets — the same fail-closed posture as any untrusted CA, with plugin log guidance.
+
+## Amendment (#77, 2026-11-03) — CA creation moves into the Event Server-side MSI
+
+Ticket #77 (epic #64) inverts this ADR's rejection of MSI custom-action creation. The original
+§4 objection was an **ordering** one: a *client* MSI can't carry a CA that does not exist until
+the Event Server plugin first starts. That objection is answered by moving creation to the
+**Event Server machine's own install**, where the CA is created *during* the install instead of
+at first plugin start:
+
+1. The plugin installer's Event Server options page (only shown when `MilestoneEventServerService`
+   exists) carries an "Enable web content proxy support" checkbox (public property
+   `PROXY_SUPPORT`, default on, scripted decline `PROXY_SUPPORT=0`). A deferred exe custom action
+   (`CreateProxyAuthority`, type 1026 SYSTEM, `Return="check"`, built by `src/WebContentProxyCa`,
+   streamed as an MSI `Binary`, never part of the drop) runs **only when the Event Server service
+   is present AND the checkbox is ticked** — machines without an Event Server, and declined
+   installs, never have `LocalMachine\Personal` touched at all.
+2. The action does not mint certificates itself: it drives the plugin's **own**
+   `LoadOrCreateDeploymentAuthority` by reflection into the just-installed `WebContent.dll`
+   (the same posture the provision script had), so the CA shape stays single-sourced — fixed CN,
+   fixed machine key container, reuse of an existing valid CA untouched.
+3. It then grants the Event Server service's own logon account (SCM `ObjectName`) read access to
+   the CA private key, locating the key file through the CAPI handle
+   (`CspKeyContainerInfo.UniqueKeyContainerName`) instead of the script's hash-name guess. Failure
+   to provision or to grant fails the install (`Return="check"`), never a half-set-up deployment.
+4. `scripts/provision-event-server-authority.ps1` is retired to a legacy/repair fallback (dev
+   `Copy-Item` deployments, hand-repaired stores). The plugin's lazy first-mint creation in
+   `LoadOrCreateDeploymentAuthority` stays as the fallback for declined/legacy installs — no
+   behavior change there.
+5. Client trust (§4's remaining content) is unchanged: never automatic, one-time elevated admin
+   step via the Management Client export (ticket #75), Group Policy, or the Smart Client setup-mode
+   trust helper (ticket #72).

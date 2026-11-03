@@ -41,6 +41,7 @@ Task Lint -Depends ToolRestore {
         & dotnet format .\src\WebContent\WebContent.csproj --verify-no-changes
         & dotnet format .\src\WebContentTrustHelper\WebContentTrustHelper.csproj --verify-no-changes
         & dotnet format .\src\WebContentServiceCtl\WebContentServiceCtl.csproj --verify-no-changes
+        & dotnet format .\src\WebContentProxyCa\WebContentProxyCa.csproj --verify-no-changes
         & dotnet format .\src\WebContent.Tests\WebContent.Tests.csproj --verify-no-changes
         & dotnet format .\tests\ux\WebContent.UxTests\WebContent.UxTests.csproj --verify-no-changes
         Invoke-ScriptAnalyzer -Settings .\PSScriptAnalyzerSettings.psd1 . -ErrorAction Stop

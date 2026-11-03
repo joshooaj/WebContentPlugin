@@ -89,27 +89,34 @@ to tolerate a device's self-signed certificate — the flag is per target, never
 To make those pages render without browser certificate errors, the plugin uses one long-lived certificate
 authority per deployment (see `docs/adr/0003-event-server-mints-loopback-leaf-certs.md`):
 
-1. **Create the CA once on the Event Server machine, elevated.** The Event Server service runs as a
-   restricted built-in account (`NT AUTHORITY\NETWORK SERVICE` on current Milestone installs) that cannot
-   create the CA itself. Run this once from an elevated Windows PowerShell 5.1 session on the Event Server
-   machine, after the plugin is deployed there:
+1. **Create the CA once on the Event Server machine — the installer does it.** The Event
+   Server service runs as a restricted built-in account (`NT AUTHORITY\NETWORK SERVICE` on
+   current Milestone installs) that cannot create the CA itself, so the MSI does it elevated
+   at install time: on the **Event Server options** page (the page that appears only when the
+   machine runs the Event Server service), tick **Enable web content proxy support**. The
+   installer then creates the CA certificate named
+   `XProtect WebContent Plugin Loopback Proxy` in the Local Machine Personal store, grants
+   the Event Server service account read access to its private key so leaf minting works at
+   runtime, and leaves any existing CA untouched (upgrade re-runs reuse it, thumbprint and
+   key permissions included). The private key never leaves that machine. Scripted installs
+   are opted in by default; pass `PROXY_SUPPORT=0` on the `msiexec` command line to decline
+   (an Event Server machine installed with the box unticked never has its certificate stores
+   touched — start the installer again or run the legacy script below if proxy support is
+   wanted later).
+   *Legacy/repair fallback:* if the plugin reached the Event Server machine without the MSI
+   (the dev `Copy-Item` shortcut), run this once from an elevated Windows PowerShell 5.1
+   session on that machine instead:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts/provision-event-server-authority.ps1
    ```
-
-   It creates the CA certificate named `XProtect WebContent Plugin Loopback Proxy` in the LocalMachine
-   Personal store, grants the service account read access to the private key so leaf minting works at
-   runtime, and exports the certificate to `C:/Users/Public/WebContent-Proxy-Authority.cer`. The private
-   key never leaves that machine.
 2. **Each Smart Client machine trusts the CA once, elevated.** Get the public certificate onto each
-   Smart Client machine and import it into the machine's trusted-root store. The exported file is the
-   same one either provisioning path leaves behind (`C:/Users/Public/WebContent-Proxy-Authority.cer`),
-   and at any later time it can be pulled fresh from the Management Client: under **Cascadia
+   Smart Client machine and import it into the machine's trusted-root store. The Management Client
+   ships it at any time: under **Cascadia
    Technology > Web Content Workspaces**, the **Export proxy certificate** button saves the CA's
    public certificate (`*.cer`, DER) — read from the Event Server over MIP messaging, with no
-   private key in sight, and it works no matter how the CA was created (script, lazy first-use, or a
-   future installer action).
+   private key in sight, and it works no matter how the CA was created (the installer's proxy opt-in
+   checkbox, lazy first-use, or the legacy script).
 
    - **Recommended for more than one machine: push it with Active Directory Group Policy.** Import
      the exported `.cer` into a GPO at *Computer Configuration > Policies > Windows Settings >

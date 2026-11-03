@@ -179,10 +179,52 @@ try {
     if ($null -eq $restartCheckbox) {
         throw "Installer service-flow guard (#82): EventServerOptionsDlg carries no CheckBox bound to RESTART_EVENT_SERVER."
     }
+
+    # #77: the install-time deployment CA. The action must be a deferred (SYSTEM) exe CA
+    # streaming WebContentProxyCa.exe, scheduled inside the script AFTER the drop is on
+    # disk (the helper reflects into the installed WebContent.dll) and before the service
+    # restart, and its condition must carry BOTH gates - Event Server present AND the
+    # proxy opt-in. Machines without ES, or with the box unticked, never run it; the
+    # checkbox lives on the same Event Server options page.
+    $caRow = $ca | Where-Object { $_.Count -ge 3 -and $_[0] -eq 'CreateProxyAuthority' } | Select-Object -First 1
+    if ($null -eq $caRow) {
+        throw "Installer proxy-CA guard (#77): CustomAction table has no CreateProxyAuthority row."
+    }
+    if ($caRow[1] -notmatch '1026') {
+        throw "Installer proxy-CA guard (#77): CreateProxyAuthority must be a deferred (SYSTEM) exe custom action (type 1026), found row: $($caRow -join ' / ')."
+    }
+    if ($caRow -notcontains 'WebContentProxyCa.exe') {
+        throw "Installer proxy-CA guard (#77): CreateProxyAuthority must run the WebContentProxyCa.exe binary stream, found row: $($caRow -join ' / ')."
+    }
+    if (($caRow -join ' / ') -notlike '*provision MilestoneEventServerService*') {
+        throw "Installer proxy-CA guard (#77): CreateProxyAuthority lost its 'provision MilestoneEventServerService' command line, found row: $($caRow -join ' / ')."
+    }
+    if (-not $seq.ContainsKey('CreateProxyAuthority')) {
+        throw "Installer proxy-CA guard (#77): CreateProxyAuthority missing from InstallExecuteSequence."
+    }
+    $caCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'CreateProxyAuthority' } | ForEach-Object { if ($_.Count -ge 2) { $_[1] } else { '' } }) -join ';'
+    foreach ($needle in 'NOT REMOVE', 'EVENTSERVERSERVICEPRESENT', 'PROXY_SUPPORT') {
+        if ($caCondition -notlike "*$needle*") {
+            throw "Installer proxy-CA guard (#77): CreateProxyAuthority condition '$caCondition' lost '$needle' - the CA must be created only on install/upgrade, only when the Event Server service exists, and only with the proxy opt-in ticked."
+        }
+    }
+    if ($seq['CreateProxyAuthority'] -le $seq['InstallFiles']) {
+        throw "Installer proxy-CA guard (#77): CreateProxyAuthority ($($seq['CreateProxyAuthority'])) must run after InstallFiles ($($seq['InstallFiles'])) - the helper drives the plugin's load-or-create through the just-installed WebContent.dll."
+    }
+    if ($seq['CreateProxyAuthority'] -ge $seq['InstallFinalize']) {
+        throw "Installer proxy-CA guard (#77): CreateProxyAuthority ($($seq['CreateProxyAuthority'])) must run before InstallFinalize ($($seq['InstallFinalize'])) so it stays a deferred SYSTEM action inside the script."
+    }
+    if ($seq['CreateProxyAuthority'] -ge $seq['RestartEventServerService']) {
+        throw "Installer proxy-CA guard (#77): CreateProxyAuthority ($($seq['CreateProxyAuthority'])) must run before RestartEventServerService ($($seq['RestartEventServerService'])) so the Event Server comes back on a provisioned CA."
+    }
+    $proxyCheckbox = $checkboxes | Where-Object { $_.Count -ge 9 -and $_[0] -eq 'EventServerOptionsDlg' -and $_[8] -eq 'PROXY_SUPPORT' } | Select-Object -First 1
+    if ($null -eq $proxyCheckbox) {
+        throw "Installer proxy-CA guard (#77): EventServerOptionsDlg carries no CheckBox bound to PROXY_SUPPORT - the opt-in must be on the same page as the restart choice."
+    }
 } finally {
     $zip.Dispose()
 }
-Write-Host "Installer sequencing OK: force-close before file removal, RemoveExistingProducts late (#70); Event Server stop/restart flow gated, inside the script, choice-carrying (#82)." -ForegroundColor Green
+Write-Host "Installer sequencing OK: force-close before file removal, RemoveExistingProducts late (#70); Event Server stop/restart flow gated, inside the script, choice-carrying (#82); install-time deployment CA gated on ES + proxy opt-in after the file copy (#77)." -ForegroundColor Green
 Write-Host "Build completed successfully." -ForegroundColor Green
 
 [pscustomobject]@{

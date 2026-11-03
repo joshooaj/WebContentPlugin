@@ -50,7 +50,11 @@
              install on an ES machine has neither, so nothing is ever stopped there.
              RESTART_EVENT_SERVER: the finish-page checkbox, checked by default; public so
              the UI value flows into the execute sequence and so scripted installs can pass
-             RESTART_EVENT_SERVER=0 on the command line to leave the service stopped. -->
+             RESTART_EVENT_SERVER=0 on the command line to leave the service stopped.
+              PROXY_SUPPORT (#77): the proxy opt-in checkbox on the same page, checked by
+              default; gates the install-time deployment-CA custom action below. Scripted
+              installs decline with PROXY_SUPPORT=0 - one public property shared by the
+              dialog checkbox and the action condition, like everything else here. -->
         <Property Id="EVENTSERVERSERVICEPRESENT">
             <RegistrySearch Id="EventServerServiceImagePath" Root="HKLM"
                 Key="SYSTEM\CurrentControlSet\Services\MilestoneEventServerService"
@@ -62,6 +66,7 @@
             </DirectorySearch>
         </Property>
         <Property Id="RESTART_EVENT_SERVER" Value="1" />
+        <Property Id="PROXY_SUPPORT" Value="1" />
 
         <StandardDirectory Id="ProgramFiles64Folder">
             <Directory Name="VideoOS">
@@ -111,6 +116,23 @@
         <CustomAction Id="RestartEventServerService" BinaryRef="WebContentServiceCtl.exe"
             ExeCommand="restart MilestoneEventServerService" Execute="deferred" Return="check" />
 
+        <!-- #77: the install-time deployment CA (ADR-0003 as amended; inverts the ADR's
+              original "not a WiX custom action" ordering objection - creation runs ON the
+              Event Server machine DURING install, not from the client package). Gated on
+              ES present AND the proxy opt-in: a machine without an Event Server, or an
+              admin who left the box unticked, never has LocalMachine\Personal touched.
+              The action runs AFTER InstallFiles because the helper drives the plugin's
+              OWN load-or-create by reflection into the just-installed WebContent.dll -
+              identical CA shape, no second minting recipe to drift. Reuse of an existing
+              valid CA is untouched (the plugin path reuses it; the grant step is
+              idempotent), so upgrade re-runs preserve thumbprint and DACL. Return="check":
+              an opted-in proxy whose CA or key grant failed is exactly the loud, rolled-
+              back failure the epic demands, never a half-provisioned deployment. -->
+        <Binary Id="WebContentProxyCa.exe"
+            SourceFile="$(var.ProxyCaExePath)" />
+        <CustomAction Id="CreateProxyAuthority" BinaryRef="WebContentProxyCa.exe"
+            ExeCommand="provision MilestoneEventServerService" Execute="deferred" Return="check" />
+
         <InstallExecuteSequence>
             <!-- #70: pin the Util CloseApplications scan right after InstallInitialize (its
                  deferred kill leg must be scheduled inside the script); upstream Util tests
@@ -121,10 +143,14 @@
             <!-- #82: stop AFTER the #70 client kills (same inside-the-script window, before
                  RemoveFiles/InstallFiles) so the Event Server is quiesced before any file is
                  touched; restart directly after InstallFiles so the service comes back up
-                 on the new drop. -->
+                 on the new drop. #77: the CA action slots between the file copy and the
+                 service (re)start - the drop must be on disk (the helper reflects into it)
+                 and the service coming up on a provisioned CA is the tidy ordering. -->
             <Custom Action="StopEventServerService" After="Wix4CloseApplications_$(sys.BUILDARCHSHORT)"
                 Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT)" />
-            <Custom Action="RestartEventServerService" After="InstallFiles"
+            <Custom Action="CreateProxyAuthority" After="InstallFiles"
+                Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND PROXY_SUPPORT=&quot;1&quot;" />
+            <Custom Action="RestartEventServerService" After="CreateProxyAuthority"
                 Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND RESTART_EVENT_SERVER=&quot;1&quot;" />
         </InstallExecuteSequence>
 

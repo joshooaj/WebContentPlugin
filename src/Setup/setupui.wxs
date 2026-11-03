@@ -76,18 +76,22 @@
             <!-- #82: the finish-page choice. Shown only after WebContentWelcomeEulaDlg's
                  Install click, and only when EVENTSERVERSERVICEPRESENT (the two branches on
                  the Welcome page are mutually exclusive), so a machine without an Event
-                 Server never sees this dialog at all. The checkbox drives the deferred
-                 restart custom action through the public RESTART_EVENT_SERVER property. -->
+                 Server never sees this dialog at all. The checkboxes drive the deferred
+                 custom actions through the public RESTART_EVENT_SERVER and PROXY_SUPPORT
+                 properties (#77: the proxy opt-in creates the deployment CA at install
+                 time; unticked, LocalMachine\Personal is never touched). -->
             <Dialog Id="EventServerOptionsDlg" Width="370" Height="270" Title="!(loc.WebContentEsOptionsWindowTitle)">
                 <Control Id="Bitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="234" TabSkip="no" Text="!(loc.WelcomeEulaDlgBitmap)" />
                 <Control Id="Title" Type="Text" X="130" Y="6" Width="225" Height="30" Transparent="yes" NoPrefix="yes" Text="!(loc.WebContentEsOptionsTitle)" />
                 <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="373" Height="0" />
                 <!-- Which story applies: the service is about to be stopped (plugin files
                      already installed - upgrade), or nothing is stopped (first install). -->
-                <Control Id="StopStoryText" Type="Text" X="130" Y="40" Width="226" Height="34" Transparent="yes" NoPrefix="yes" Hidden="yes" ShowCondition="WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT" Text="!(loc.WebContentEsOptionsStopStory)" />
-                <Control Id="FreshStoryText" Type="Text" X="130" Y="40" Width="226" Height="34" Transparent="yes" NoPrefix="yes" Hidden="yes" ShowCondition="NOT (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT)" Text="!(loc.WebContentEsOptionsFreshStory)" />
-                <Control Id="RestartCheckBox" Type="CheckBox" X="130" Y="88" Width="226" Height="18" CheckBoxValue="1" Property="RESTART_EVENT_SERVER" Text="!(loc.WebContentEsOptionsRestart)" />
-                <Control Id="WarningText" Type="Text" X="130" Y="126" Width="226" Height="70" Transparent="yes" NoPrefix="yes" Text="!(loc.WebContentEsOptionsWarning)" />
+                <Control Id="StopStoryText" Type="Text" X="130" Y="36" Width="226" Height="30" Transparent="yes" NoPrefix="yes" Hidden="yes" ShowCondition="WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT" Text="!(loc.WebContentEsOptionsStopStory)" />
+                <Control Id="FreshStoryText" Type="Text" X="130" Y="36" Width="226" Height="30" Transparent="yes" NoPrefix="yes" Hidden="yes" ShowCondition="NOT (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT)" Text="!(loc.WebContentEsOptionsFreshStory)" />
+                <Control Id="ProxyCheckBox" Type="CheckBox" X="130" Y="70" Width="226" Height="18" CheckBoxValue="1" Property="PROXY_SUPPORT" Text="!(loc.WebContentEsOptionsProxy)" />
+                <Control Id="RestartCheckBox" Type="CheckBox" X="130" Y="92" Width="226" Height="18" CheckBoxValue="1" Property="RESTART_EVENT_SERVER" Text="!(loc.WebContentEsOptionsRestart)" />
+                <Control Id="WarningText" Type="Text" X="130" Y="114" Width="226" Height="52" Transparent="yes" NoPrefix="yes" Text="!(loc.WebContentEsOptionsWarning)" />
+                <Control Id="ProxyNoteText" Type="Text" X="130" Y="170" Width="226" Height="56" Transparent="yes" NoPrefix="yes" Text="!(loc.WebContentEsOptionsProxyNote)" />
                 <Control Id="Back" Type="PushButton" X="156" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
                 <Control Id="Install" Type="PushButton" X="212" Y="243" Width="80" Height="17" Default="yes" Text="!(loc.WelcomeEulaDlgInstall)">
                     <Publish Event="EndDialog" Value="Return" Condition="OutOfDiskSpace &lt;&gt; 1" />

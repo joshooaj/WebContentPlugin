@@ -1,8 +1,14 @@
 <#
 .SYNOPSIS
-  One-time elevated setup of the WebContent proxy certificate authority on the
-  XProtect Event Server machine (ADR-0003). Run this ONCE per deployment, from
-  an elevated Windows PowerShell 5.1 session on the Event Server machine.
+  LEGACY fallback (#77): one-time elevated setup of the WebContent proxy certificate
+  authority on the XProtect Event Server machine (ADR-0003). The SUPPORTED path since
+  #77 is the "Enable web content proxy support" checkbox on the installer's Event
+  Server options page (deferred custom action, same load-or-create code, same key
+  grant) - running the MSI on the Event Server machine needs no script at all. Keep
+  this script for legacy/repair setups only: machines whose plugin was deployed by
+  the dev Copy-Item route (no MSI), or a hand-repaired store where the CA must be
+  re-minted from an elevated shell. Run it ONCE, from an elevated Windows PowerShell
+  5.1 session on the Event Server machine.
 
 .DESCRIPTION
   The proxy fetcher mints short-lived loopback leaf certificates from a
