@@ -1724,9 +1724,14 @@ identical). One transient first attempt at row 2 failed with 1722/exit-code-2 fr
 (exe verified launchable as SYSTEM by hand immediately after; WER showed nothing for that
 timestamp) and the retry passed; treat as a lab one-off, not a package fault.
 
-The full-UI checkbox page is structurally verified only (dialog/Control/ControlEvent rows pinned
-in `build.ps1` and the guard tests; `scripts/manual-installer-ui-row.ps1` walks a human through
-it with the service journal running) - nobody clicked through it live.
+The full-UI checkbox page is also now walked live (`scripts/manual-installer-ui-row.ps1` remains the
+with-journal variant): on the dev machine, `msiexec /i` of `0.1.999.6` with `EVENTSERVERSERVICEPRESENT=1`
+(forcing the ES-detected condition on a no-ES box) showed the welcome/EULA page render (MIT license,
+accept checkbox, Install enabled), then the `EventServerOptionsDlg` with the UPGRADE story text (the
+plugin was already installed), the **Restart the Event Server now** checkbox TICKED by default, and the
+client-disconnect warning paragraph, through to the finish page — 2026-11-03, screenshots reviewed. The
+same package on the same machine WITHOUT the forced property showed no option page at all (the
+requirement-3 posture, observed in the UI, not just in the action table).
 
 ## Known high-risk regressions → pinned by
 
@@ -1765,7 +1770,7 @@ it with the service journal running) - nobody clicked through it live.
 | A tri-state string on a WPF-boolean DataGrid attribute taking the whole Management Client config page down at BAML parse time (#76, found in the MC-13 walk) | `WorkspaceTabShellGuardTests` (every `CanUser*` on every page DataGrid pinned to a real bool), MC-13 |
 | A CA export writing an EMPTY file when no authority exists, guessing the CA's provenance (a script-provisioned certificate invisible to the export), reaching any cert store WRITE flag, or outgrowing the MIP frame limits mid-reply (#75) | `ProxyCaExportTests` (`NoAuthority` "does not exist yet" posture; fixed-CN read-only `LocalMachine\Personal` resolve with source guards on the open flags; view builder never offers a save without bytes; 8 KiB DER / 16 KiB wire caps pinned under the proven chunk headroom with a real 2048-bit CA under the cap), MC-15 (live bytes byte-identical to the legacy-script-provisioned store entry) |
 | MSI upgrade dying with 1603 because a running Smart Client / Management Client locks the plugin dlls, or the force-close drifting after RemoveFiles/InstallFiles so the files are still locked when the MSI reaches them (#70) | `build.ps1` installer sequencing guard (compiled-MSI action order + kill-target table pins), IN-1 (live uninstall/fresh-install/upgrade rows with the dll proven LOCKED, all exit 0) |
-| Plugin upgrade on an Event Server machine racing the running service's locked drop: the stop/restart CAs drifting outside the script or after the file copy, the stop assuming instead of WAITING for the real Stopped state, the stop firing on first installs / no-ES machines, or the finish-page choice losing its wire to the restart action (#82) | `EventServerServiceCtlTests` (exit-code decision table incl. StopPending), `InstallerEsServiceFlowGuardTests` (authored conditions/sequence/Binary), `build.ps1` compiled-package guard (1026 at 1502/4001, condition needles, choice-page hop), IN-2 (five live rows with a 250 ms service-state journal, all exit 0/1641) |
+| Plugin upgrade on an Event Server machine racing the running service's locked drop: the stop/restart CAs drifting outside the script or after the file copy, the stop assuming instead of WAITING for the real Stopped state, the stop firing on first installs / no-ES machines, or the finish-page choice losing its wire to the restart action (#82) | `EventServerServiceCtlTests` (exit-code decision table incl. StopPending), `InstallerEsServiceFlowGuardTests` (authored conditions/sequence/Binary), `build.ps1` compiled-package guard (1026 at 1502/4001, condition needles, choice-page hop), IN-2 (five live rows with a 250 ms service-state journal, all exit 0/1641, plus the live full-UI walkthrough of the choice page incl. its hidden-on-no-ES posture) |
 | A non-proxied view silently losing OS (WinINET) proxy inheritance (a stray browser-arguments injection), or a proxied view falling back to the system proxy so the workspace allowlist stops being the whole story (#67) | `ProxyBrowserArgumentsTests` (the pin shape: all four schemes + `<-loopback>`), `ProxyWorkspaceProfileTests` (enabled always proxies; disabled emits no profile), SC-8 (both postures observed live on the real browser command lines and the OS-proxy harness journal) |
 
 ## Scope notes (deliberate)
