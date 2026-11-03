@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebContent", "WebContent\We
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebContentTrustHelper", "WebContentTrustHelper\WebContentTrustHelper.csproj", "{4C6A1E9D-27B8-4C1C-9E07-5A6E9D2F4B31}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebContentServiceCtl", "WebContentServiceCtl\WebContentServiceCtl.csproj", "{7E2C4B1F-9A63-4D8E-B0C2-52F7A1B9D4A6}"
+EndProject
 Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "setup", "Setup\setup.wixproj", "{AB6D7257-BF41-489E-A208-EBF6A3379715}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebContent.UxTests", "..\tests\ux\WebContent.UxTests\WebContent.UxTests.csproj", "{8383F61E-B8F5-CBBD-1F61-D5E382DF5C38}"
@@ -25,6 +27,10 @@ Global
 		{4C6A1E9D-27B8-4C1C-9E07-5A6E9D2F4B31}.Debug|x64.Build.0 = Debug|Any CPU
 		{4C6A1E9D-27B8-4C1C-9E07-5A6E9D2F4B31}.Release|x64.ActiveCfg = Release|Any CPU
 		{4C6A1E9D-27B8-4C1C-9E07-5A6E9D2F4B31}.Release|x64.Build.0 = Release|Any CPU
+		{7E2C4B1F-9A63-4D8E-B0C2-52F7A1B9D4A6}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{7E2C4B1F-9A63-4D8E-B0C2-52F7A1B9D4A6}.Debug|x64.Build.0 = Debug|Any CPU
+		{7E2C4B1F-9A63-4D8E-B0C2-52F7A1B9D4A6}.Release|x64.ActiveCfg = Release|Any CPU
+		{7E2C4B1F-9A63-4D8E-B0C2-52F7A1B9D4A6}.Release|x64.Build.0 = Release|Any CPU
 		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Debug|x64.ActiveCfg = Debug|x64
 		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Debug|x64.Build.0 = Debug|x64
 		{AB6D7257-BF41-489E-A208-EBF6A3379715}.Release|x64.ActiveCfg = Release|x64

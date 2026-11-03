@@ -1,0 +1,157 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <!--
+        #82: custom dialog set replacing WixUI_Minimal, so the install can carry the
+        "Restart the Event Server now?" choice. WiX keeps no supported way to inject a
+        dialog into a built-in set whose Install button already ends the dialog loop
+        (WelcomeEulaDlg's Install control publishes EndDialog Return inside its own
+        wixlib fragment), so this file forks exactly the two authored pieces involved,
+        per the documented customization recipe (FireGiant docs: "Adding and removing
+        dialogs from a dialog set"), and keeps everything else from WixUI_Common:
+
+          WebContentWelcomeEulaDlg - fork of wixlib WelcomeEulaDlg; its Install /
+              InstallNoShield buttons now go to EventServerOptionsDlg when the
+              MilestoneEventServerService registry key exists on the machine, and end
+              the dialog loop (exactly like before) when it does not.
+          EventServerOptionsDlg  - the Event Server page: explains what the install will
+              do to the service, carries the RESTART_EVENT_SERVER checkbox (checked by
+              default), and warns that restarting the Event Server disposes the plugin
+              connections held by running XProtect clients.
+          WebContentMinimal      - fork of the WixUI_Minimal dialog set wiring.
+
+        The custom-action side (detection properties, stop/restart actions, sequencing)
+        lives in setup.wxs; dialog visibility and the action conditions key off the same
+        EVENTSERVERSERVICEPRESENT property, so "no Event Server on the machine" means
+        none of these steps or dialogs ever appear.
+    -->
+    <?define licenseRtf = ..\WebContent\license.rtf ?>
+
+    <Fragment>
+        <UI>
+            <Dialog Id="WebContentWelcomeEulaDlg" Width="370" Height="270" Title="!(loc.WelcomeEulaDlg_Title)">
+                <Control Id="Bitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="234" TabSkip="no" Text="!(loc.WelcomeEulaDlgBitmap)" />
+                <Control Id="Title" Type="Text" X="130" Y="6" Width="225" Height="30" Transparent="yes" NoPrefix="yes" Text="!(loc.WelcomeEulaDlgTitle)" />
+                <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="373" Height="0" />
+                <Control Id="LicenseAcceptedCheckBox" Type="CheckBox" X="130" Y="207" Width="226" Height="18" CheckBoxValue="1" Property="LicenseAccepted" Text="!(loc.WelcomeEulaDlgLicenseAcceptedCheckBox)" />
+                <Control Id="Print" Type="PushButton" X="88" Y="243" Width="56" Height="17" Text="!(loc.WixUIPrint)">
+                    <Publish Event="MsiPrint" Value="1" />
+                </Control>
+                <Control Id="Back" Type="PushButton" X="156" Y="243" Width="56" Height="17" Disabled="yes" Text="!(loc.WixUIBack)" />
+                <Control Id="Install" Type="PushButton" ElevationShield="yes" X="212" Y="243" Width="80" Height="17" Default="yes" Text="!(loc.WelcomeEulaDlgInstall)" Hidden="yes" DisableCondition="LicenseAccepted &lt;&gt; &quot;1&quot;" EnableCondition="LicenseAccepted = &quot;1&quot;" ShowCondition="ALLUSERS">
+                    <Publish Event="SpawnWaitDialog" Value="WaitForCostingDlg" Condition="!(wix.WixUICostingPopupOptOut) OR CostingComplete = 1" />
+                    <!-- #82: on a machine with the Event Server the wizard continues to the
+                         restart-choice page instead of ending; without ES this is exactly the
+                         old WixUI_Minimal behaviour. -->
+                    <Publish Event="NewDialog" Value="EventServerOptionsDlg" Condition="EVENTSERVERSERVICEPRESENT AND OutOfDiskSpace &lt;&gt; 1" />
+                    <Publish Event="EndDialog" Value="Return" Condition="NOT EVENTSERVERSERVICEPRESENT AND OutOfDiskSpace &lt;&gt; 1" />
+                    <Publish Event="SpawnDialog" Value="OutOfRbDiskDlg" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND (PROMPTROLLBACKCOST=&quot;P&quot; OR NOT PROMPTROLLBACKCOST)" />
+                    <Publish Event="EndDialog" Value="Return" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND PROMPTROLLBACKCOST=&quot;D&quot;" />
+                    <Publish Event="EnableRollback" Value="False" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND PROMPTROLLBACKCOST=&quot;D&quot;" />
+                    <Publish Event="SpawnDialog" Value="OutOfDiskDlg" Condition="(OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 1) OR (OutOfDiskSpace = 1 AND PROMPTROLLBACKCOST=&quot;F&quot;)" />
+                </Control>
+                <Control Id="InstallNoShield" Type="PushButton" ElevationShield="no" X="212" Y="243" Width="80" Height="17" Default="yes" Text="!(loc.WelcomeEulaDlgInstall)" Hidden="yes" DisableCondition="LicenseAccepted &lt;&gt; &quot;1&quot;" EnableCondition="LicenseAccepted = &quot;1&quot;" ShowCondition="NOT ALLUSERS">
+                    <Publish Event="SpawnWaitDialog" Value="WaitForCostingDlg" Condition="!(wix.WixUICostingPopupOptOut) OR CostingComplete = 1" />
+                    <Publish Event="NewDialog" Value="EventServerOptionsDlg" Condition="EVENTSERVERSERVICEPRESENT AND OutOfDiskSpace &lt;&gt; 1" />
+                    <Publish Event="EndDialog" Value="Return" Condition="NOT EVENTSERVERSERVICEPRESENT AND OutOfDiskSpace &lt;&gt; 1" />
+                    <Publish Event="SpawnDialog" Value="OutOfRbDiskDlg" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND (PROMPTROLLBACKCOST=&quot;P&quot; OR NOT PROMPTROLLBACKCOST)" />
+                    <Publish Event="EndDialog" Value="Return" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND PROMPTROLLBACKCOST=&quot;D&quot;" />
+                    <Publish Event="EnableRollback" Value="False" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND PROMPTROLLBACKCOST=&quot;D&quot;" />
+                    <Publish Event="SpawnDialog" Value="OutOfDiskDlg" Condition="(OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 1) OR (OutOfDiskSpace = 1 AND PROMPTROLLBACKCOST=&quot;F&quot;)" />
+                </Control>
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+                    <Publish Event="SpawnDialog" Value="CancelDlg" />
+                </Control>
+                <Control Id="LicenseText" Type="ScrollableText" X="130" Y="36" Width="226" Height="162" Sunken="yes" TabSkip="no">
+                    <Text SourceFile="$(var.licenseRtf)" />
+                </Control>
+            </Dialog>
+        </UI>
+
+        <InstallUISequence>
+            <Show Dialog="WebContentWelcomeEulaDlg" Before="ProgressDlg" Condition="NOT Installed" />
+        </InstallUISequence>
+    </Fragment>
+
+    <Fragment>
+        <UI>
+            <!-- #82: the finish-page choice. Shown only after WebContentWelcomeEulaDlg's
+                 Install click, and only when EVENTSERVERSERVICEPRESENT (the two branches on
+                 the Welcome page are mutually exclusive), so a machine without an Event
+                 Server never sees this dialog at all. The checkbox drives the deferred
+                 restart custom action through the public RESTART_EVENT_SERVER property. -->
+            <Dialog Id="EventServerOptionsDlg" Width="370" Height="270" Title="!(loc.WebContentEsOptionsWindowTitle)">
+                <Control Id="Bitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="234" TabSkip="no" Text="!(loc.WelcomeEulaDlgBitmap)" />
+                <Control Id="Title" Type="Text" X="130" Y="6" Width="225" Height="30" Transparent="yes" NoPrefix="yes" Text="!(loc.WebContentEsOptionsTitle)" />
+                <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="373" Height="0" />
+                <!-- Which story applies: the service is about to be stopped (plugin files
+                     already installed - upgrade), or nothing is stopped (first install). -->
+                <Control Id="StopStoryText" Type="Text" X="130" Y="40" Width="226" Height="34" Transparent="yes" NoPrefix="yes" Hidden="yes" ShowCondition="WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT" Text="!(loc.WebContentEsOptionsStopStory)" />
+                <Control Id="FreshStoryText" Type="Text" X="130" Y="40" Width="226" Height="34" Transparent="yes" NoPrefix="yes" Hidden="yes" ShowCondition="NOT (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT)" Text="!(loc.WebContentEsOptionsFreshStory)" />
+                <Control Id="RestartCheckBox" Type="CheckBox" X="130" Y="88" Width="226" Height="18" CheckBoxValue="1" Property="RESTART_EVENT_SERVER" Text="!(loc.WebContentEsOptionsRestart)" />
+                <Control Id="WarningText" Type="Text" X="130" Y="126" Width="226" Height="70" Transparent="yes" NoPrefix="yes" Text="!(loc.WebContentEsOptionsWarning)" />
+                <Control Id="Back" Type="PushButton" X="156" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+                <Control Id="Install" Type="PushButton" X="212" Y="243" Width="80" Height="17" Default="yes" Text="!(loc.WelcomeEulaDlgInstall)">
+                    <Publish Event="EndDialog" Value="Return" Condition="OutOfDiskSpace &lt;&gt; 1" />
+                    <Publish Event="SpawnDialog" Value="OutOfRbDiskDlg" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND (PROMPTROLLBACKCOST=&quot;P&quot; OR NOT PROMPTROLLBACKCOST)" />
+                    <Publish Event="EndDialog" Value="Return" Condition="OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 0 AND PROMPTROLLBACKCOST=&quot;D&quot;" />
+                    <Publish Event="SpawnDialog" Value="OutOfDiskDlg" Condition="(OutOfDiskSpace = 1 AND OutOfNoRbDiskSpace = 1) OR (OutOfDiskSpace = 1 AND PROMPTROLLBACKCOST=&quot;F&quot;)" />
+                </Control>
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+                    <Publish Event="SpawnDialog" Value="CancelDlg" />
+                </Control>
+            </Dialog>
+        </UI>
+    </Fragment>
+
+    <?foreach WIXUIARCH in X86;X64;A64 ?>
+    <Fragment>
+        <UI Id="WebContentMinimal_$(WIXUIARCH)" />
+        <UIRef Id="WebContentMinimal" />
+    </Fragment>
+    <?endforeach?>
+
+    <Fragment>
+        <UI Id="file WebContentMinimal">
+            <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+            <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+            <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+
+            <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+            <DialogRef Id="ErrorDlg" />
+            <DialogRef Id="FatalError" />
+            <DialogRef Id="FilesInUse" />
+            <DialogRef Id="MsiRMFilesInUse" />
+            <DialogRef Id="PrepareDlg" />
+            <DialogRef Id="ProgressDlg" />
+            <DialogRef Id="ResumeDlg" />
+            <DialogRef Id="UserExit" />
+            <DialogRef Id="WelcomeDlg" />
+            <DialogRef Id="WebContentWelcomeEulaDlg" />
+            <DialogRef Id="EventServerOptionsDlg" />
+
+            <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" />
+
+            <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+
+            <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+            <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+            <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+            <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="Installed AND PATCH" />
+
+            <!-- #82: Back from the Event Server page returns to the welcome/EULA page. -->
+            <Publish Dialog="EventServerOptionsDlg" Control="Back" Event="NewDialog" Value="WebContentWelcomeEulaDlg" />
+
+            <InstallUISequence>
+                <Show Dialog="override WelcomeDlg" Before="WebContentWelcomeEulaDlg" Condition="Installed AND PATCH" />
+            </InstallUISequence>
+
+            <Property Id="ARPNOMODIFY" Value="1" />
+        </UI>
+
+        <UIRef Id="WixUI_Common" />
+    </Fragment>
+</Wix>

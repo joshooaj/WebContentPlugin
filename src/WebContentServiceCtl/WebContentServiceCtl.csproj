@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Ticket #82: the MSI's Event Server service custom-action helper. Unlike the #72 trust
+    helper this exe is NOT part of the installed drop - it rides inside the MSI as a Binary
+    stream and only ever runs as a deferred (SYSTEM) custom action that stops / restarts
+    MilestoneEventServerService around the file swap. Deliberately dumb and auditable: one
+    command, one service name, no elevation logic (MSI provides it), and waits that poll the
+    SCM for the real Stopped/Running transition instead of sleeping a fixed guess.
+    Default bin path (NOT the drop): src/Setup/setup.wxs references it as a Binary.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>WebContent.ServiceCtl</RootNamespace>
+    <AssemblyName>WebContentServiceCtl</AssemblyName>
+    <Deterministic>true</Deterministic>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Explicit path: the wixproj passes Platform=x64 through the ProjectReference, and
+         the default bin layout would then insert an x64 segment the Binary SourceFile
+         would not know about. (Same reason WebContent/WebContentTrustHelper pin their
+         OutputPath.) -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+
+  <!-- ServiceController lives in the legacy monolithic System.ServiceProcess assembly of
+       the net472 targeting pack (the split System.ServiceProcess.ServiceController name is
+       the .NET Core / NuGet shape, not this one). -->
+  <ItemGroup>
+    <Reference Include="System.ServiceProcess" />
+  </ItemGroup>
+
+</Project>

@@ -106,10 +106,86 @@ try {
             throw "Installer sequencing guard (#70): Wix4CloseApplication table does not force-close $target (found: $($targets -join ', '))."
         }
     }
+
+    # #82: the Event Server service flow. The stop action must sit inside the script
+    # (after InstallInitialize, after the #70 client-kill scan) and before both file
+    # actions - a still-running Event Server locks the drop DLLs. The restart action
+    # (finish-page choice) must land after InstallFiles so the service comes back on
+    # the new files, and before InstallFinalize so it stays a deferred SYSTEM action.
+    function Get-CustomActionRow([string]$xml, [string]$action) {
+        $rows = Get-MsiTableRows $xml 'CustomAction'
+        $rows | Where-Object { $_.Count -ge 1 -and $_[0] -eq $action } | Select-Object -First 1
+    }
+    foreach ($action in 'StopEventServerService', 'RestartEventServerService') {
+        $row = Get-CustomActionRow $widXml $action
+        if ($null -eq $row) {
+            throw "Installer service-flow guard (#82): CustomAction table has no $action row."
+        }
+        # 1026 = exe streamed from the Binary table, deferred, return check, non-impersonating.
+        if ($row[1] -ne '1026') {
+            throw "Installer service-flow guard (#82): $action must be a deferred (SYSTEM) exe custom action (type 1026), found type $($row[1])."
+        }
+        if ($row[2] -ne 'WebContentServiceCtl.exe') {
+            throw "Installer service-flow guard (#82): $action must run the WebContentServiceCtl.exe binary stream, found $($row[2])."
+        }
+        if (-not $seq.ContainsKey($action)) {
+            throw "Installer service-flow guard (#82): $action missing from InstallExecuteSequence."
+        }
+    }
+    $stopCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'StopEventServerService' })[0][1]
+    foreach ($needle in 'NOT REMOVE', 'EVENTSERVERSERVICEPRESENT', 'WIX_UPGRADE_DETECTED', 'WEBCONTENTPLUGINPRESENT') {
+        if ($stopCondition -notlike "*$needle*") {
+            throw "Installer service-flow guard (#82): StopEventServerService condition '$stopCondition' lost '$needle' - the stop must fire only on install/upgrade, only when the Event Server service exists, and only when plugin files are already installed."
+        }
+    }
+    if ($seq['StopEventServerService'] -le $seq['InstallInitialize'] -or $seq['StopEventServerService'] -le $closeSeq) {
+        throw "Installer service-flow guard (#82): StopEventServerService ($($seq['StopEventServerService'])) must run after InstallInitialize ($($seq['InstallInitialize'])) and the client-kill scan ($closeSeq)."
+    }
+    if ($seq['StopEventServerService'] -ge $seq['RemoveFiles'] -or $seq['StopEventServerService'] -ge $seq['InstallFiles']) {
+        throw "Installer service-flow guard (#82): StopEventServerService ($($seq['StopEventServerService'])) must run before RemoveFiles ($($seq['RemoveFiles'])) and InstallFiles ($($seq['InstallFiles'])) - the Event Server still holds the drop dlls until it is Stopped."
+    }
+    if ($seq['RestartEventServerService'] -lt $seq['InstallFiles'] -or $seq['RestartEventServerService'] -ge $seq['InstallFinalize']) {
+        throw "Installer service-flow guard (#82): RestartEventServerService ($($seq['RestartEventServerService'])) must run after InstallFiles ($($seq['InstallFiles'])) and before InstallFinalize ($($seq['InstallFinalize']))."
+    }
+    $restartCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'RestartEventServerService' })[0][1]
+    if ($restartCondition -notlike '*RESTART_EVENT_SERVER*') {
+        throw "Installer service-flow guard (#82): RestartEventServerService condition '$restartCondition' lost the RESTART_EVENT_SERVER choice."
+    }
+
+    # #82: the UI half - the welcome page must branch to the choice page (and to the old
+    # one-click end) on the ES-detected property, the choice page carries the checkbox,
+    # and its Install button ends the dialog loop.
+    $controlEvents = Get-MsiTableRows $widXml 'ControlEvent'
+    $branch = $controlEvents | Where-Object {
+        $_.Count -ge 4 -and $_[0] -eq 'WebContentWelcomeEulaDlg' -and $_[1] -eq 'Install' -and $_[2] -eq 'NewDialog' -and $_[3] -eq 'EventServerOptionsDlg'
+    } | Select-Object -First 1
+    if ($null -eq $branch) {
+        throw "Installer service-flow guard (#82): no WebContentWelcomeEulaDlg/Install -> EventServerOptionsDlg branch - setupui.wxs lost the Event Server page hop."
+    }
+    if ($branch[4] -notlike '*EVENTSERVERSERVICEPRESENT*') {
+        throw "Installer service-flow guard (#82): the Event Server page hop is not gated on EVENTSERVERSERVICEPRESENT - the page must never appear on machines without the Event Server."
+    }
+    $endNoEs = $controlEvents | Where-Object {
+        $_.Count -ge 4 -and $_[0] -eq 'WebContentWelcomeEulaDlg' -and $_[1] -eq 'Install' -and $_[2] -eq 'EndDialog' -and $_[3] -eq 'Return' -and $_.Count -ge 5 -and $_[4] -like '*NOT EVENTSERVERSERVICEPRESENT*'
+    } | Select-Object -First 1
+    if ($null -eq $endNoEs) {
+        throw "Installer service-flow guard (#82): the no-Event-Server branch lost the direct EndDialog Return (the old WixUI_Minimal one-click behaviour)."
+    }
+    $installChoice = $controlEvents | Where-Object {
+        $_.Count -ge 4 -and $_[0] -eq 'EventServerOptionsDlg' -and $_[1] -eq 'Install' -and $_[2] -eq 'EndDialog' -and $_[3] -eq 'Return'
+    } | Select-Object -First 1
+    if ($null -eq $installChoice) {
+        throw "Installer service-flow guard (#82): EventServerOptionsDlg/Install no longer ends the dialog loop."
+    }
+    $checkboxes = Get-MsiTableRows $widXml 'Control'
+    $restartCheckbox = $checkboxes | Where-Object { $_.Count -ge 9 -and $_[0] -eq 'EventServerOptionsDlg' -and $_[8] -eq 'RESTART_EVENT_SERVER' } | Select-Object -First 1
+    if ($null -eq $restartCheckbox) {
+        throw "Installer service-flow guard (#82): EventServerOptionsDlg carries no CheckBox bound to RESTART_EVENT_SERVER."
+    }
 } finally {
     $zip.Dispose()
 }
-Write-Host "Installer sequencing OK: force-close before file removal, RemoveExistingProducts late (#70)." -ForegroundColor Green
+Write-Host "Installer sequencing OK: force-close before file removal, RemoveExistingProducts late (#70); Event Server stop/restart flow gated, inside the script, choice-carrying (#82)." -ForegroundColor Green
 Write-Host "Build completed successfully." -ForegroundColor Green
 
 [pscustomobject]@{

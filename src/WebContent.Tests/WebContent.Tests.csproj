@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <Compile Include="..\WebContent\Client\AddressBarInteraction.cs" Link="AddressBarInteraction.cs" />
+    <Compile Include="..\WebContent\Browser\BrowserSessionId.cs" Link="Browser\BrowserSessionId.cs" />
+    <Compile Include="..\WebContent\Browser\BrowserSessionTable.cs" Link="Browser\BrowserSessionTable.cs" />
     <Compile Include="..\WebContent\Client\BrowserCommandAdmission.cs" Link="BrowserCommandAdmission.cs" />
     <Compile Include="..\WebContent\Enums.cs" Link="Enums.cs" />
     <Compile Include="..\WebContent\Client\BrowserProfileKey.cs" Link="BrowserProfileKey.cs" />
@@ -65,6 +67,7 @@
     <Compile Include="..\WebContent\ProxyBlockTally.cs" Link="ProxyBlockTally.cs" />
     <Compile Include="..\WebContent\ProxyCaTrustState.cs" Link="ProxyCaTrustState.cs" />
     <Compile Include="..\WebContentTrustHelper\TrustHelperCore.cs" Link="TrustHelperCore.cs" />
+    <Compile Include="..\WebContentServiceCtl\ServiceCtlCore.cs" Link="ServiceCtlCore.cs" />
     <Compile Include="..\WebContent\ProxyStatusCorrelation.cs" Link="ProxyStatusCorrelation.cs" />
     <Compile Include="..\WebContent\ProxyCaExportCorrelation.cs" Link="ProxyCaExportCorrelation.cs" />
     <Compile Include="..\WebContent\ProxyCaExportResponder.cs" Link="ProxyCaExportResponder.cs" />

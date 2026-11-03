@@ -38,6 +38,31 @@
         <Icon Id="CascadiaIcon" SourceFile="..\WebContent\Resources\icon.ico" />
         <Property Id="ARPPRODUCTICON" Value="CascadiaIcon" />
 
+        <!-- #82: Event Server service flow detection.
+             EVENTSERVERSERVICEPRESENT: the MilestoneEventServerService key in the service
+             control manager's registry view. One property gates BOTH halves of the feature -
+             the dialog hop to the restart-choice page (setupui.wxs) and the two service
+             custom actions below - so a machine without an Event Server never sees any of
+             it. Type="raw" on ImagePath: the key exists exactly when the service is installed.
+             WEBCONTENTPLUGINPRESENT: plugin files already on disk from any earlier route
+             (MSI upgrade OR the dev Copy-Item deploy), i.e. the drop DLLs may be locked by
+             a running Event Server and the stop action is required. A genuine first-time
+             install on an ES machine has neither, so nothing is ever stopped there.
+             RESTART_EVENT_SERVER: the finish-page checkbox, checked by default; public so
+             the UI value flows into the execute sequence and so scripted installs can pass
+             RESTART_EVENT_SERVER=0 on the command line to leave the service stopped. -->
+        <Property Id="EVENTSERVERSERVICEPRESENT">
+            <RegistrySearch Id="EventServerServiceImagePath" Root="HKLM"
+                Key="SYSTEM\CurrentControlSet\Services\MilestoneEventServerService"
+                Name="ImagePath" Type="raw" Bitness="always64" />
+        </Property>
+        <Property Id="WEBCONTENTPLUGINPRESENT">
+            <DirectorySearch Id="PluginDropDir" Path="C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin">
+                <FileSearch Id="PluginDropWebContentDll" Name="WebContent.dll" />
+            </DirectorySearch>
+        </Property>
+        <Property Id="RESTART_EVENT_SERVER" Value="1" />
+
         <StandardDirectory Id="ProgramFiles64Folder">
             <Directory Name="VideoOS">
                 <Directory Name="MIPPlugins">
@@ -62,6 +87,30 @@
         <CustomAction Id="InvokeStandalone" BinaryRef="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
             Execute="deferred" ExeCommand=" /silent /install" Return="check" />
 
+        <!-- #82: Event Server service handling, exactly the three ticket branches:
+             1. ES present + plugin files already installed (upgrade or post-Copy-Item):
+                StopEventServerService (deferred, SYSTEM) stops MilestoneEventServerService
+                and polls the SCM until it really reports Stopped - its stop is slow and a
+                still-stopping service keeps the drop DLLs locked, which is the 1603 race.
+                No fixed sleep anywhere.
+             2. ES present + first-time plugin install: NEITHER action fires (the stop
+                condition requires WIX_UPGRADE_DETECTED or WEBCONTENTPLUGINPRESENT); only
+                the restart-choice page runs.
+             3. No ES: EVENTSERVERSERVICEPRESENT is false, so neither action is ever
+                scheduled and the choice page never shows.
+             RestartEventServerService implements the finish-page choice: Yes (the default,
+             or RESTART_EVENT_SERVER=1 scripted) (re)starts the service right after the new
+             files land; No leaves it wherever the flow left it and the installer's exit
+             page text tells the admin to start it. Both run from the same streamed exe
+             (built by src/WebContentServiceCtl), Return="check" so a failed wait fails the
+             install instead of copying locked files. -->
+        <Binary Id="WebContentServiceCtl.exe"
+            SourceFile="$(var.ServiceCtlExePath)" />
+        <CustomAction Id="StopEventServerService" BinaryRef="WebContentServiceCtl.exe"
+            ExeCommand="stop MilestoneEventServerService" Execute="deferred" Return="check" />
+        <CustomAction Id="RestartEventServerService" BinaryRef="WebContentServiceCtl.exe"
+            ExeCommand="restart MilestoneEventServerService" Execute="deferred" Return="check" />
+
         <InstallExecuteSequence>
             <!-- #70: pin the Util CloseApplications scan right after InstallInitialize (its
                  deferred kill leg must be scheduled inside the script); upstream Util tests
@@ -69,12 +118,28 @@
             <Custom Action="override Wix4CloseApplications_$(sys.BUILDARCHSHORT)" After="InstallInitialize" />
             <Custom Action="InvokeStandalone" Before="InstallFinalize"
                 Condition="NOT(REMOVE OR WVRTINSTALLED)" />
+            <!-- #82: stop AFTER the #70 client kills (same inside-the-script window, before
+                 RemoveFiles/InstallFiles) so the Event Server is quiesced before any file is
+                 touched; restart directly after InstallFiles so the service comes back up
+                 on the new drop. -->
+            <Custom Action="StopEventServerService" After="Wix4CloseApplications_$(sys.BUILDARCHSHORT)"
+                Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT)" />
+            <Custom Action="RestartEventServerService" After="InstallFiles"
+                Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND RESTART_EVENT_SERVER=&quot;1&quot;" />
         </InstallExecuteSequence>
 
-        <ui:WixUI Id="WixUI_Minimal" InstallDirectory="INSTALLFOLDER" />
-        <WixVariable
-            Id="WixUILicenseRtf"
-            Value="license.rtf"
-        />
+        <!-- #82: when the admin declined the restart, the finish page itself states that
+             the stopped Event Server must be started for the new plugin files to load
+             (stop branch only - a first-time install never stopped anything). ExitDialog
+             is a termination pseudo-action with no schedulable position, so the property
+             is set just before ProgressDlg - the checkbox value is fixed long before. -->
+        <SetProperty Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+            Value="!(loc.WebContentEsExitText)" Sequence="ui" Before="ProgressDlg"
+            Condition="EVENTSERVERSERVICEPRESENT AND (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT) AND NOT RESTART_EVENT_SERVER" />
+
+        <!-- #82: replaces WixUI_Minimal (forked in setupui.wxs) so the install can carry
+             the Event Server restart choice; the license agreement itself now binds
+             directly to src/WebContent/license.rtf from the fork. -->
+        <ui:WixUI Id="WebContentMinimal" InstallDirectory="INSTALLFOLDER" />
     </Package>
 </Wix>
