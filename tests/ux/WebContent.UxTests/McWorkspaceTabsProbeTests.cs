@@ -13,7 +13,7 @@ namespace WebContent.UxTests;
 /// Ticket #74 probe: the Management Client workspace config page renders as the four-tab shell
 /// (Settings | Proxy | Diagnostics | Status), the Settings tab keeps every settings control on
 /// the default tab (no navigation needed - the home-address probes must stay intact), and walking
-/// the live Proxy grid (#81), the placeholder Diagnostics tab and the read-only Status tab (#76)
+/// the live Proxy grid (#81), the read-only Diagnostics grid (#84) and the read-only Status tab (#76)
 /// never dirties the pane: Save must stay disabled through the whole walk ("no config writes
 /// from the shell"). Since #81 the proxy section lives ONLY on the Proxy tab, which the probe
 /// asserts by looking for a realized proxy control while Settings is selected. The Status tab is
@@ -72,7 +72,8 @@ public class McWorkspaceTabsProbeTests
 
             // 3. Each tab selects (UIA SelectionItem, no mouse needed) and renders its content;
             //    screenshot per tab. The Proxy tab is live since #81 (structured allowlist grid);
-            //    Diagnostics (#84) is the last placeholder left.
+            //    Diagnostics went live with #84 (read-only blocked-origin grid - MC-16 owns its
+            //    live-content assertions).
             SelectTabByAutomationId(mcMain, "tabProxy");
             ManagementClientUi.ExpectControl(mcMain, "dgProxyTargets", 10);
             ManagementClientUi.ExpectControl(mcMain, "btnProxyTargetAdd", 5);
@@ -80,8 +81,10 @@ public class McWorkspaceTabsProbeTests
             Artifacts.Window(mcMain, "mc-tabs-proxy");
 
             SelectTabByAutomationId(mcMain, "tabDiagnostics");
-            ManagementClientUi.ExpectControl(mcMain, "txtDiagnosticsTabPlaceholder", 10);
-            log.AppendLine("diagnostics tab placeholder rendered");
+            ManagementClientUi.ExpectControl(mcMain, "dgDiagnosticsBlocked", 10);
+            ManagementClientUi.ExpectControl(mcMain, "txtDiagnosticsSummary", 5);
+            ManagementClientUi.ExpectControl(mcMain, "btnDiagnosticsRefresh", 5);
+            log.AppendLine("diagnostics tab live surface rendered - read-only blocked-origin grid present");
             Artifacts.Window(mcMain, "mc-tabs-diagnostics");
 
             // Status is live since #76: no placeholder - the shell check here is that selecting it
