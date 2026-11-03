@@ -58,6 +58,8 @@ public class ScProxyErrorProbeTests
         string failure = null;
         string title = null;
         string bodyText = null;
+        bool? detailsOpen = null;
+        bool copyButtonPresent = false;
         string previousHome = null;
         ClientSession sc = null;
         try
@@ -100,6 +102,13 @@ public class ScProxyErrorProbeTests
             title = await page.TitleAsync();
             var body = await page.QuerySelectorAsync("body");
             bodyText = body == null ? null : await body.TextContentAsync();
+
+            // #66 surfaces: the technical section is collapsed by default and the copy button
+            // exists; the friendly headline/cause sit above it. (TextContent includes the
+            // collapsed section's text - the diagnostics facts are asserted from bodyText.)
+            detailsOpen = await page.EvalOnSelectorAsync<bool?>("details", "el => el.open");
+            copyButtonPresent = await page.QuerySelectorAsync("#wdc-copy") != null;
+
             log.AppendLine($"start document -> title='{title}'");
             log.AppendLine($"body: {Summarize(bodyText)}");
 
@@ -135,7 +144,20 @@ public class ScProxyErrorProbeTests
         Assert.True(failure == null, $"probe run failed: {failure}{Environment.NewLine}{log}");
         Assert.Equal("Web Content proxy: 403", title);
         Assert.NotNull(bodyText);
+
+        // #66: friendly layer up front - one cause category chip + plain headline.
+        Assert.Contains("Not allowed by the administrator", bodyText);
+        Assert.Contains("This web address is not allowed for this view", bodyText);
+
+        // ...technical detail collapsed by default, copy affordance present...
+        Assert.NotNull(detailsOpen);
+        Assert.False(detailsOpen.Value, "the technical details section is expanded by default");
+        Assert.True(copyButtonPresent, "no Copy diagnostics button on the refusal page");
+
+        // ...and it carries the actionable facts: the verbatim refusal naming the origin plus
+        // the exact canonical allowlist entry that would admit it.
         Assert.Contains("not in the workspace proxy allowlist", bodyText);
+        Assert.Contains("Allowlist entry that would admit this origin: http://neverssl.com", bodyText);
     }
 
     [Fact]
