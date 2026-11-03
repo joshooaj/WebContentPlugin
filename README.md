@@ -134,6 +134,13 @@ To remove the plugin completely, also delete the CA: from `LocalMachine\My` on t
 
 ![Screenshot of web content view item properties](./docs/assets/images/properties.png)
 
+These per-view properties apply to a **manually placed** Web Content view. A view that lives on
+an admin-defined workspace (see below) keeps its **home/target URL and proxy posture locked**:
+the field is still shown, but rendered read-only with a "Managed by Administrator" note, and
+any stored override of those security-relevant settings is ignored at every load. Cosmetic and
+navigation options (toolbar, address bar, zoom, audio, history, isolation, developer tools)
+stay editable per instance.
+
 ## Workspace administration (Management Client)
 
 The plugin also integrates with the XProtect Management Client. Under **Cascadia Technology**, a

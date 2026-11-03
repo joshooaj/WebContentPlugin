@@ -36,7 +36,9 @@ namespace WebContent.Client
         /// item's layout FQID and instance ids, and the view item seeds its own persisted
         /// property store from it. Standalone (manually placed) view items have no registry
         /// entry and keep their own configuration. The seeding runs from PropertiesLoaded (the
-        /// current platform hook) and Init (legacy hook) and is idempotent.
+        /// current platform hook) and Init (legacy hook) and is idempotent. Since #71 the seed
+        /// enforces identity + security-relevant keys always and only supplies initial values for
+        /// cosmetic keys (see <see cref="WorkspaceSettingLocks"/>).
         /// </summary>
         private void SeedWorkspaceProperties()
         {
@@ -47,13 +49,15 @@ namespace WebContent.Client
                     return;
                 }
 
-                if (definition.TryGetValue(WorkspaceViewItemSync.FingerprintKey, out var updatedFingerprint) &&
-                    WorkspaceSessionState.ShouldResetOnDefinitionUpdate(GetProperty(WorkspaceViewItemSync.FingerprintKey), updatedFingerprint))
+                var definitionChanged =
+                    definition.TryGetValue(WorkspaceViewItemSync.FingerprintKey, out var updatedFingerprint) &&
+                    WorkspaceSessionState.ShouldResetOnDefinitionUpdate(GetProperty(WorkspaceViewItemSync.FingerprintKey), updatedFingerprint);
+                if (definitionChanged)
                 {
                     ResetSavedNavigationState(definition, matchedKey);
                 }
 
-                var seed = WorkspaceInstanceProperties.ComputeSeed(GetProperty, definition);
+                var seed = WorkspaceInstanceProperties.ComputeSeed(GetProperty, definition, definitionChanged);
                 if (seed.Count == 0)
                 {
                     EnvironmentManager.Instance.Log(false, nameof(WebContentViewItemManager), $"WebContent workspace seed: view item {matchedKey} already current (HomeAddress={TryHome(definition)}).");

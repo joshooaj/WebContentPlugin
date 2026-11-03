@@ -26,6 +26,7 @@
     <Compile Include="..\WebContent\Client\WorkspaceDefinition.cs" Link="WorkspaceDefinition.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceDefinitionFingerprint.cs" Link="WorkspaceDefinitionFingerprint.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceInstanceProperties.cs" Link="WorkspaceInstanceProperties.cs" />
+    <Compile Include="..\WebContent\Client\WorkspaceSettingLocks.cs" Link="WorkspaceSettingLocks.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceProperties.cs" Link="WorkspaceProperties.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceSessionState.cs" Link="WorkspaceSessionState.cs" />
     <Compile Include="..\WebContent\Admin\WorkspaceNameValidation.cs" Link="WorkspaceNameValidation.cs" />

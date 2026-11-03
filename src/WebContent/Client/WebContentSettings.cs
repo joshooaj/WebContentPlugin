@@ -261,6 +261,32 @@ namespace WebContent.Client
             WebContentConfiguration.GetString(GetProperty, string.Empty, WorkspaceViewItemSync.WorkspaceIdKey);
 
         /// <summary>
+        /// Ticket #71: true when this view item is provisioned inside an admin-defined (managed)
+        /// workspace - its persisted store carries the workspace identity the seeding path wrote.
+        /// A standalone (manually placed) view item carries neither key and keeps every setting
+        /// user-owned.
+        /// </summary>
+        public bool IsManagedWorkspace =>
+            WorkspaceSettingLocks.IsManagedWorkspace(WorkspaceItemId, DefinitionFingerprint);
+
+        /// <summary>
+        /// Ticket #71: the home/target URL of a managed view item is pinned by the workspace
+        /// definition (the definition builder always writes it), so the properties pane renders
+        /// the field read-only with the "Managed by Administrator" indicator. The seed keeps the
+        /// definition authoritative regardless of what is stored, so the UI is not the only
+        /// enforcement. Standalone items keep the editable field.
+        /// </summary>
+        public bool IsHomeAddressEditable => !IsManagedWorkspace;
+
+        public string ManagedByAdministratorLabel => Strings.ManagedByAdministratorLabel;
+
+        /// <summary>
+        /// Tooltip for the locked home-address field; null means "no tooltip" when the field is
+        /// user-owned (ticket #71).
+        /// </summary>
+        public string HomeAddressToolTip => IsManagedWorkspace ? Strings.ManagedByAdministratorLabel : null;
+
+        /// <summary>
         /// Updates the session-scoped last-visited URL for this workspace tab. No-op for
         /// standalone items (no definition fingerprint).
         /// </summary>

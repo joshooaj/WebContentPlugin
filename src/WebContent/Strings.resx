@@ -378,6 +378,9 @@
   <data name="ProxyLabel" xml:space="preserve">
     <value>Proxy:</value>
   </data>
+  <data name="ManagedByAdministratorLabel" xml:space="preserve">
+    <value>Managed by Administrator</value>
+  </data>
   <data name="ProxyDisplayDisabled" xml:space="preserve">
     <value>Disabled - browser connects directly</value>
   </data>

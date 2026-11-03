@@ -835,6 +835,15 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Managed by Administrator.
+        /// </summary>
+        internal static string ManagedByAdministratorLabel {
+            get {
+                return ResourceManager.GetString("ManagedByAdministratorLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Disabled - browser connects directly.
         /// </summary>
         internal static string ProxyDisplayDisabled {
