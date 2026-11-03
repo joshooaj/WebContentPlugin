@@ -181,6 +181,27 @@ On the workspace's details page in the **Management Client** under
 The toggle takes effect when the workspace tab is (re)opened in Smart Client; the Smart Client
 properties page shows the effective proxy state for the workspace.
 
+### The computer's own proxy (WinINET): inherited when off, ignored when on
+
+A view **without** the workspace proxy injects no proxy arguments into its browser, so the
+browser simply follows the computer's own web-proxy configuration — on Windows that is the
+per-user WinINET proxy ("Internet Options → LAN settings"; the `ProxyEnable`/`ProxyServer`
+values, settable machine-wide through Group Policy or ProxyConfig-style tools). To put such
+views' traffic through a corporate proxy, configure that OS setting for the users running the
+Smart Client. The plugin deliberately has **no proxy-URL setting of its own** — the operating
+system already owns that (including proxy authentication and PAC), and non-proxied views
+inherit it for free.
+
+A **proxied** workspace deliberately ignores that OS proxy. Its browser profile launches with
+every scheme pinned to the machine-local loopback proxy (`--proxy-server=http=http://127.0.0.1:<port>;https=...;ws=...;wss=...`)
+and the implicit localhost bypass disabled (`--proxy-bypass-list=<-loopback>`), so a system
+proxy can never widen what a proxied workspace loads — the allowlist posture is decided by
+the VMS server, and nothing reaches the network except through it. Verified live (SC-8 in
+`docs/verification-matrix.md`): with the user's WinINET proxy pointed at a local logging
+harness, a non-proxied view renders the harness's marker page for a host that can never
+resolve directly, while the proxied view of the same url shows the plugin's own 403 refusal
+page and the OS-proxy harness never sees a single request for that origin.
+
 ### The server side is the XProtect EVENT SERVER
 
 The component that performs the fetches runs **inside the XProtect Event Server process — not the

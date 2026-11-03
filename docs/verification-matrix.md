@@ -59,6 +59,7 @@ is not evidence the plugin never ran.
 | Per-workspace proxy header policy: add/override/strip rows on BOTH fetch legs, forbidden-header guardrail enforced at save AND at runtime | #86 | `ProxyHeaderPolicyTests` (the canonical forbidden set: exact hop-by-hop/Host/Content-Length/Transfer-Encoding/TE/Upgrade names + every `Proxy-*` prefix, case-insensitive; RFC 9110 token-name grammar, CR/LF in a value refused; the apply model: add/override replaces all same-name entries case-insensitively, rules apply in configuration order with LAST rule winning, forbidden rules never applied even when hand-fed past the store), `ProxyHeaderPolicyStoreTests` (60 s refresh / last-known-good / Prime-at-Init; forbidden and malformed stored rows refused with one audit line per refresh naming workspace + raw text; corrupt blobs = empty policy, never a refusal), `ProxyHeaderEditorTests` (the MC build refuses the WHOLE policy by name with nothing partial returned; strip-without-value is valid; strip does NOT unlock a forbidden name; Load drops unrenderable stored rows counted for the log), `ProxyConfigurationTests` header section (round-trips keep forbidden names VERBATIM on the wire - readers refuse, nobody censors; empty grids store no section, pre-#86 wire shape preserved), `EventServerHeaderPolicyWiringGuardTests` (request rules applied before the fetch, response rules before the frame and only for a real upstream status, store Prime at Init, all three block sets derived from the one canonical set), `WorkspaceTabShellGuardTests` (both grids on the Proxy tab: name-keyed lookups, per-AutomationId column pinning for both legs, the PropertyChanged binding guard across every Proxy-tab grid) | See MC-18 below - **live rows PASSED 2026-11-02** (run `20261102-224611`): a two-rule policy per leg stores through the audit line AND order-sensitive reloaded-pane readback; four forbidden-row cycles (request+response, add+strip) each pin the live Problem text, the notice naming the row verbatim, the refusal marker, and zero new audit lines; empty grids store the empty policy |
 | Per-workspace proxy rule triggers: MC Proxy-tab "Rule triggers" grid (URL/method/status), whole-save grammar guardrail sharing the Event Server's `ProxyTriggerPolicy` matcher grammar | #78 | `ProxyTriggerEditorTests` (blank rows skipped not refused; url-required / mid-host-wildcard url / out-of-grammar status each refused by code; the WHOLE build refused by name with nothing partial returned; configuration order preserved and null members kept compact (any-method `*` and blank status store as null); stored rows with unrenderable method verbs dropped at Load and counted for the log; the fixed event type and the method dropdown set pinned to the matcher's constants; the grid's validation and the Event Server's matcher ACCEPT AND REFUSE THE SAME ROWS - `ProxyTriggerPolicy`'s normalizers are the single grammar both call), `WorkspaceTabShellGuardTests` (the trigger grid + Add button + hint carry their AutomationIds on the Proxy tab, not the Settings tab; every row's Event cell is a non-editable TextBlock; the XAML method array never drifts from `ProxyTriggerEditor.ProxyTriggerMethods`) | See MC-19 below - **live rows PASSED 2026-11-03** (run `20261103-031310`): a two-row trigger list (an exact-status row + an any-method wildcard-host row) stores through the audit line AND order-sensitive reloaded-grid readback with the fixed event type shown in the read-only Event column on every row, typed AND reloaded; three invalid-row cycles (mid-host-wildcard url / status `600` / a method with no url) each pin the live Problem text, the notice naming the row verbatim, the `invalid proxy trigger row(s)` MIP.log marker, and zero new audit lines; an emptied grid stores no trigger section (`0 row(s) []`) |
 | Installer upgrade with Milestone clients running (MSI force-closes Smart Client / Management Client instead of failing 1603 on locked plugin dlls) | #70 | `build.ps1` structural guard (parses `wix-wid.xml` out of the versioned `.wixpdb`: the `Wix4CloseApplications_*` action is scheduled after InstallInitialize and before RemoveFiles/InstallFiles, RemoveExistingProducts is after InstallFiles, and the three kill targets — `Client.exe`, `VideoOS.Administration.exe`, `VideoOS.OAuth2TokenGenerator.exe` — are in the `Wix4CloseApplication` table) | See IN-1 below - **all live rows PASSED 2026-11-03** on the VMS machine with the clients launched in a real interactive session and `WebContent.dll` proven LOCKED first: uninstall, fresh install, and an upgrade — each with `Client.exe` + `VideoOS.Administration.exe` running — answered exit code 0, killed the clients, and left a hash-verified drop |
+| OS-configured (WinINET) proxy inheritance for non-proxied views, and the deliberate contrast for proxied views (loopback pin wins; no admin-facing proxy-URL setting exists because the OS owns that layer) (#67) | #67 | `ProxyBrowserArgumentsTests` (the pin itself: every scheme routed to the loopback listener, `<-loopback` bypass off - nothing falls back to the system path); the inheritance claim is a live-host fact, pinned by the SC-8 probe rows below (`ScOsProxyInheritanceProbeTests`: WinINET snapshot/apply/restore, a logging forward-proxy harness on loopback, live `Win32_Process` command-line reads of the plugin's browser processes) | See SC-8 below: routing OFF + the per-user WinINET proxy pointed at the harness - the non-proxied view renders the harness marker page for an RFC 2606 `.invalid` host (which can never resolve, so a served page can only have ridden the OS proxy) with the browser's absolute-form GET in the journal and NO proxy switch on any browser command line; routing ON + the SAME OS proxy + the SAME url - the plugin's 403 page renders, the harness journals nothing for the origin, and the live browser command lines carry `--proxy-server=http=http://127.0.0.1:<listener>;...` plus `--proxy-bypass-list=<-loopback>`. **BEAST 2026-11-03: both rows PASSED** (`20261103-035256`, `20261103-040006`) |
 
 ## Manual host checks
 
@@ -1365,6 +1366,75 @@ toggles expansion) — workspace children never realize without a real double-cl
 MC-provisioning phase is input-injection-dependent by nature (FlaUI SendInput fails with
 ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all work).
 
+### SC-8 OS (WinINET) proxy inheritance for non-proxied views; proxied views ignore it (#67)
+
+The question this closes is a documentation question with evidence: an admin asking "make the
+web views use our corporate proxy" is asking for OS-level behavior. The plugin injects NO
+proxy arguments into a non-proxied view's browser, so that browser resolves its proxy from the
+OS - on Windows, the per-user WinINET "LAN settings" proxy - while a proxied view's browser is
+launched with the loopback pin (`ProxyBrowserArguments.For`: every scheme to the loopback
+listener + `--proxy-bypass-list=<-loopback>`), which makes the system proxy moot. Both halves
+are now live-observed, not inferred.
+
+Automatable harness pieces (ux project only; no plugin code changed):
+
+- `WinInetProxyHarness` - a loopback plain-HTTP forward proxy that answers every
+  absolute-form GET with a marker page (`WebContent OS-proxy harness` /
+  `WININET-OS-PROXY-ROUTE-CONFIRMED`) and journals every request head (method,
+  absolute-form target, User-Agent). It never tunnels (CONNECT is journaled + 403) and never
+  dials upstream, so a journaled request IS an OS-proxy request.
+- `WinInetProxyControl` - snapshot / apply / restore of the exact HKCU WinINET values
+  (`ProxyEnable`, `ProxyServer`, `ProxyOverride`, `AutoConfigURL`) plus the
+  `InternetSetOptionW(SETTINGS_CHANGED/REFRESH)` broadcast, so the probe changes the machine
+  exactly as the LAN-settings dialog would and puts it back verbatim.
+- `BrowserProcessArgs` - the live `Win32_Process` command lines of the plugin's
+  `msedgewebview2.exe` processes (scoped by `--user-data-dir` marker), which is where
+  "which proxy does this browser obey" is actually decided.
+
+Live: `ScOsProxyInheritanceProbeTests` (probe category; artifacts under
+`%TEMP%\webcontent-os-proxy-probe\<run>\`). Both rows use the same workspace home,
+`http://wininet-proxy.invalid/` - an RFC 2606 `.invalid` host that can NEVER resolve, so any
+bytes at that url can only have come through a proxy. The Management Client phase sets the
+Demo Workspace home + routing toggle in one session, verifies the plugin's
+`Stored proxy targets ... routing on|off` audit line plus a reloaded-pane readback, and the
+probe's finally restores whatever pre-call state it read (baseline fallback
+`http://httpforever.com/` + routing on).
+
+- **Row 1 (inheritance)** `ProbeNonProxiedViewRoutesThroughOsConfiguredProxy` - routing OFF,
+  WinINET proxy pointed at the harness: the workspace's first document renders the harness
+  marker page (title + marker + absolute url echo asserted over CDP), the harness journal
+  carries the browser's absolute-form `GET http://wininet-proxy.invalid/` with its Chromium
+  UA, and every plugin browser process command line shows NO `--proxy-server` and no
+  `--no-proxy-server` (the only injected argument in the session is the harness's own
+  `--remote-debugging-port=0` via `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`).
+- **Row 2 (contrast)** `ProbeProxiedViewNeverUsesOsConfiguredProxy` - routing ON, SAME OS
+  proxy, SAME url: the workspace's first document is the plugin's own
+  `Web Content proxy: 403` page ("not in the workspace proxy allowlist" + the canonical
+  entry line), the harness journal for that origin is EMPTY (the OS proxy was never asked),
+  and the live browser command lines carry `--proxy-server=http=http://127.0.0.1:<listener>;https=...;ws=...;wss=...`
+  plus `--proxy-bypass-list=<-loopback>`.
+
+**Live records (BEAST, vms.joshooaj.com):**
+
+- Row 1 (inheritance): `20261103-035256` — **PASSED** 2026-11-03. Home
+  `http://wininet-proxy.invalid/` (routing OFF, WinINET proxy = harness 127.0.0.1:55920): the
+  tab's document title was `WebContent OS-proxy harness`, the body carried the marker + the
+  absolute url echo, the journal recorded `GET http://wininet-proxy.invalid/` with the
+  `Edg/156.0.0.0` UA, and the browser command lines showed the `msedgewebview2.exe` tree with
+  no proxy switch. Restore verified in the artifact (WinINET back to the exact snapshot).
+- Row 2 (contrast): `20261103-040006` — **PASSED** 2026-11-03. SAME home, routing ON: the
+  document title was `Web Content proxy: 403` with the "not allowed by the administrator" body,
+  the harness journal for `wininet-proxy.invalid` was EMPTY (0 of 73 journaled requests — the
+  others were the machine's own apps discovering the temporarily-set OS proxy), and the live
+  command lines carried `--proxy-server=http=http://127.0.0.1:63391;https=...;ws=...;wss=...`
+  with `--proxy-bypass-list=<-loopback>` on the browser tree root. WinINET + workspace
+  (home `http://httpforever.com/`, routing ON) both restored verbatim, audit line + reloaded
+  pane readback confirmed.
+- Harness ordering fact discovered while building this: the Management Client phase must run
+  BEFORE the WinINET proxy is applied — MC's own login channel follows the system proxy, and
+  pointing WinINET at the harness (which 403s CONNECT and never dials upstream) breaks the MC
+  login. The probe now orders MC first.
+
 ## Installer checks
 
 ### IN-1 Installer force-closes running Milestone clients (#70)
@@ -1446,6 +1516,7 @@ scheduled tasks removed afterwards.
 | A tri-state string on a WPF-boolean DataGrid attribute taking the whole Management Client config page down at BAML parse time (#76, found in the MC-13 walk) | `WorkspaceTabShellGuardTests` (every `CanUser*` on every page DataGrid pinned to a real bool), MC-13 |
 | A CA export writing an EMPTY file when no authority exists, guessing the CA's provenance (a script-provisioned certificate invisible to the export), reaching any cert store WRITE flag, or outgrowing the MIP frame limits mid-reply (#75) | `ProxyCaExportTests` (`NoAuthority` "does not exist yet" posture; fixed-CN read-only `LocalMachine\Personal` resolve with source guards on the open flags; view builder never offers a save without bytes; 8 KiB DER / 16 KiB wire caps pinned under the proven chunk headroom with a real 2048-bit CA under the cap), MC-15 (live bytes byte-identical to the legacy-script-provisioned store entry) |
 | MSI upgrade dying with 1603 because a running Smart Client / Management Client locks the plugin dlls, or the force-close drifting after RemoveFiles/InstallFiles so the files are still locked when the MSI reaches them (#70) | `build.ps1` installer sequencing guard (compiled-MSI action order + kill-target table pins), IN-1 (live uninstall/fresh-install/upgrade rows with the dll proven LOCKED, all exit 0) |
+| A non-proxied view silently losing OS (WinINET) proxy inheritance (a stray browser-arguments injection), or a proxied view falling back to the system proxy so the workspace allowlist stops being the whole story (#67) | `ProxyBrowserArgumentsTests` (the pin shape: all four schemes + `<-loopback>`), `ProxyWorkspaceProfileTests` (enabled always proxies; disabled emits no profile), SC-8 (both postures observed live on the real browser command lines and the OS-proxy harness journal) |
 
 ## Scope notes (deliberate)
 
