@@ -264,8 +264,11 @@ public static class TriggerGridUi
         AllowlistGridUi.OpenProxyTab(mcMain);
         var stored = ReadRows(mcMain);
         if (!SameRows(rows, stored))
+        {
+            Artifacts.Window(mcMain, "mc-triggers-reload-mismatch");
             throw new InvalidOperationException(
                 $"After Save + reload the trigger grid reads '{string.Join(" | ", stored.Select(r => r.Describe()))}' — expected '{string.Join(" | ", rows.Select(r => r.Describe()))}'.");
+        }
         log.AppendLine(
             $"saved triggers [{string.Join("; ", rows.Select(r => r.Describe()))}] (verified from the audit line AND the reloaded grid, order-sensitive)");
     }
@@ -344,18 +347,35 @@ public static class TriggerGridUi
             var cell = CellElement(grid, cellId, index);
             try
             {
-                if (cell.Patterns.ExpandCollapse.IsSupported)
+                var expandable = cell.Patterns.ExpandCollapse.IsSupported;
+                if (expandable)
                     cell.Patterns.ExpandCollapse.Pattern.Expand();
                 Thread.Sleep(400);
-                var items = cell.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem));
+                var items = cell.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem)).ToList();
+                var scope = "combo-scoped";
+                if (items.Count == 0)
+                {
+                    // WPF dropdowns live in a popup that can attach OUTSIDE the combo's subtree -
+                    // fall back to a window-wide search, restricted to the known verb set so no
+                    // other list on the pane can be mistaken for this dropdown.
+                    items = mcMain.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem))
+                        .Where(i => MethodOrder.Contains((i.Name ?? string.Empty).Trim()))
+                        .ToList();
+                    scope = "window-wide";
+                }
+
                 var match = items.FirstOrDefault(i => string.Equals((i.Name ?? string.Empty).Trim(), verb, StringComparison.Ordinal));
+                Trace($"combo row {index} '{verb}': expand={expandable} items={items.Count} ({scope}) match={(match == null ? "none" : $"'{match.Name}' selectionItem={match.Patterns.SelectionItem.IsSupported}")}");
                 if (match != null && match.Patterns.SelectionItem.IsSupported)
                     match.Patterns.SelectionItem.Pattern.Select();
                 Thread.Sleep(300);
                 if (cell.Patterns.ExpandCollapse.IsSupported)
                     cell.Patterns.ExpandCollapse.Pattern.Collapse();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Trace($"combo row {index} '{verb}' pattern route threw {ex.GetType().Name}: {ex.Message}");
+            }
 
             Thread.Sleep(400);
             if (string.Equals(ReadComboSelection(CellElement(grid, cellId, index)), verb, StringComparison.Ordinal))
@@ -365,7 +385,9 @@ public static class TriggerGridUi
             cell = CellElement(grid, cellId, index);
             var current = Array.IndexOf(MethodOrder, ReadComboSelection(cell));
             var target = Array.IndexOf(MethodOrder, verb);
-            if (ManagementClientUi.FocusVerified(mcMain, cell, cellId) && current >= 0 && target >= 0)
+            var focusOk = ManagementClientUi.FocusVerified(mcMain, cell, cellId);
+            Trace($"combo row {index} '{verb}': keyboard route focus={focusOk} current={current} target={target}");
+            if (focusOk && current >= 0 && target >= 0)
             {
                 var key = target >= current
                     ? FlaUI.Core.WindowsAPI.VirtualKeyShort.DOWN
@@ -415,12 +437,70 @@ public static class TriggerGridUi
         catch { return element.Name ?? string.Empty; }
     }
 
-    /// <summary>A non-editable WPF ComboBox surfaces its selection as the control's UIA Name.</summary>
+    /// <summary>Read the combo's selection. A WPF ComboBox peer exposes its dropdown items as
+    /// children only once the dropdown has been opened at least time (a freshly loaded closed
+    /// combo shows ZERO item peers), and the popup stays in the subtree after a collapse, so naive
+    /// Text scans hit the popup's first row ("*") instead of the selection. The selection is read
+    /// from the item peers' IsSelected flags; a combo whose peers are not realized yet is expanded
+    /// once to realize them, read there, and collapsed again.</summary>
     private static string ReadComboSelection(AutomationElement element)
     {
-        try { return (element.Name ?? string.Empty).Trim(); }
+        try
+        {
+            var direct = (element.Name ?? string.Empty).Trim();
+            if (MethodOrder.Contains(direct))
+                return direct;
+
+            var selected = FirstSelected(element.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem)).ToList());
+            if (selected != null)
+                return (selected.Name ?? string.Empty).Trim();
+
+            var probe = new List<string>();
+            try
+            {
+                if (element.Patterns.ExpandCollapse.IsSupported)
+                {
+                    element.Patterns.ExpandCollapse.Pattern.Expand();
+                    Thread.Sleep(400);
+                    var realized = element.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem)).ToList();
+                    foreach (var i in realized)
+                    {
+                        try { probe.Add($"'{i.Name}'={i.Patterns.SelectionItem.IsSupported}:{i.Patterns.SelectionItem.Pattern.IsSelected}"); }
+                        catch (Exception ex) { probe.Add($"'{i.Name}'=threw:{ex.GetType().Name}"); }
+                    }
+
+                    selected = FirstSelected(realized);
+                    element.Patterns.ExpandCollapse.Pattern.Collapse();
+                }
+            }
+            catch { }
+
+            if (selected == null)
+                Trace($"combo readback: realized=[{string.Join(" ", probe)}] selected=none");
+            if (selected != null)
+                return (selected.Name ?? string.Empty).Trim();
+            if (probe.Count == 0)
+            {
+                // No item peers even after expanding: fall back to the selection-box Text child.
+                foreach (var text in element.FindAllDescendants(cf => cf.ByControlType(ControlType.Text)))
+                {
+                    var name = (text.Name ?? string.Empty).Trim();
+                    if (MethodOrder.Contains(name))
+                        return name;
+                }
+            }
+
+            return direct;
+        }
         catch { return string.Empty; }
     }
+
+    private static AutomationElement FirstSelected(List<AutomationElement> items) =>
+        items.FirstOrDefault(i =>
+        {
+            try { return i.Patterns.SelectionItem.IsSupported && i.Patterns.SelectionItem.Pattern.IsSelected; }
+            catch { return false; }
+        });
 
     private static string ReadText(AutomationElement element)
     {

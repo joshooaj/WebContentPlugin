@@ -91,7 +91,7 @@ public class McProxyTriggersProbeTests
             var mcLogin = LoginFlow.WaitForLoginWindow(mc);
             LoginFlow.Login(mc, mcLogin, config);
             LoginFlow.AcceptCertificateTrust(mc);
-            LoginFlow.WaitForAdminMain(mc);
+            mcMain = LoginFlow.WaitForAdminMain(mc);
             ManagementClientUi.CloseStrayLoginDialogs(mc);
             ManagementClientUi.WaitForTreeReady(mcMain);
 
