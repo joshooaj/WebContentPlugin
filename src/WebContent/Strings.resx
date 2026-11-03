@@ -327,6 +327,21 @@
   <data name="StatusNoItemContext" xml:space="preserve">
     <value>No workspace item context: this page cannot ask the Event Server for a status snapshot.</value>
   </data>
+  <data name="DiagnosticsSummaryFormat" xml:space="preserve">
+    <value>{0} blocked proxy origin(s) reported for this workspace since the Event Server started tracking. Newest refusal first. The list lives in the Event Server's memory only - it resets when the Event Server service restarts.</value>
+  </data>
+  <data name="DiagnosticsEmpty" xml:space="preserve">
+    <value>Nothing has been blocked on this workspace since the Event Server started tracking. As Smart Clients open proxied views and the proxy refuses their requests, every refused origin appears here with its cause and hit count. The list lives in the Event Server's memory only - it resets when the Event Server service restarts.</value>
+  </data>
+  <data name="DiagnosticsStatusAllowlisted" xml:space="preserve">
+    <value>on allowlist</value>
+  </data>
+  <data name="DiagnosticsStatusCertTrust" xml:space="preserve">
+    <value>certificate trust, not the allowlist</value>
+  </data>
+  <data name="DiagnosticsPromotionRefusedFormat" xml:space="preserve">
+    <value>Could not add '{0}' to the allowlist: it is not an exact proxy origin the allowlist can name.</value>
+  </data>
   <data name="BlockedResourcesIndicatorOne" xml:space="preserve">
     <value>1 resource blocked</value>
   </data>

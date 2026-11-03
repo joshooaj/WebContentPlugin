@@ -33,5 +33,15 @@ namespace WebContent.Admin
         {
             return permission == WorkspaceManagePermission.Granted;
         }
+
+        /// <summary>
+        /// #84: the Diagnostics tab rides the identical gate — its data is the status snapshot's
+        /// blocked ring, and its one affordance writes the allowlist, so it belongs behind the
+        /// same edit-rights check. Fail closed on every non-Granted verdict.
+        /// </summary>
+        public static bool ShowDiagnosticsTab(WorkspaceManagePermission permission)
+        {
+            return permission == WorkspaceManagePermission.Granted;
+        }
     }
 }

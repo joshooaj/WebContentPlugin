@@ -14,18 +14,21 @@ namespace WebContent.Admin
     /// The WPF workspace configuration page, hosted inside the WinForms
     /// <see cref="WorkspaceUserControl"/> wrapper through an ElementHost.
     /// Since #74 the page is a four-tab shell (Settings | Proxy | Diagnostics | Status): the
-    /// Settings tab carries the configuration content, Proxy/Diagnostics are still landing panels
-    /// with no input controls, and Status (#76) renders the workspace's live proxy sessions behind
-    /// the SecurityActions edit-rights gate — read-only, and polled only while that tab is open.
+    /// Settings tab carries the configuration content, Proxy (#81) edits the structured allowlist,
+    /// Diagnostics (#84) renders the Event Server's recently-blocked list with one-click
+    /// promotion, and Status (#76) renders the workspace's live proxy sessions - the last two
+    /// behind the SecurityActions edit-rights gate, read-only, and polled only while one of them
+    /// is the open tab.
     /// All field labels come from <see cref="Strings"/> so the Smart Client
     /// properties page and the Management Client admin page share wording.
     /// </summary>
     public partial class WorkspaceConfigPage : UserControl
     {
-        /// <summary>#76: how often the open Status tab pulls a fresh snapshot from the Event Server.</summary>
+        /// <summary>#76/#84: how often an open live tab (Status or Diagnostics) pulls a fresh
+        /// snapshot from the Event Server - one query pair feeds both.</summary>
         internal static readonly TimeSpan StatusPollInterval = TimeSpan.FromSeconds(3);
 
-        /// <summary>#76: how long a status query may stay unanswered before the page says so.</summary>
+        /// <summary>#76/#84: how long a status query may stay unanswered before the page says so.</summary>
         internal static readonly TimeSpan StatusQueryDeadline = TimeSpan.FromSeconds(2);
 
         private bool _syncingZoom;
@@ -34,6 +37,10 @@ namespace WebContent.Admin
         private string _statusWorkspaceItemId;
         private readonly ProxyStatusRateTracker _statusRates = new ProxyStatusRateTracker();
         private readonly DispatcherTimer _statusPoll;
+
+        /// <summary>#84: the last successful snapshot, kept so an allowlist promotion can re-annotate
+        /// the Diagnostics rows (now-allowed state) without waiting for the next poll tick.</summary>
+        private ProxyStatusResponsePayload _lastStatusSnapshot;
 
         // #81: the row collection behind the Proxy tab's structured allowlist grid. _loading
         // suppresses the dirty chain while the item manager fills rows from a stored definition -
@@ -254,9 +261,11 @@ namespace WebContent.Admin
             configError.Visibility = Visibility.Collapsed;
             chkHideAddress.IsEnabled = true;
             // #74 shell: every fresh fill opens on Settings, and with no item context the
-            // Status role gate has nothing to grant — the tab stays hidden until a fill says otherwise.
+            // Status/Diagnostics role gate has nothing to grant — both tabs stay hidden until a
+            // fill says otherwise.
             workspaceTabs.SelectedItem = tabSettings;
             tabStatus.Visibility = Visibility.Collapsed;
+            tabDiagnostics.Visibility = Visibility.Collapsed;
 
             // #76: a different item means a different workspace's sessions - drop the old page's
             // rows, its rate baseline, and its pull timer before the next fill.
@@ -267,6 +276,13 @@ namespace WebContent.Admin
             txtStatusSummary.Text = string.Empty;
             statusError.Visibility = Visibility.Collapsed;
             txtStatusError.Text = string.Empty;
+
+            // #84: the same for the Diagnostics tab's blocked-origin rows.
+            _lastStatusSnapshot = null;
+            dgDiagnosticsBlocked.ItemsSource = null;
+            txtDiagnosticsSummary.Text = string.Empty;
+            diagnosticsError.Visibility = Visibility.Collapsed;
+            txtDiagnosticsError.Text = string.Empty;
         }
 
         public void FillContent()
@@ -299,16 +315,36 @@ namespace WebContent.Admin
             }
 
             // A gate that closes mid-session must stop the pull loop with the tab: the page must
-            // never keep querying (or keep rendering) a status feed the user cannot see.
+            // never keep querying (or keep rendering) a status feed the user cannot see. Shared
+            // with Diagnostics (#84): the loop only stops when NO live tab is open any more.
             if (!visible)
             {
-                StopStatusPolling();
+                MaybeStopLivePolling();
             }
         }
 
         /// <summary>
-        /// #76: which workspace the page is showing, so the Status tab knows what to ask the Event
-        /// Server for. The id travels in exactly the form the Smart Client's block reports and
+        /// #84 role gate: the Diagnostics tab shows status-derived data and carries the one
+        /// allowlist-writing affordance, so it rides the exact same SecurityActions Manage
+        /// (edit-rights) gate as the Status tab — denial or a failed lookup hides the whole tab.
+        /// </summary>
+        public void SetDiagnosticsTabVisible(bool visible)
+        {
+            tabDiagnostics.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (!visible && ReferenceEquals(workspaceTabs.SelectedItem, tabDiagnostics))
+            {
+                workspaceTabs.SelectedItem = tabSettings;
+            }
+
+            if (!visible)
+            {
+                MaybeStopLivePolling();
+            }
+        }
+
+        /// <summary>
+        /// #76/#84: which workspace the page is showing, so the live tabs know what to ask the
+        /// Event Server for. The id travels in exactly the form the Smart Client's block reports and
         /// session events carry (the workspace item's <c>FQID.ObjectId.ToString()</c>), because the
         /// Event Server matches it as a string against its own workspace lookup.
         /// </summary>
@@ -319,9 +355,11 @@ namespace WebContent.Admin
             if (changed)
             {
                 // Byte counters are per session and per Event Server process: a new item context
-                // never inherits the previous one's rate baseline.
+                // never inherits the previous one's rate baseline. Same for the blocked ring:
+                // every snapshot in flight describes the OTHER workspace.
                 _statusRates.Reset();
-                if (IsStatusTabOpen)
+                _lastStatusSnapshot = null;
+                if (IsLiveTabOpen)
                 {
                     RefreshStatus();
                 }
@@ -331,16 +369,23 @@ namespace WebContent.Admin
         private bool IsStatusTabOpen =>
             tabStatus != null && tabStatus.Visibility == Visibility.Visible && ReferenceEquals(workspaceTabs.SelectedItem, tabStatus);
 
+        private bool IsDiagnosticsTabOpen =>
+            tabDiagnostics != null && tabDiagnostics.Visibility == Visibility.Visible && ReferenceEquals(workspaceTabs.SelectedItem, tabDiagnostics);
+
+        /// <summary>#84: one status-query pair feeds both live tabs; the pull loop is alive exactly
+        /// while either of them is the tab being looked at.</summary>
+        private bool IsLiveTabOpen => IsStatusTabOpen || IsDiagnosticsTabOpen;
+
         private void OnTabSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (!ReferenceEquals(e.OriginalSource, workspaceTabs) && !ReferenceEquals(e.Source, workspaceTabs))
             {
                 // TabItem children raise their own selection events; only the TabControl's switch
-                // decides whether the Status tab is being looked at.
+                // decides whether a live tab is being looked at.
                 return;
             }
 
-            if (IsStatusTabOpen)
+            if (IsLiveTabOpen)
             {
                 StartStatusPolling();
             }
@@ -351,6 +396,13 @@ namespace WebContent.Admin
         }
 
         private void OnStatusRefresh(object sender, RoutedEventArgs e)
+        {
+            RefreshStatus();
+        }
+
+        /// <summary>#84: the Diagnostics tab's explicit re-pull - the same query pair, one answer
+        /// renders both tabs.</summary>
+        private void OnDiagnosticsRefresh(object sender, RoutedEventArgs e)
         {
             RefreshStatus();
         }
@@ -377,8 +429,19 @@ namespace WebContent.Admin
             }
         }
 
+        /// <summary>#84: a role gate closing one live tab must not kill the loop out from under
+        /// the other one - stop only when neither tab is open.</summary>
+        private void MaybeStopLivePolling()
+        {
+            if (!IsLiveTabOpen)
+            {
+                StopStatusPolling();
+            }
+        }
+
         /// <summary>
-        /// #76: one pull of the Event Server's status snapshot for this workspace. Re-entrancy
+        /// #76/#84: one pull of the Event Server's status snapshot for this workspace, rendered
+        /// into BOTH live tabs (sessions on Status, blocked origins on Diagnostics). Re-entrancy
         /// guarded, and no ConfigureAwait(false) anywhere: every statement after the await touches
         /// WPF elements and must stay on the UI thread.
         /// </summary>
@@ -392,6 +455,7 @@ namespace WebContent.Admin
             if (string.IsNullOrEmpty(_statusWorkspaceItemId))
             {
                 RenderStatusFailure(Strings.StatusNoItemContext);
+                RenderDiagnosticsFailure(Strings.StatusNoItemContext);
                 return;
             }
 
@@ -399,6 +463,7 @@ namespace WebContent.Admin
             if (client == null || !client.IsReady)
             {
                 RenderStatusFailure(Strings.StatusNotConnected);
+                RenderDiagnosticsFailure(Strings.StatusNotConnected);
                 return;
             }
 
@@ -416,14 +481,18 @@ namespace WebContent.Admin
                         true,
                         nameof(WorkspaceConfigPage),
                         $"Proxy status query for workspace '{_statusWorkspaceItemId}' failed (code={view.FailureCode}).");
-                    RenderStatusFailure(StatusFailureText(view.FailureCode, response));
+                    var failureText = StatusFailureText(view.FailureCode, response);
+                    RenderStatusFailure(failureText);
+                    RenderDiagnosticsFailure(failureText);
                     return;
                 }
 
+                _lastStatusSnapshot = response;
+                var blockedCount = response.Blocked == null ? 0 : response.Blocked.Count;
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(WorkspaceConfigPage),
-                    $"Proxy status snapshot for workspace '{_statusWorkspaceItemId}' answered: {view.SessionCount} live session(s).");
+                    $"Proxy status snapshot for workspace '{_statusWorkspaceItemId}' answered: {view.SessionCount} live session(s), {blockedCount} blocked origin(s).");
                 dgStatusSessions.ItemsSource = view.Sessions;
                 statusError.Visibility = Visibility.Collapsed;
                 txtStatusError.Text = string.Empty;
@@ -436,6 +505,12 @@ namespace WebContent.Admin
                         view.TotalRequestsPerMinute,
                         ProxyStatusFormat.Rate(view.SendBytesPerSecond),
                         ProxyStatusFormat.Rate(view.ReceiveBytesPerSecond));
+
+                RenderDiagnostics(ProxyDiagnosticsViewBuilder.Build(
+                    response,
+                    _allowlist.ValidCanonicalEntries(),
+                    VmsFloorHosts(),
+                    DateTime.UtcNow));
             }
             catch (Exception exception)
             {
@@ -445,11 +520,13 @@ namespace WebContent.Admin
                     true,
                     nameof(WorkspaceConfigPage),
                     $"Proxy status query for workspace '{_statusWorkspaceItemId}' threw: {exception.Message}");
-                RenderStatusFailure(string.Format(
+                var failureText = string.Format(
                     CultureInfo.InvariantCulture,
                     Strings.StatusQueryFailedFormat,
                     ProxyFetchErrorCodes.Error,
-                    exception.Message));
+                    exception.Message);
+                RenderStatusFailure(failureText);
+                RenderDiagnosticsFailure(failureText);
             }
             finally
             {
@@ -485,6 +562,124 @@ namespace WebContent.Admin
             txtStatusSummary.Text = string.Empty;
             txtStatusError.Text = text;
             statusError.Visibility = Visibility.Visible;
+        }
+
+        // ---- #84: Diagnostics tab wiring ---------------------------------------------------
+
+        /// <summary>
+        /// One render of the Diagnostics tab. The rows arrive pre-formatted (the builder is pure
+        /// and unit-tested); only the Status cell's localized sentence is written here, the same
+        /// code→text split the #81 grid uses so the XAML stays BAML-trivial.
+        /// </summary>
+        private void RenderDiagnostics(ProxyDiagnosticsView view)
+        {
+            foreach (var row in view.Rows)
+            {
+                switch (row.StatusCode)
+                {
+                    case ProxyBlockedRowStatus.Allowlisted:
+                        row.StatusText = Strings.DiagnosticsStatusAllowlisted;
+                        break;
+                    case ProxyBlockedRowStatus.CertTrust:
+                        row.StatusText = Strings.DiagnosticsStatusCertTrust;
+                        break;
+                    default:
+                        row.StatusText = string.Empty;
+                        break;
+                }
+            }
+
+            dgDiagnosticsBlocked.ItemsSource = view.Rows;
+            txtDiagnosticsSummary.Text = view.BlockedCount == 0
+                ? Strings.DiagnosticsEmpty
+                : string.Format(CultureInfo.InvariantCulture, Strings.DiagnosticsSummaryFormat, view.BlockedCount);
+            diagnosticsError.Visibility = Visibility.Collapsed;
+            txtDiagnosticsError.Text = string.Empty;
+        }
+
+        private void RenderDiagnosticsFailure(string text)
+        {
+            _lastStatusSnapshot = null;
+            dgDiagnosticsBlocked.ItemsSource = null;
+            txtDiagnosticsSummary.Text = string.Empty;
+            txtDiagnosticsError.Text = text;
+            diagnosticsError.Visibility = Visibility.Visible;
+        }
+
+        /// <summary>
+        /// #84: the one-click "Add to allowlist" promotion. The row's canonical blocked origin
+        /// becomes an exact scheme+host+port row in the Proxy tab's structured grid (identical to
+        /// what the grid itself would save — the admin can then widen it into a wildcard); the
+        /// row-collection chain dirties the pane exactly like a hand-typed row. Then the tab
+        /// re-annotates from the last snapshot WITHOUT a new query, so the row visibly updates to
+        /// its now-allowed state. CertUntrusted rows never carry the button; the builder already
+        /// hid it, and the promotion path refuses such an origin again as a guard.
+        /// </summary>
+        private void OnDiagnosticsPromote(object sender, RoutedEventArgs e)
+        {
+            var row = (sender as FrameworkElement)?.DataContext as ProxyBlockedRowView;
+            if (row == null || string.IsNullOrEmpty(row.Origin))
+            {
+                return;
+            }
+
+            var outcome = _allowlist.TryAddExactOrigin(row.Origin, out _);
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WorkspaceConfigPage),
+                $"Proxy allowlist promotion for workspace '{_statusWorkspaceItemId}': origin '{row.Origin}' {DescribePromotion(outcome)}" +
+                (outcome == ProxyPromotionOutcome.Added ? " (grid edit, not yet saved - Save writes it)." : "."));
+
+            if (outcome == ProxyPromotionOutcome.Refused)
+            {
+                RenderDiagnosticsFailure(string.Format(
+                    CultureInfo.InvariantCulture,
+                    Strings.DiagnosticsPromotionRefusedFormat,
+                    row.Origin));
+                return;
+            }
+
+            // Immediate honest feedback: re-annotate the whole list against the grid as it now
+            // stands. The promoted row and any same-origin sibling flip to "on allowlist"; no
+            // button remains on them, so a double click cannot stack duplicates.
+            if (_lastStatusSnapshot != null)
+            {
+                RenderDiagnostics(ProxyDiagnosticsViewBuilder.Build(
+                    _lastStatusSnapshot,
+                    _allowlist.ValidCanonicalEntries(),
+                    VmsFloorHosts(),
+                    DateTime.UtcNow));
+            }
+        }
+
+        private static string DescribePromotion(ProxyPromotionOutcome outcome)
+        {
+            switch (outcome)
+            {
+                case ProxyPromotionOutcome.Added: return "added to the allowlist grid";
+                case ProxyPromotionOutcome.AlreadyPresent: return "already covered by an existing entry";
+                default: return "refused (not an exact allowlist origin)";
+            }
+        }
+
+        /// <summary>
+        /// #73/#84: the VMS's own host names for the wildcard SSRF floor - the same
+        /// <c>EnvironmentManager</c> source the Smart Client feeds its forward gate, so the
+        /// Diagnostics annotation ("this origin is already covered") can never disagree with what
+        /// the Event Server's gate would actually decide for a wildcard entry. Absent (offline)
+        /// just leaves the matcher's syntactic floor (IPs, localhost).
+        /// </summary>
+        private static string[] VmsFloorHosts()
+        {
+            try
+            {
+                var host = EnvironmentManager.Instance?.MasterSite?.ServerId?.Uri?.Host;
+                return string.IsNullOrWhiteSpace(host) ? null : new[] { host };
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private void OnUserChanged(object sender, RoutedEventArgs e)

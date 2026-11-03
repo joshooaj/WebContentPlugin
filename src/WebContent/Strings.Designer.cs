@@ -682,6 +682,51 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to {0} blocked proxy origin(s) reported for this workspace since the Event Server started tracking. Newest refusal first. The list lives in the Event Server&apos;s memory only - it resets when the Event Server service restarts..
+        /// </summary>
+        internal static string DiagnosticsSummaryFormat {
+            get {
+                return ResourceManager.GetString("DiagnosticsSummaryFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Nothing has been blocked on this workspace since the Event Server started tracking. As Smart Clients open proxied views and the proxy refuses their requests, every refused origin appears here with its cause and hit count. The list lives in the Event Server&apos;s memory only - it resets when the Event Server service restarts..
+        /// </summary>
+        internal static string DiagnosticsEmpty {
+            get {
+                return ResourceManager.GetString("DiagnosticsEmpty", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to on allowlist.
+        /// </summary>
+        internal static string DiagnosticsStatusAllowlisted {
+            get {
+                return ResourceManager.GetString("DiagnosticsStatusAllowlisted", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to certificate trust, not the allowlist.
+        /// </summary>
+        internal static string DiagnosticsStatusCertTrust {
+            get {
+                return ResourceManager.GetString("DiagnosticsStatusCertTrust", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Could not add &apos;{0}&apos; to the allowlist: it is not an exact proxy origin the allowlist can name..
+        /// </summary>
+        internal static string DiagnosticsPromotionRefusedFormat {
+            get {
+                return ResourceManager.GetString("DiagnosticsPromotionRefusedFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to 1 resource blocked.
         /// </summary>
         internal static string BlockedResourcesIndicatorOne {
