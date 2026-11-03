@@ -18,9 +18,18 @@ namespace WebContent.UxTests;
 /// refuses them client-side (403 NotAllowed) and tallies them per browser-view instance.
 /// The contract:
 ///   1. nothing renders in runtime mode for ordinary users (indicator absent/offscreen),
-///   2. entering setup mode shows "N resources blocked" near the address bar,
+///   2. entering setup mode shows "N resources blocked" near the address bar (the label is
+///      its own toolbar element: the #72-style guard pins it beside the icon button, after
+///      the first live run 2026-11-03 proved text Content inside VideoOSButtonTransparentSmall
+///      renders nothing),
 ///   3. clicking it lists origin (selectable), reason, and hit count,
-///   4. a top-level navigation resets the counters - the clean twin page hides the indicator,
+///   4. a top-level navigation resets the counters - the probe's blocked origin is GONE from
+///      the list after the clean twin page. Origin-scoped, not "the whole indicator is gone":
+///      the pinned browser proxies Edge's OWN service traffic (nav-edge.smartscreen...,
+///      edge.microsoft.com - live MIPLog lines show them re-refused within seconds of any
+///      navigation), and those refusals honestly re-tally for the new page load. The reset
+///      contract is about THIS page's blocked resources, not about silencing the proxy's
+///      fail-closed posture toward browser traffic,
 ///   5. re-blocking in runtime mode stays invisible until setup mode shows it again.
 ///
 /// The page origin is http://172.16.128.210:18125 - an origin the workspace allowlist has
@@ -69,7 +78,7 @@ public class ScProxyBlockedIndicatorProbeTests
         string originRowValue = null;
         bool reasonRowFound = false;
         string countRowValue = null;
-        bool hiddenAfterCleanNavigation = false;
+        bool probeOriginGoneAfterCleanNavigation = false;
         bool runtimeIndicatorHiddenAfterReblock = false;
         bool setupShowsReblockedTally = false;
 
@@ -163,22 +172,15 @@ public class ScProxyBlockedIndicatorProbeTests
                 indicatorText = text?.Name;
                 log.AppendLine($"indicator text: '{indicatorText}'");
 
-                // Click to open the per-view list.
+                // Click to open the per-view list. Rows are ENUMERATED, not just the first
+                // descendant: the browser's own pinned service traffic (SmartScreen pings)
+                // can occupy any row position, and the probe origin must be found among them.
                 SmartClientUi.TryInvokeById(main, "blockedIndicator", 1500);
                 var rowsDeadline = DateTime.UtcNow.AddSeconds(10);
                 while (DateTime.UtcNow < rowsDeadline && !originRowFound)
                 {
                     item = SmartClientUi.WaitForMipViewItem(main);
-                    var origin = item.FindFirstDescendant(cf => cf.ByAutomationId("blockedResourceOrigin"));
-                    if (origin != null)
-                    {
-                        originRowValue = ReadElementValue(origin);
-                        originRowFound = string.Equals(originRowValue, server.BlockedOrigin, StringComparison.OrdinalIgnoreCase);
-                        var reason = item.FindFirstDescendant(cf => cf.ByAutomationId("blockedResourceReason"));
-                        reasonRowFound = reason != null && (reason.Name ?? "").Contains("not allowed", StringComparison.OrdinalIgnoreCase);
-                        var hits = item.FindFirstDescendant(cf => cf.ByAutomationId("blockedResourceCount"));
-                        countRowValue = hits?.Name;
-                    }
+                    originRowFound = TryReadProbeOriginRow(item, server.BlockedOrigin, out originRowValue, out reasonRowFound, out countRowValue);
                     if (!originRowFound) Thread.Sleep(1000);
                 }
                 log.AppendLine($"list row: origin='{originRowValue}' reason-row={reasonRowFound} count='{countRowValue}'");
@@ -189,20 +191,45 @@ public class ScProxyBlockedIndicatorProbeTests
                 SafeWindowPrint(main, "sc-blocked-indicator-setup-missing", log);
             }
 
-            // Navigation resets the counters like the browser's own console: the clean twin
-            // page (same origin, no blocked subresources) must hide the indicator again.
+            // Navigation resets the counters like the browser's own console. The proof is
+            // ORIGIN-SCOPED (first live run 2026-11-03): Edge's own service traffic rides the
+            // pinned loopback proxy and is re-refused within seconds of any navigation, so the
+            // indicator may honestly stay lit on the clean page with the browser's own origins
+            // in its list. What the reset contract promises is that THIS page load's blocked
+            // resources are gone - the probe's 18131 row must no longer be counting.
             await page.GotoAsync($"{server.PageOrigin}/clean/", new PageGotoOptions { WaitUntil = WaitUntilState.Load, Timeout = 60000 });
             var cleanDeadline = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < cleanDeadline && await page.TitleAsync() != "UX Probe CLEANPAGE") await Task.Delay(500);
             log.AppendLine($"clean twin page -> title='{await page.TitleAsync()}'");
-            var hideDeadline = DateTime.UtcNow.AddSeconds(15);
-            while (DateTime.UtcNow < hideDeadline && !hiddenAfterCleanNavigation)
+            var hideDeadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < hideDeadline && !probeOriginGoneAfterCleanNavigation)
             {
                 item = SmartClientUi.WaitForMipViewItem(main);
-                hiddenAfterCleanNavigation = !IndicatorRendered(item, log, "after-clean");
-                if (!hiddenAfterCleanNavigation) Thread.Sleep(1000);
+                if (!IndicatorRendered(item, log, "after-clean"))
+                {
+                    probeOriginGoneAfterCleanNavigation = true;
+                    log.AppendLine("after clean navigation: indicator hidden outright");
+                    break;
+                }
+
+                // Indicator still lit: open the list (unless already open) and look for the
+                // probe origin specifically. Any surviving rows are browser-service noise and
+                // get named in the log so the run states what stayed blocked.
+                var openCheck = item.FindFirstDescendant(cf => cf.ByAutomationId("blockedResourceOrigin"));
+                if (openCheck == null) SmartClientUi.TryInvokeById(main, "blockedIndicator", 1500);
+                string cleanOrigin, cleanCount;
+                bool cleanReason;
+                if (!TryReadProbeOriginRow(item, server.BlockedOrigin, out cleanOrigin, out cleanReason, out cleanCount))
+                {
+                    probeOriginGoneAfterCleanNavigation = true;
+                    var remaining = item.FindAllDescendants(cf => cf.ByAutomationId("blockedResourceOrigin"));
+                    log.AppendLine($"after clean navigation: probe origin gone; rows kept (browser's own pinned traffic): {string.Join(", ", remaining.Select(o => ReadElementValue(o) ?? o.Name))}");
+                    break;
+                }
+
+                Thread.Sleep(1000);
             }
-            log.AppendLine($"after clean navigation: indicator hidden = {hiddenAfterCleanNavigation}");
+            log.AppendLine($"after clean navigation: probe origin gone = {probeOriginGoneAfterCleanNavigation}");
 
             // Back to runtime mode and re-block: tallies keep counting invisibly, and setup
             // mode shows them again - the reset-then-recount cycle end to end.
@@ -256,9 +283,46 @@ public class ScProxyBlockedIndicatorProbeTests
         Assert.Matches(@"\d+ resources? blocked", indicatorText);
         Assert.True(originRowFound, $"the list did not carry the canonical blocked origin '{server.BlockedOrigin}' (read: '{originRowValue}')");
         Assert.True(reasonRowFound, "the list row did not name the not-allowed refusal category");
-        Assert.True(hiddenAfterCleanNavigation, "the tally did not reset on a top-level navigation to a clean page");
+        Assert.True(probeOriginGoneAfterCleanNavigation, "the probe's blocked origin survived a top-level navigation - the per-page-load tally did not reset it");
         Assert.True(runtimeIndicatorHiddenAfterReblock, "the indicator rendered in runtime mode after fresh refusals were tallied");
         Assert.True(setupShowsReblockedTally, "setup mode did not re-show the indicator after runtime-mode re-blocking");
+    }
+
+    /// <summary>
+    /// True when the open per-view list carries a row for <paramref name="blockedOrigin"/>;
+    /// when it does, the row's canonical origin text, a whether-its-reason-says-"not allowed"
+    /// flag, and its hit-count text come back. Rows are enumerated by AutomationId and paired
+    /// by tree order - the first-live-run lesson was that a single FindFirstDescendant can
+    /// land on a browser-service row and call the probe origin "missing".
+    /// </summary>
+    private static bool TryReadProbeOriginRow(
+        AutomationElement viewItem,
+        string blockedOrigin,
+        out string originValue,
+        out bool reasonIsNotAllowed,
+        out string countValue)
+    {
+        originValue = null;
+        reasonIsNotAllowed = false;
+        countValue = null;
+
+        var origins = viewItem.FindAllDescendants(cf => cf.ByAutomationId("blockedResourceOrigin"));
+        if (origins == null || origins.Length == 0) return false;
+        var reasons = viewItem.FindAllDescendants(cf => cf.ByAutomationId("blockedResourceReason"));
+        var counts = viewItem.FindAllDescendants(cf => cf.ByAutomationId("blockedResourceCount"));
+
+        for (var i = 0; i < origins.Length; i++)
+        {
+            var value = ReadElementValue(origins[i]) ?? origins[i].Name;
+            if (!string.Equals(value, blockedOrigin, StringComparison.OrdinalIgnoreCase)) continue;
+
+            originValue = value;
+            reasonIsNotAllowed = i < reasons.Length && (reasons[i].Name ?? "").Contains("not allowed", StringComparison.OrdinalIgnoreCase);
+            countValue = i < counts.Length ? counts[i].Name : null;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>First CDP page whose url is an http(s) page of the plugin browser.</summary>

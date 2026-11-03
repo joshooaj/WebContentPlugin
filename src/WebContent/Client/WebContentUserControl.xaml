@@ -44,10 +44,19 @@
                     </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
                 </platformUiControls:VideoOSButtonTransparentSmall>
                 <!-- #83: setup-mode blocked-resources indicator. Collapsed while the tally is
-                     zero or the client is in runtime mode; click opens the per-page-load list. -->
+                     zero or the client is in runtime mode; click opens the per-page-load list.
+                     VideoOSButtonTransparentSmall is an icon-only control: its template never
+                     presents text Content, so the first live SC-7 run (2026-11-03) proved the
+                     "N resources blocked" label rendered nothing and surfaced no UIA peer. The
+                     label is a sibling TextBlock in the same toolbar row, toggled in lockstep
+                     with the button (UpdateBlockedIndicator); its AutomationId is set explicitly
+                     because x:Name alone has no proven peer on a bare TextBlock. -->
                 <platformUiControls:VideoOSButtonTransparentSmall Name="blockedIndicator" DockPanel.Dock="Right" Visibility="Collapsed" Click="blockedIndicator_Click" Margin="2">
-                    <TextBlock Name="blockedIndicatorText" VerticalAlignment="Center" Margin="2 0" />
+                    <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                        <platformUiControls:VideoOSIconBuiltInSource Icon="Warning_Combined"/>
+                    </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
                 </platformUiControls:VideoOSButtonTransparentSmall>
+                <TextBlock Name="blockedIndicatorText" DockPanel.Dock="Right" Visibility="Collapsed" VerticalAlignment="Center" Margin="2 4 4 4" Foreground="White" AutomationProperties.AutomationId="blockedIndicatorText" />
                 <platformUiControls:VideoOSTextBoxSmall Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" Margin="0 2 2 2" IsEnabled="{Binding IsAddressEnabled}" />
             </DockPanel>
             <platformUiControls:VideoOSInlineMessageSmall Name="addressWarning" Appearance="Error" Visibility="Collapsed" MinLines="1" MaxLines="2" Margin="0 0 0 2" />

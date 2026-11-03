@@ -177,9 +177,13 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    `Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ScProxyErrorProbeTests.ProbeProxiedStartUrlOutsideAllowlistShows403Page' }`
    — the probe makes an off-allowlist origin the workspace home, so the block is a real client-side
    gate refusal, and it restores the workspace home address afterwards.
-4. **Not yet run (2026-11-02):** the agent session that shipped #69 cannot drive FlaUI — every
-   input call dies with `Win32Exception: Access is denied` on a non-interactive desktop — so the
-   step 3 markers are still unverified live. The status-query answer (a
+4. **Observed live since that note (2026-11-02/03):** the `Proxy block recorded` marker landed
+   in the Event Server's `logs\MIP.log` twice - the SC-6 fail-closed row (`20261102-114705`)
+   logged `Proxy block recorded origin='https://172.16.128.210:18127'`, and SC-5 record 7
+   (`20261103-020728`) logged `... origin='https://neverssl.com' reason=NotAllowed
+   client='BEAST'`. The session-open half is proven end-to-end rather than by its log text: the
+   MC-12/#76 Status probe saw this machine's proxied view render as a live session row - a
+   never-opened session cannot appear in a snapshot. The status-query answer (a
    `WebContent.Proxy.StatusRequest` answered with a snapshot) has its sender since #76 landed in
    the Management Client drop (2026-11-02): the Status tab sends one query every ~3 s while it is
    the selected tab and logs one MC marker per pull (`Proxy status snapshot for workspace '...'
@@ -1399,17 +1403,42 @@ session). Rows: page renders (title proves the allowlist entry survived); the in
 rendered in runtime mode despite the client-side refusals; entering setup mode shows
 "N resources blocked" (`blockedIndicatorText`); invoking the button lists `blockedResourceOrigin`
 (canonical, matching the listener's refusal), `blockedResourceReason` ("not allowed by the
-workspace allowlist"), `blockedResourceCount`; the clean twin navigation resets the tally (row
-and indicator gone); runtime re-blocking stays invisible and re-entering setup mode re-shows the
-tally.
+workspace allowlist"), `blockedResourceCount`; the clean twin navigation resets the tally —
+ORIGIN-scoped: the probe's blocked origin must be gone from the list, while the browser's OWN
+pinned service traffic (see the defect note below) may honestly keep other rows; runtime
+re-blocking stays invisible and re-entering setup mode re-shows the tally.
 
-**Live rows pending (2026-11-02)**: the Smart Client refuses to START on this machine's
-disconnected desktop session — `ClientLog.txt` "Video player validation failed ... Error creating
-Direct3D9Ex object!" and a `Cannot start` dialog ("There is a unknown issue."), reproduced three
-consecutive attempts (05:29/05:31/05:34, `ReconTests.Probe_SmartClientStartupOnDisconnectedDesktop`
-captures the dialog text); the plugin drop itself is fine (loaded cleanly in the connected-session
-runs earlier that day, ES hash-verified). Reconnect the console (`tscon 1 /dest:console` needs
-elevation an unattended Medium-IL session cannot get) and re-run:
+**First live run (2026-11-03, `20261103-102550`) found two real defects** — the disconnected-
+session blocker from 2026-11-02 is gone (the console session is up; every later SC-* row this
+date ran green), and the probe immediately failed on both:
+
+1. **The label never rendered.** `VideoOSButtonTransparentSmall` is an icon-only control: its
+   template never presents text Content, so the "N resources blocked" TextBlock authored as the
+   button's CONTENT rendered nothing and surfaced no UIA peer — `blockedIndicatorText` read as
+   missing, and the screenshots showed an anonymous icon where the labeled affordance should
+   be. Fix: the button now carries a `Warning_Combined` built-in icon and the label is a
+   toolbar SIBLING TextBlock with an explicit `AutomationProperties.AutomationId`, both toggled
+   in lockstep by `UpdateBlockedIndicator`. `ProxyBlockIndicatorWiringGuardTests` pins the
+   sibling shape (label NOT inside the button), the icon, the explicit AutomationId, the
+   lockstep show/hide assignments, and the setup-mode-and-nonzero-tally gate.
+2. **"Clean page hides the whole indicator" was the wrong expectation.** The pinned browser
+   proxies EVERYTHING, including Edge's own service traffic — SmartScreen pings to
+   `nav-edge.smartscreen.microsoft.com` ride every navigation and are refused (NotAllowed)
+   like any other off-allowlist origin, so the indicator honestly re-lights within seconds on
+   a clean page. The reset contract is now proven ORIGIN-scoped (the probe origin's row must
+   disappear), and rows are ENUMERATED (`FindAllDescendants` paired by tree order) instead of
+   first-descendant reads, so a browser-noise row can never mask the probe origin.
+
+**Live record (BEAST):** `20261103-104747` — **PASSED** 2026-11-03 (local drop `WebContent.dll`
+SHA-256 `972A01EA…09F78E03` hash-verified in the install folder): runtime renders nothing; setup
+mode shows `4 resources blocked` beside the warning icon (real rendered UIA text); the list
+carries the canonical `http://172.16.128.210:18131` row with "not allowed by the workspace
+allowlist" and count 3 (two images + script, the fourth tally being the browser's own SmartScreen
+ping); after the clean twin navigation the probe origin is GONE and the single surviving row is
+`https://nav-edge.smartscreen.microsoft.com`, logged by name as the browser's own pinned traffic;
+runtime re-blocking stays invisible and re-entering setup mode re-shows the tally. Screenshots
+`sc-blocked-indicator-setup.png` (label visible, list open) and `sc-blocked-indicator-recount.png`
+under the run directory. Re-run on demand:
 
 ```powershell
 Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ProbeSetupModeBlockedResourcesIndicator' }
@@ -1729,7 +1758,7 @@ it with the service journal running) - nobody clicked through it live.
 | A stopped/restarting Event Server surfacing as a silent 30-second hang or a generic 502 indistinguishable from a target failure, so the admin cannot tell "proxy component absent" from "target down" (#58) | `ProxyFetchCorrelationTests` (deadline silence = `ServerUnavailable`; `Fail` carries the channel reason), `ProxyForwardConnectionTests` (503 component page, 403 vs 502 vs 504 posture table, size-cap page), SC-5 |
 | The tunnel TLS leg trusting any chain (every wss device invisibly unvalidated), or the wss posture drifting onto an http twin entry so a strict https origin never admits the upgrade (#60) | `ProxyTunnelServerTests` (production resolver is null = SslStream full chain validation; untrusted chain → explicit `TlsValidation` naming the origin and the Event Server side; the accept-all resolver is a test-only seam), `ProxyForwardPolicyTests` (https entry required for the upgrade — http twin alone 403; no `WebSocketTunnelRefused` posture exists), SC-6 |
 | The Status tab hammering the Event Server after its tab closes (polling follows the pane, not the selection), or bitrate columns inventing spikes out of first sightings / backwards counters (#76) | `ProxyStatusViewTests` (rate needs two sightings, non-later snapshot / backwards counters / unknown ids → zero, `Reset` drops the baseline), `WorkspaceTabShellGuardTests` (Status tab has no config input — it can never dirty the pane), MC-12 (marker count flat across tab-away, resumes on reopen) |
-| Client-side proxy refusals vanishing with the debug log, so an integrator fixing "camera won't load" gets no per-view record of which origin the allowlist refused (#83) | `ProxyBlockTallyTests` (per-origin+reason counts, navigation reset, bounded eviction, dead-forwarder isolation, one ES payload + one local row per refusal), SC-7 |
+| Client-side proxy refusals vanishing with the debug log, so an integrator fixing "camera won't load" gets no per-view record of which origin the allowlist refused (#83) | `ProxyBlockTallyTests` (per-origin+reason counts, navigation reset, bounded eviction, dead-forwarder isolation, one ES payload + one local row per refusal), `ProxyBlockIndicatorWiringGuardTests` (label is a toolbar sibling of the icon-only VideoOS button with an explicit AutomationId - the first live SC-7 run proved content-authored labels never render there; lockstep visibility toggles; setup-mode gate), SC-7 |
 | A wildcard allowlist entry reaching the apex, a literal IP, `localhost`, or the VMS's own hosts - SSRF widening of every gate AND the mint policy at once (#73) | `ProxyPolicyTests` (seeded apex/subdomain/floor invariants over random hosts and IPv4s), `ProxyAllowlistGateAgreementTests` (ES fetch, client forward, and leaf mint reach identical verdicts on one matrix), MC-13 |
 | A tri-state string on a WPF-boolean DataGrid attribute taking the whole Management Client config page down at BAML parse time (#76, found in the MC-13 walk) | `WorkspaceTabShellGuardTests` (every `CanUser*` on every page DataGrid pinned to a real bool), MC-13 |
 | A CA export writing an EMPTY file when no authority exists, guessing the CA's provenance (a script-provisioned certificate invisible to the export), reaching any cert store WRITE flag, or outgrowing the MIP frame limits mid-reply (#75) | `ProxyCaExportTests` (`NoAuthority` "does not exist yet" posture; fixed-CN read-only `LocalMachine\Personal` resolve with source guards on the open flags; view builder never offers a save without bytes; 8 KiB DER / 16 KiB wire caps pinned under the proven chunk headroom with a real 2048-bit CA under the cap), MC-15 (live bytes byte-identical to the legacy-script-provisioned store entry) |

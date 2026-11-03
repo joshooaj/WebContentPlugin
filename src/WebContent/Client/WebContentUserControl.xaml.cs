@@ -415,6 +415,10 @@ namespace WebContent.Client
                 blockedIndicatorText.Text = total == 1
                     ? Strings.BlockedResourcesIndicatorOne
                     : string.Format(System.Globalization.CultureInfo.InvariantCulture, Strings.BlockedResourcesIndicatorMany, total);
+                // The VideoOS button is icon-only, so the label is its toolbar sibling; both
+                // toggle in lockstep (the first live SC-7 run proved a label inside the button
+                // template renders nothing).
+                blockedIndicatorText.Visibility = Visibility.Visible;
                 blockedIndicator.Visibility = Visibility.Visible;
 
                 if (_blockedPanelOpen)
@@ -425,6 +429,7 @@ namespace WebContent.Client
             else
             {
                 blockedIndicator.Visibility = Visibility.Collapsed;
+                blockedIndicatorText.Visibility = Visibility.Collapsed;
                 blockedResourcesPanel.Visibility = Visibility.Collapsed;
                 _blockedPanelOpen = false;
             }
