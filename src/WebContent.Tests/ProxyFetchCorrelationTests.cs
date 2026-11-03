@@ -286,13 +286,42 @@ namespace WebContent.Tests
                 Kind = ProxyFetchFrameKinds.Response,
                 Sequence = -1,
                 StatusCode = 200,
-                BodyLength = ProxyFetchLimits.DefaultMaxResponseBytes + 1L,
+                BodyLength = ProxyFetchLimits.MaxAllowedResponseBytes + 1L,
                 ChunkCount = 0,
             });
 
             var completed2 = await second;
             Assert.False(completed2.Success);
             Assert.Equal(ProxyFetchErrorCodes.Error, completed2.ErrorCode);
+        }
+
+        [Fact]
+        public async Task ABodyPastTheOldDefaultCapIsAcceptedWhenTheProtocolCeilingAllowsIt()
+        {
+            // #85: the client receive guard bounds allocation against the 20 MB PROTOCOL ceiling,
+            // not the 5 MB default - a workspace with a raised per-workspace cap must see its
+            // 6 MB answer reassemble, or the raised cap would be rejected client-side.
+            var body = TestBody(6 * 1024 * 1024);
+            var original = new ProxyFetchResult
+            {
+                Success = true,
+                StatusCode = 200,
+                Body = body,
+                BodyLength = body.Length,
+            };
+
+            var correlation = new ProxyFetchCorrelation();
+            var completion = correlation.Begin("corr-raised-cap", TimeSpan.FromSeconds(30));
+
+            foreach (var frame in ProxyFetchFramer.Frame("corr-raised-cap", original, chunkSizeBytes: ProxyFetchLimits.DefaultChunkSizeBytes))
+            {
+                correlation.Feed(frame);
+            }
+
+            var completed = await completion;
+            Assert.True(completed.Success);
+            Assert.Equal(6 * 1024 * 1024, completed.BodyLength);
+            Assert.Equal(body, completed.Body);
         }
 
         private static byte[] TestBody(int length)

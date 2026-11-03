@@ -156,6 +156,12 @@ namespace WebContent.Admin
                     _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
                     _userControl.EnableDevTools = settings.EnableDevTools;
                     _userControl.ProxyEnabled = settings.ProxyEnabled;
+                    // #85: the cap field fills from the stored wire value (0 = never stored),
+                    // displayed in whole MB inside the admin range; the server-side clamp keeps
+                    // even a hand-edited huge value honest.
+                    _userControl.ProxyResponseCapText =
+                        WebContentConfiguration.ResolveProxyResponseCapMegabytes(settings.ProxyMaxResponseBytes)
+                            .ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
                     // #81: the structured grid renders stored entries from either shape (legacy
                     // host, structured pattern) forever; records too corrupt to render are
                     // dropped here exactly as the old text-box fill dropped them - with a log line.
@@ -190,6 +196,7 @@ namespace WebContent.Admin
             _userControl.IsolateBrowserInstances = WebContentConfiguration.GetBoolean(properties, false, "IsolateBrowserInstances");
             _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
             _userControl.ProxyEnabled = false;
+            _userControl.ProxyResponseCapText = WebContentConfiguration.DefaultProxyResponseCapMegabytes.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
             _userControl.LoadProxyTargets(null);
             _userControl.FillContent();
 
@@ -297,10 +304,29 @@ namespace WebContent.Admin
                 return false;
             }
 
+            // #85: the per-workspace response-size cap validated from the Proxy tab's whole-MB
+            // field. An out-of-range or non-numeric entry refuses the save by name - the page
+            // never silently rewrites what the admin typed. The Event Server clamps stored
+            // values server-side regardless, so this UI is convenience, not the enforcement.
+            if (!WebContentConfiguration.TryParseProxyResponseCapMegabytes(_userControl?.ProxyResponseCapText, out var capMegabytes, out var rejectedCapText))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy response cap '{rejectedCapText}'.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyCapMessage, rejectedCapText), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
             // What the grid actually stored, in the admin's own entry shape. The MC MIP.log is the
             // storage-side view of the allowlist editor that does not depend on how the WPF grid
             // surfaces through accessibility, so it is what the #81 probe compares against.
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Stored proxy targets for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): routing {(proxyEnabled ? "on" : "off")}; {ProxyAllowlistEditor.DescribeStoredTargets(proxyTargets)}.");
+
+            // The stored cap, again the MC's own storage-side statement for the #85 probe to
+            // compare against a reloaded-pane readback.
+            var capBytes = WebContentConfiguration.ProxyResponseCapBytes(capMegabytes);
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WorkspaceItemManager),
+                $"Stored proxy response cap for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): {WebContentConfiguration.ResolveProxyResponseCapMegabytes(capBytes)} MB{(capBytes == 0 ? " (default)" : string.Empty)}.");
 
             SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
             SetOrRemoveProperty(CurrentItem, "HomeAddress", homeAddress);
@@ -331,6 +357,9 @@ namespace WebContent.Admin
                 settings.EnableDevTools = _userControl?.EnableDevTools ?? false;
                 settings.ProxyEnabled = proxyEnabled;
                 settings.ProxyTargets = proxyTargets;
+                // #85: the wire cap in bytes; the default stores 0 so the optional member stays
+                // omitted and pre-#85 stored shapes never grow a redundant member.
+                settings.ProxyMaxResponseBytes = capBytes;
             }
 
             SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, config.Serialize());

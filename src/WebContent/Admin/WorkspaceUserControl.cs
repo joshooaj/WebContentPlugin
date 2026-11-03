@@ -121,6 +121,16 @@ namespace WebContent.Admin
         }
 
         /// <summary>
+        /// #85: forwards the Proxy tab's max-response-size field (whole-MB text) to the item
+        /// manager for fill and validated save.
+        /// </summary>
+        internal string ProxyResponseCapText
+        {
+            get => _page.ProxyResponseCapText;
+            set => _page.ProxyResponseCapText = value;
+        }
+
+        /// <summary>
         /// #81: forwards the structured allowlist grid's row surface to the item manager. The
         /// free-text ProxyTargetsText property left with the txtProxyTargets box it served.
         /// </summary>

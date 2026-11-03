@@ -258,5 +258,78 @@ namespace WebContent.Tests
             Assert.Equal("False", built["HideToolbar"]);
             Assert.Equal(FallbackWorkspaceId.ToString(), built["InstanceId"]);
         }
+
+        // #85: the Proxy tab's whole-megabytes response-cap field. Unlike zoom (silent clamp),
+        // an out-of-range cap REFUSES the save and names the rejected text - the server-side
+        // clamp (ProxyFetchLimits/ProxyResponseCapStore) is the enforcement, so the UI never
+        // needs to pretend a 99999 became something else.
+
+        [Theory]
+        [InlineData(null, 0)]
+        [InlineData("", 0)]
+        [InlineData("   ", 0)]
+        [InlineData("1", 1)]
+        [InlineData("5", 5)]
+        [InlineData(" 12 ", 12)]
+        [InlineData("20", 20)]
+        public void ProxyCapAcceptsBlankOrWholeMegabytesInsideTheAdminRange(string value, int expected)
+        {
+            Assert.True(WebContentConfiguration.TryParseProxyResponseCapMegabytes(value, out var megabytes, out var rejected));
+
+            Assert.Equal(expected, megabytes);
+            Assert.Null(rejected);
+        }
+
+        [Theory]
+        [InlineData("0")]
+        [InlineData("-3")]
+        [InlineData("21")]
+        [InlineData("99999")]
+        [InlineData("8.5")]
+        [InlineData("eight")]
+        [InlineData("8 MB")]
+        public void ProxyCapRefusesAnythingElseAndNamesTheRejectedText(string value)
+        {
+            Assert.False(WebContentConfiguration.TryParseProxyResponseCapMegabytes(value, out var megabytes, out var rejected));
+
+            Assert.Equal(0, megabytes);
+            Assert.Equal(value.Trim(), rejected);
+        }
+
+        [Theory]
+        [InlineData(0, 0)]
+        [InlineData(5, 0)]
+        [InlineData(1, 1048576)]
+        [InlineData(8, 8388608)]
+        [InlineData(20, 20971520)]
+        [InlineData(-4, 0)]
+        public void ProxyCapAdminMegabytesStoreBytesWithTheDefaultStoredAsOmitted(int megabytes, int expectedStoredBytes)
+        {
+            // 5 MB stores 0 so the optional member never appears for default-cap workspaces.
+            Assert.Equal(expectedStoredBytes, WebContentConfiguration.ProxyResponseCapBytes(megabytes));
+        }
+
+        [Theory]
+        [InlineData(0, 5)]                    // absent / default
+        [InlineData(-1, 5)]                   // nonsense stored value reads as the default
+        [InlineData(1048576, 1)]              // hand-edited sub-MB value displays the minimum
+        [InlineData(8388608, 8)]
+        [InlineData(20971520, 20)]
+        [InlineData(40 * 1024 * 1024, 20)]    // hand-edited past the ceiling displays the ceiling
+        public void ProxyCapStoredBytesReadBackAsDisplayMegabytes(int storedBytes, int expectedMegabytes)
+        {
+            Assert.Equal(expectedMegabytes, WebContentConfiguration.ResolveProxyResponseCapMegabytes(storedBytes));
+        }
+
+        [Fact]
+        public void ProxyCapAdminCeilingMatchesTheProtocolCeilingConstant()
+        {
+            // The admin field's range and the server-side clamp must move together; without
+            // this guard they can drift apart silently across the two assemblies' files.
+            Assert.Equal(
+                ProxyFetchLimits.MaxAllowedResponseBytes,
+                WebContentConfiguration.MaxProxyResponseCapMegabytes * 1024 * 1024);
+            Assert.Equal(ProxyFetchLimits.DefaultMaxResponseBytes, WebContentConfiguration.DefaultProxyResponseCapMegabytes * 1024 * 1024);
+        }
     }
 }
