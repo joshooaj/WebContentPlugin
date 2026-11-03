@@ -42,6 +42,9 @@ namespace WebContent.Admin
         /// the Diagnostics rows (now-allowed state) without waiting for the next poll tick.</summary>
         private ProxyStatusResponsePayload _lastStatusSnapshot;
 
+        /// <summary>#80: single-flight guard for the Diagnostics banner's inline certificate export.</summary>
+        private bool _caExportRunning;
+
         // #81: the row collection behind the Proxy tab's structured allowlist grid. _loading
         // suppresses the dirty chain while the item manager fills rows from a stored definition -
         // a fill is not a user edit.
@@ -455,6 +458,16 @@ namespace WebContent.Admin
             txtDiagnosticsSummary.Text = string.Empty;
             diagnosticsError.Visibility = Visibility.Collapsed;
             txtDiagnosticsError.Text = string.Empty;
+
+            // #80: a different item has a different workspace's untrusted-machine aggregate;
+            // drop the old banner and any export sentence with the rest of the tab.
+            if (caUntrustedBanner != null)
+            {
+                caUntrustedBanner.Visibility = Visibility.Collapsed;
+                txtCaUntrustedSummary.Text = string.Empty;
+                txtCaUntrustedMachines.Text = string.Empty;
+                txtCaUntrustedExportResult.Text = string.Empty;
+            }
         }
 
         public void FillContent()
@@ -767,6 +780,135 @@ namespace WebContent.Admin
                 : string.Format(CultureInfo.InvariantCulture, Strings.DiagnosticsSummaryFormat, view.BlockedCount);
             diagnosticsError.Visibility = Visibility.Collapsed;
             txtDiagnosticsError.Text = string.Empty;
+
+            RenderCaUntrustedAggregate(view);
+        }
+
+        /// <summary>
+        /// #80: one render of the untrusted-machine warning inside the Diagnostics tab. The
+        /// banner shows ONLY when at least one distinct machine reported the proxy CA untrusted
+        /// (per-machine dedup already happened on the Event Server); it names the machines and
+        /// carries the #75 export button inline. A zero-aggregate or failed pull never shows it,
+        /// and the export-result sentence from a prior click clears when the banner leaves.
+        /// </summary>
+        private void RenderCaUntrustedAggregate(ProxyDiagnosticsView view)
+        {
+            if (caUntrustedBanner == null || view == null || view.UntrustedMachineCount <= 0)
+            {
+                if (caUntrustedBanner != null)
+                {
+                    caUntrustedBanner.Visibility = Visibility.Collapsed;
+                    txtCaUntrustedExportResult.Text = string.Empty;
+                }
+
+                return;
+            }
+
+            txtCaUntrustedSummary.Text = string.Format(
+                CultureInfo.InvariantCulture,
+                Strings.CaUntrustedBannerFormat,
+                view.UntrustedMachineCount);
+
+            var machines = new System.Text.StringBuilder();
+            foreach (var row in view.UntrustedMachineRows)
+            {
+                if (machines.Length > 0)
+                {
+                    machines.Append(", ");
+                }
+
+                machines.Append(string.Format(CultureInfo.InvariantCulture, Strings.CaUntrustedMachineFormat, row.Machine, row.Reports));
+            }
+
+            txtCaUntrustedMachines.Text = string.Format(CultureInfo.InvariantCulture, Strings.CaUntrustedMachinesFormat, machines);
+            caUntrustedBanner.Visibility = Visibility.Visible;
+        }
+
+        /// <summary>
+        /// #80: the Diagnostics banner's inline export. Same exchange and the same pure decision
+        /// layer as the overview page's #75 button (ProxyFetchClient pull + the shared failure
+        /// sentences), single-flighted, and the Save-As flow never sees a success without bytes.
+        /// No ConfigureAwait(false): everything after the await is WPF.
+        /// </summary>
+        private async void OnCaUntrustedExport(object sender, System.Windows.RoutedEventArgs e)
+        {
+            if (_caExportRunning)
+            {
+                return;
+            }
+
+            _caExportRunning = true;
+            btnCaUntrustedExport.IsEnabled = false;
+            txtCaUntrustedExportResult.Text = Strings.ProxyCaExportRunning;
+            diagnosticsError.Visibility = Visibility.Collapsed;
+            txtDiagnosticsError.Text = string.Empty;
+
+            try
+            {
+                var client = ProxyFetchClient.Active;
+                if (client == null || !client.IsReady)
+                {
+                    txtCaUntrustedExportResult.Text = Strings.ProxyCaExportNotConnected;
+                    return;
+                }
+
+                var response = await client.RequestProxyCertificateAsync();
+                var view = ProxyCaExportViewBuilder.Build(response);
+                if (!view.ExportAvailable)
+                {
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(WorkspaceConfigPage),
+                        $"Proxy authority certificate export from Diagnostics failed (code={view.FailureCode}).");
+                    txtCaUntrustedExportResult.Text = ProxyCaExportFailureSentence.For(view.FailureCode, response);
+                    return;
+                }
+
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = Strings.ProxyCaExportSaveTitle,
+                    Filter = Strings.ProxyCaExportSaveFilter,
+                    FileName = "WebContent-Proxy-Authority.cer",
+                    DefaultExt = "cer",
+                    AddExtension = true,
+                };
+                if (dialog.ShowDialog() != true)
+                {
+                    txtCaUntrustedExportResult.Text = Strings.ProxyCaExportCancelled;
+                    return;
+                }
+
+                System.IO.File.WriteAllBytes(dialog.FileName, view.DerBytes);
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(WorkspaceConfigPage),
+                    $"Proxy authority certificate exported to '{dialog.FileName}' (thumbprint {view.Thumbprint}).");
+                txtCaUntrustedExportResult.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    Strings.ProxyCaExportSavedFormat,
+                    dialog.FileName,
+                    view.Thumbprint);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(WorkspaceConfigPage),
+                    $"Proxy authority certificate export from Diagnostics threw: {exception.Message}");
+                txtCaUntrustedExportResult.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    Strings.ProxyCaExportFailedFormat,
+                    ProxyFetchErrorCodes.Error,
+                    exception.Message);
+            }
+            finally
+            {
+                _caExportRunning = false;
+                if (btnCaUntrustedExport != null)
+                {
+                    btnCaUntrustedExport.IsEnabled = true;
+                }
+            }
         }
 
         private void RenderDiagnosticsFailure(string text)
@@ -776,6 +918,13 @@ namespace WebContent.Admin
             txtDiagnosticsSummary.Text = string.Empty;
             txtDiagnosticsError.Text = text;
             diagnosticsError.Visibility = Visibility.Visible;
+
+            // #80: an unanswerable pull has no aggregate to vouch for - hide the warning rather
+            // than keep asserting a count the Event Server did not just confirm.
+            if (caUntrustedBanner != null)
+            {
+                caUntrustedBanner.Visibility = Visibility.Collapsed;
+            }
         }
 
         /// <summary>

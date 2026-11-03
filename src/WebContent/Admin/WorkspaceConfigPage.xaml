@@ -566,6 +566,7 @@
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -574,14 +575,39 @@
                    Margin="0,0,0,6" Text="Diagnostics" />
         <TextBlock Grid.Row="1" x:Name="txtDiagnosticsSummary" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap" />
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,8">
+        <!--
+          Ticket #80: the aggregate untrusted-CA warning. The Event Server folds every
+          client-side CertUntrusted report into ONE entry per machine; this banner says how many
+          machines report the proxy certificate untrusted, names them, and puts the #75 export
+          button right here - the admin exports the certificate from exactly where the problem
+          was reported. Starts Collapsed: no reports, no banner. The export button is the tab's
+          one read-only-but-opens-a-save-dialog affordance; it writes no configuration, so the
+          pane never dirties.
+        -->
+        <Border Grid.Row="2" x:Name="caUntrustedBanner" Style="{StaticResource WarningBannerStyle}"
+                Visibility="Collapsed" Margin="0,8,0,0">
+          <StackPanel>
+            <TextBlock x:Name="txtCaUntrustedSummary" AutomationProperties.AutomationId="caUntrustedBannerText"
+                       Style="{StaticResource WarningBannerTextStyle}" TextWrapping="Wrap" />
+            <TextBlock x:Name="txtCaUntrustedMachines" AutomationProperties.AutomationId="caUntrustedMachines"
+                       Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+              <Button x:Name="btnCaUntrustedExport" AutomationProperties.AutomationId="proxyCaExportFromDiagnostics"
+                      Content="Export proxy certificate" Padding="10,4" Click="OnCaUntrustedExport" />
+              <TextBlock x:Name="txtCaUntrustedExportResult" Style="{StaticResource SecondaryTextStyle}"
+                         TextWrapping="Wrap" Margin="12,0,0,0" MaxWidth="430" VerticalAlignment="Center" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,8">
           <Button x:Name="btnDiagnosticsRefresh" Content="Refresh now" Padding="10,4" Click="OnDiagnosticsRefresh" />
           <TextBlock x:Name="txtDiagnosticsCadence" Style="{StaticResource SecondaryTextStyle}" Margin="10,0,0,0"
                      VerticalAlignment="Center" TextWrapping="Wrap"
                      Text="Blocked resources refresh on their own while this tab is open; polling stops the moment you leave it. The list lives in the Event Server's memory and resets when the Event Server service restarts." />
         </StackPanel>
 
-        <DataGrid Grid.Row="3" x:Name="dgDiagnosticsBlocked" AutoGenerateColumns="False" IsReadOnly="True"
+        <DataGrid Grid.Row="4" x:Name="dgDiagnosticsBlocked" AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False"
                   CanUserResizeRows="False" CanUserSortColumns="False" CanUserReorderColumns="False"
                   GridLinesVisibility="Horizontal" SelectionMode="Single"
@@ -608,7 +634,7 @@
           </DataGrid.Columns>
         </DataGrid>
 
-        <Border Grid.Row="4" x:Name="diagnosticsError" Style="{StaticResource ErrorBannerStyle}"
+        <Border Grid.Row="5" x:Name="diagnosticsError" Style="{StaticResource ErrorBannerStyle}"
                 Visibility="Collapsed" Margin="0,10,0,0">
           <TextBlock x:Name="txtDiagnosticsError" Style="{StaticResource ErrorBannerTextStyle}" TextWrapping="Wrap" />
         </Border>

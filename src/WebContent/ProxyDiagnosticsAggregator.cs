@@ -21,6 +21,11 @@ namespace WebContent
         /// <summary>Distinct blocked origins kept per workspace before the oldest is evicted.</summary>
         internal const int MaxBlockedOriginsPerWorkspace = 200;
 
+        /// <summary>#80: distinct untrusted-CA machines kept per workspace before eviction. Far
+        /// above any realistic workstation count; the cap is there so a crafted report flood
+        /// cannot grow the unbounded.</summary>
+        internal const int MaxUntrustedMachinesPerWorkspace = 200;
+
         private sealed class BlockedEntry
         {
             internal string Origin;
@@ -32,6 +37,13 @@ namespace WebContent
             {
                 get { return Reason + "\n" + Origin; }
             }
+        }
+
+        private sealed class UntrustedMachineEntry
+        {
+            internal string Machine;
+            internal long Count;
+            internal DateTime LastSeenUtc;
         }
 
         internal sealed class SessionRecord
@@ -53,6 +65,11 @@ namespace WebContent
             internal readonly Dictionary<string, BlockedEntry> Blocked = new Dictionary<string, BlockedEntry>(StringComparer.Ordinal);
             internal readonly LinkedList<BlockedEntry> InsertionOrder = new LinkedList<BlockedEntry>();
             internal readonly Dictionary<string, SessionRecord> Sessions = new Dictionary<string, SessionRecord>(StringComparer.Ordinal);
+
+            /// <summary>#80: machine name (case-insensitive - Windows machine names are) to the
+            /// untrusted-CA report tally; same recency-order discipline as the blocked ring.</summary>
+            internal readonly Dictionary<string, UntrustedMachineEntry> UntrustedMachines = new Dictionary<string, UntrustedMachineEntry>(StringComparer.OrdinalIgnoreCase);
+            internal readonly LinkedList<UntrustedMachineEntry> UntrustedMachineOrder = new LinkedList<UntrustedMachineEntry>();
         }
 
         private readonly object _sync = new object();
@@ -138,6 +155,58 @@ namespace WebContent
 
             RecordBlock(workspaceItemId, origin, reason, 1, utcNow);
             return true;
+        }
+
+        /// <summary>
+        /// #80: attribute one machine's untrusted-proxy-CA report to its workspace. Only
+        /// CLIENT-decided CertUntrusted reports (which carry the reporting machine name) land
+        /// here — an ES-decided TLS failure says the TARGET's certificate failed validation at
+        /// the Event Server, not that this machine distrusts the deployment CA, so the
+        /// RecordBlockForSession path never attributes a machine. Dedup is per machine, not per
+        /// view instance: a workstation running ten untrusted proxied views counts once, and
+        /// its Count accumulates the reports while the entry moves to the fresh end of the
+        /// recency order. Blank machine drops the report. Returns true only for a NEW machine
+        /// entry — the transition the caller logs; repeat reports stay quiet.
+        /// </summary>
+        internal bool RecordUntrustedAuthorityReport(string workspaceItemId, string clientMachine, DateTime utcNow)
+        {
+            if (string.IsNullOrEmpty(workspaceItemId) || string.IsNullOrEmpty(clientMachine))
+            {
+                return false;
+            }
+
+            lock (_sync)
+            {
+                var state = GetOrCreate(workspaceItemId);
+
+                UntrustedMachineEntry existing;
+                if (state.UntrustedMachines.TryGetValue(clientMachine, out existing))
+                {
+                    existing.Count += 1;
+                    existing.LastSeenUtc = utcNow;
+                    state.UntrustedMachineOrder.Remove(existing);
+                    state.UntrustedMachineOrder.AddLast(existing);
+                    return false;
+                }
+
+                var entry = new UntrustedMachineEntry
+                {
+                    Machine = clientMachine,
+                    Count = 1,
+                    LastSeenUtc = utcNow,
+                };
+                state.UntrustedMachines[clientMachine] = entry;
+                state.UntrustedMachineOrder.AddLast(entry);
+
+                while (state.UntrustedMachineOrder.Count > MaxUntrustedMachinesPerWorkspace)
+                {
+                    var oldest = state.UntrustedMachineOrder.First.Value;
+                    state.UntrustedMachineOrder.RemoveFirst();
+                    state.UntrustedMachines.Remove(oldest.Machine);
+                }
+
+                return true;
+            }
         }
 
         /// <summary>
@@ -275,7 +344,7 @@ namespace WebContent
                         reclaimed.Add(sessionId);
                     }
 
-                    if (state.Sessions.Count == 0 && state.Blocked.Count == 0)
+                    if (state.Sessions.Count == 0 && state.Blocked.Count == 0 && state.UntrustedMachines.Count == 0)
                     {
                         _byWorkspace.Remove(workspace);
                     }
@@ -352,6 +421,7 @@ namespace WebContent
                 Success = true,
                 Sessions = new List<ProxySessionStatusEntry>(),
                 Blocked = new List<ProxyBlockEntry>(),
+                UntrustedMachines = new List<ProxyCaUntrustedMachineEntry>(),
             };
 
             if (string.IsNullOrEmpty(workspaceItemId))
@@ -395,6 +465,18 @@ namespace WebContent
                     {
                         Origin = entry.Origin,
                         Reason = entry.Reason,
+                        Count = entry.Count,
+                        LastSeenUtc = entry.LastSeenUtc,
+                    });
+                }
+
+                // #80: same oldest-first answer shape as the blocked ring - the MC page sorts by
+                // recency for the admin, and per-machine dedup already happened at record time.
+                foreach (var entry in state.UntrustedMachineOrder)
+                {
+                    response.UntrustedMachines.Add(new ProxyCaUntrustedMachineEntry
+                    {
+                        Machine = entry.Machine,
                         Count = entry.Count,
                         LastSeenUtc = entry.LastSeenUtc,
                     });

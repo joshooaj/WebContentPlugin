@@ -1024,6 +1024,33 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to {0} client machine(s) report that the proxy certificate is NOT trusted on their PC. Export it here and distribute it to those machines - their users see a warning banner, and proxied HTTPS pages show a certificate error, until the certificate sits in those machines&apos; trusted roots..
+        /// </summary>
+        internal static string CaUntrustedBannerFormat {
+            get {
+                return ResourceManager.GetString("CaUntrustedBannerFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Machines: {0}.
+        /// </summary>
+        internal static string CaUntrustedMachinesFormat {
+            get {
+                return ResourceManager.GetString("CaUntrustedMachinesFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} ({1} report(s)).
+        /// </summary>
+        internal static string CaUntrustedMachineFormat {
+            get {
+                return ResourceManager.GetString("CaUntrustedMachineFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to 1 resource blocked.
         /// </summary>
         internal static string BlockedResourcesIndicatorOne {

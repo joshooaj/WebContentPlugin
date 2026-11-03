@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace WebContent.Admin
 {
@@ -77,6 +78,32 @@ namespace WebContent.Admin
             view.NotBeforeUtc = payload.NotBeforeUtc;
             view.NotAfterUtc = payload.NotAfterUtc;
             return view;
+        }
+    }
+
+    /// <summary>
+    /// Ticket #75 (shared by #80's Diagnostics-tab button): the failure code → admin sentence
+    /// mapping. Both export surfaces - the workspaces overview and the Diagnostics banner - must
+    /// say the SAME thing about the SAME failure, so the wording lives in one pure place instead
+    /// of being copied per page.
+    /// </summary>
+    internal static class ProxyCaExportFailureSentence
+    {
+        internal static string For(string code, ProxyCaExportResponsePayload response)
+        {
+            switch (code)
+            {
+                case ProxyFetchErrorCodes.NoAuthority:
+                    return Strings.ProxyCaExportMissing;
+                case ProxyFetchErrorCodes.ServerUnavailable:
+                    return Strings.ProxyCaExportNotConnected;
+                default:
+                    return string.Format(
+                        CultureInfo.InvariantCulture,
+                        Strings.ProxyCaExportFailedFormat,
+                        code,
+                        response == null ? "no response" : response.ErrorMessage);
+            }
         }
     }
 }

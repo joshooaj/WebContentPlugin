@@ -703,6 +703,14 @@ namespace WebContent
         public List<ProxySessionStatusEntry> Sessions;
         public List<ProxyBlockEntry> Blocked;
 
+        /// <summary>
+        /// Ticket #80: the client machines that reported their proxy CA posture as untrusted
+        /// (a CertUntrusted block report carrying a machine name). Deduped per MACHINE, not per
+        /// view instance; in-memory like the rest of the snapshot. Absent (null) on failure
+        /// frames and on frames from a pre-#80 Event Server.
+        /// </summary>
+        public List<ProxyCaUntrustedMachineEntry> UntrustedMachines;
+
         // Failure fields.
         public string ErrorCode;
         public string ErrorMessage;
@@ -742,6 +750,25 @@ namespace WebContent
         public string Origin;
         public string Reason;
         public long Count;
+        public DateTime LastSeenUtc;
+    }
+
+    /// <summary>
+    /// Ticket #80: one CLIENT MACHINE whose proxied views reported the deployment CA as not
+    /// trusted on that machine (a CertUntrusted block report naming its machine). Dedup is per
+    /// machine — a machine with ten untrusted view instances is still ONE entry — and Count
+    /// accumulates the reports, so the MC can show admins "N machines need the CA" rather than
+    /// a pile of per-view noise. In-memory only, like every other diagnostics surface.
+    /// </summary>
+    [Serializable]
+    public class ProxyCaUntrustedMachineEntry
+    {
+        /// <summary>The reporting machine's name (Environment.MachineName as the client sends it).</summary>
+        public string Machine;
+
+        /// <summary>How many CertUntrusted reports this machine's views have sent.</summary>
+        public long Count;
+
         public DateTime LastSeenUtc;
     }
 

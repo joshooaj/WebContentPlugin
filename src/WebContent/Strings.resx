@@ -441,6 +441,15 @@
   <data name="DiagnosticsPromotionRefusedFormat" xml:space="preserve">
     <value>Could not add '{0}' to the allowlist: it is not an exact proxy origin the allowlist can name.</value>
   </data>
+  <data name="CaUntrustedBannerFormat" xml:space="preserve">
+    <value>{0} client machine(s) report that the proxy certificate is NOT trusted on their PC. Export it here and distribute it to those machines - their users see a warning banner, and proxied HTTPS pages show a certificate error, until the certificate sits in those machines' trusted roots.</value>
+  </data>
+  <data name="CaUntrustedMachinesFormat" xml:space="preserve">
+    <value>Machines: {0}</value>
+  </data>
+  <data name="CaUntrustedMachineFormat" xml:space="preserve">
+    <value>{0} ({1} report(s))</value>
+  </data>
   <data name="BlockedResourcesIndicatorOne" xml:space="preserve">
     <value>1 resource blocked</value>
   </data>
