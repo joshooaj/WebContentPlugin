@@ -63,6 +63,11 @@ namespace WebContent
         /// workspace attribution, clamped server-side to the fixed 20 MB ceiling.
         /// </summary>
         private ProxyResponseCapStore _responseCaps;
+
+        // #86: per-workspace header add/override/remove policy for BOTH fetch legs, refreshed on
+        // the same 60 s workspace snapshot cadence; forbidden (hop-by-hop/framing) rows are
+        // refused at snapshot time with an audit line, never applied.
+        private ProxyHeaderPolicyStore _headerPolicies;
         private int _selfTestProbeDone;
 
         /// <summary>
@@ -141,6 +146,16 @@ namespace WebContent
                     ResolveWorkspaceCapSnapshots,
                     message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
                 _responseCaps.Prime();
+
+                // #86: the per-workspace header policy rides the same workspace snapshot (same
+                // 60 s refresh, last-known-good on config faults). The forbidden-header guardrail
+                // is enforced here at snapshot time - a stored row naming Host, Content-Length,
+                // Transfer-Encoding, a Proxy-* pseudo-header etc. is refused with an audit line
+                // and never reaches the wire, whatever the client sent.
+                _headerPolicies = new ProxyHeaderPolicyStore(
+                    ResolveWorkspaceHeaderSnapshots,
+                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                _headerPolicies.Prime();
 
                 // ADR-0003: the same plugin answers leaf-mint requests for the loopback TLS
                 // termination; the same allowlist union gates minting exactly like fetching.
@@ -504,7 +519,27 @@ namespace WebContent
                 // TooLarge exactly as before. Tunnels never reach this path - CONNECT/websocket
                 // streams stay uncapped by design.
                 var limits = ProxyFetchLimits.ForResponseCapBytes(ResolveWorkspaceResponseCapBytes(payload));
+
+                // #86: this workspace's header policy on BOTH legs. Request rules rewrite what is
+                // replayed upstream (after the codec already stripped the browser's hop-by-hop
+                // headers, so only end-to-end headers reach the rules); response rules rewrite
+                // what the framer carries back. A workspace with no policy (or an unresolvable
+                // store) changes nothing.
+                var policy = ResolveWorkspaceHeaderPolicy(payload);
+                if (policy.RequestRules.Count > 0)
+                {
+                    ProxyHeaderPolicy.ApplyRules(query.Headers, policy.RequestRules);
+                }
+
                 var result = await new ProxyHttpFetcher().FetchAsync(query, limits, tlsMode);
+
+                // #86 response leg: rules apply only to a real upstream response (status known);
+                // a transport failure stays a pure error frame - injecting configured headers onto
+                // a failure the target never answered would misattribute them to the origin.
+                if (policy.ResponseRules.Count > 0 && result != null && result.StatusCode > 0)
+                {
+                    ProxyHeaderPolicy.ApplyRules(result.Headers, policy.ResponseRules);
+                }
 
                 if (!result.Success)
                 {
@@ -1183,6 +1218,43 @@ namespace WebContent
         }
 
         /// <summary>
+        /// #86: the workspace a fetch's header policy is attributed to - identical attribution to
+        /// <see cref="ResolveWorkspaceResponseCapBytes"/> (payload stamp first, then the session's
+        /// workspace in the diagnostics map). An unattributable or unresolved lookup answers the
+        /// EMPTY policy: plain pass-through, never a refusal and never invented headers.
+        /// </summary>
+        private WorkspaceHeaderPolicy ResolveWorkspaceHeaderPolicy(ProxyFetchRequestPayload payload)
+        {
+            try
+            {
+                var store = _headerPolicies;
+                if (store == null)
+                {
+                    return WorkspaceHeaderPolicy.Empty;
+                }
+
+                var workspaceItemId = payload.WorkspaceItemId;
+                if (string.IsNullOrEmpty(workspaceItemId))
+                {
+                    string mapped;
+                    workspaceItemId = _diagnostics != null && _diagnostics.TryGetSessionWorkspace(payload.SessionId, out mapped)
+                        ? mapped
+                        : null;
+                }
+
+                return store.Resolve(workspaceItemId);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Proxy header policy lookup failed (fetching with no header rules): {exception.Message}");
+                return WorkspaceHeaderPolicy.Empty;
+            }
+        }
+
+        /// <summary>
         /// #65: raise the platform event for one rule-trigger match on the event bus
         /// (Server.NewEventCommand, the system-defined raise the Event Server processes through its
         /// matcher chain). Fire-and-swallow: a trigger event must never alter or break the fetch
@@ -1719,6 +1791,36 @@ namespace WebContent
                 if (workspace != null && workspace.FQID != null && workspace.Properties != null)
                 {
                     sources.Add(new ProxyWorkspaceCapSource
+                    {
+                        ItemId = workspace.FQID.ObjectId.ToString(),
+                        Name = workspace.Name,
+                        Properties = workspace.Properties,
+                    });
+                }
+            }
+
+            return sources;
+        }
+
+        /// <summary>
+        /// #86: the workspace items the header-policy store reads, item id and all - the same
+        /// Configuration lookup every other per-workspace resolver uses.
+        /// </summary>
+        private static System.Collections.Generic.IEnumerable<ProxyWorkspaceHeaderSource> ResolveWorkspaceHeaderSnapshots()
+        {
+            List<Item> workspaces;
+            Exception error;
+            if (!Admin.WorkspaceItemManager.TryGetWorkspaces(out workspaces, out error))
+            {
+                throw error ?? new InvalidOperationException("Workspace configuration lookup failed.");
+            }
+
+            var sources = new List<ProxyWorkspaceHeaderSource>();
+            foreach (var workspace in workspaces)
+            {
+                if (workspace != null && workspace.FQID != null && workspace.Properties != null)
+                {
+                    sources.Add(new ProxyWorkspaceHeaderSource
                     {
                         ItemId = workspace.FQID.ObjectId.ToString(),
                         Name = workspace.Name,

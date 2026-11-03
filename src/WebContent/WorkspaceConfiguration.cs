@@ -279,6 +279,47 @@ namespace WebContent
         /// </summary>
         [DataMember(Name = "proxyMaxResponseBytes", EmitDefaultValue = false)]
         public int ProxyMaxResponseBytes { get; set; }
+
+        /// <summary>
+        /// Ticket #86: header add/override/remove rows applied to the request the Event Server
+        /// sends upstream. Null for definitions saved before #86 (readers are tolerant of the
+        /// section's absence) or where the admin added none — no rows means plain pass-through
+        /// besides the unconditional hop-by-hop stripping. Raw, unvalidated text on the wire:
+        /// <see cref="ProxyHeaderPolicy"/> is the grammar authority on every read.
+        /// </summary>
+        [DataMember(Name = "proxyRequestHeaders", EmitDefaultValue = false)]
+        public List<ProxyHeaderRuleConfiguration> ProxyRequestHeaders { get; set; }
+
+        /// <summary>
+        /// Ticket #86: header add/remove rows applied to the fetch-mode response returned to the
+        /// plugin client. Same wire shape and same guardrail as <see cref="ProxyRequestHeaders"/>.
+        /// </summary>
+        [DataMember(Name = "proxyResponseHeaders", EmitDefaultValue = false)]
+        public List<ProxyHeaderRuleConfiguration> ProxyResponseHeaders { get; set; }
+    }
+
+    /// <summary>
+    /// Ticket #86: one admin-defined proxy header policy row stored in the workspace's
+    /// <c>proxyRequestHeaders</c>/<c>proxyResponseHeaders</c> sections. Raw, unvalidated text on
+    /// the wire — <see cref="ProxyHeaderPolicy"/> is the single grammar authority on every read
+    /// (RFC 9110 field-name token, forbidden-header guardrail, CR/LF rejection), and the MC grid
+    /// validates against the same policy before saving. A reader must never decide header handling
+    /// from this shape alone.
+    /// </summary>
+    [DataContract]
+    internal class ProxyHeaderRuleConfiguration
+    {
+        /// <summary>Header name as configured (validated on read, never trusted as-is).</summary>
+        [DataMember(Name = "name")]
+        public string Name { get; set; }
+
+        /// <summary>Header value for add/override rows; ignored for removal rows.</summary>
+        [DataMember(Name = "value", EmitDefaultValue = false)]
+        public string Value { get; set; }
+
+        /// <summary>True = strip this header instead of adding/overriding it.</summary>
+        [DataMember(Name = "remove", EmitDefaultValue = false)]
+        public bool Remove { get; set; }
     }
 
     [DataContract]

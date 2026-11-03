@@ -169,20 +169,16 @@ namespace WebContent
         /// replaced), never the browser's — they must not be relayed onto the loopback socket.
         /// Content-Length is in the set because the proxy restates it from the reassembled body.
         /// </summary>
-        private static readonly HashSet<string> RelayBlockedHeaders =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Connection",
-                "Keep-Alive",
-                "Proxy-Authenticate",
-                "Proxy-Authorization",
-                "Proxy-Connection",
-                "TE",
-                "Trailer",
-                "Transfer-Encoding",
-                "Upgrade",
-                "Content-Length",
-            };
+        private static readonly HashSet<string> RelayBlockedHeaders = BuildRelayBlockedHeaders();
+
+        private static HashSet<string> BuildRelayBlockedHeaders()
+        {
+            var blocked = new HashSet<string>(ProxyHeaderPolicy.ForbiddenHeaderNames, StringComparer.OrdinalIgnoreCase);
+            // Host is NOT relay-blocked: it is the request line's authority the codec parses for
+            // policy; the fetcher derives its own from the target uri.
+            blocked.Remove("Host");
+            return blocked;
+        }
 
         /// <summary>
         /// Browser request headers the fetcher must NOT replay at the target (#55): the hop-by-hop
@@ -192,20 +188,7 @@ namespace WebContent
         /// injects or inspects credentials.
         /// </summary>
         private static readonly HashSet<string> OutboundRequestBlockedHeaders =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Connection",
-                "Keep-Alive",
-                "Proxy-Authenticate",
-                "Proxy-Authorization",
-                "Proxy-Connection",
-                "TE",
-                "Trailer",
-                "Transfer-Encoding",
-                "Upgrade",
-                "Content-Length",
-                "Host",
-            };
+            new HashSet<string>(ProxyHeaderPolicy.ForbiddenHeaderNames, StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// The request headers to carry on the wire to the Event Server fetcher: the parsed

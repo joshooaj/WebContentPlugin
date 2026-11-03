@@ -251,22 +251,16 @@ namespace WebContent
         /// describe a connection or body framing the fetcher states itself. Cookie, Authorization,
         /// Content-Type (property), Accept-*, and custom app headers deliberately pass (#55).
         /// </summary>
-        private static readonly HashSet<string> TransportBlockedRequestHeaders =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Host",
-                "Content-Length",
-                "Connection",
-                "Keep-Alive",
-                "Proxy-Connection",
-                "Proxy-Authenticate",
-                "Proxy-Authorization",
-                "TE",
-                "Trailer",
-                "Transfer-Encoding",
-                "Upgrade",
-                "Expect",
-            };
+        private static readonly HashSet<string> TransportBlockedRequestHeaders = BuildTransportBlockedRequestHeaders();
+
+        private static HashSet<string> BuildTransportBlockedRequestHeaders()
+        {
+            // The canonical forbidden set plus Expect: the fetcher states Expect: 100-continue
+            // itself when it streams a body, so a wire-supplied one never reaches the target.
+            var blocked = new HashSet<string>(ProxyHeaderPolicy.ForbiddenHeaderNames, StringComparer.OrdinalIgnoreCase);
+            blocked.Add("Expect");
+            return blocked;
+        }
 
         private static async Task<ProxyFetchResult> WriteRequestBodyAsync(HttpWebRequest request, byte[] body, Uri target, ProxyFetchLimits limits, TlsDecision tlsDecision)
         {
