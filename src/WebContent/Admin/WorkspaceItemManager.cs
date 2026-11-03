@@ -180,6 +180,17 @@ namespace WebContent.Admin
                     {
                         EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredHeaderRules} stored proxy header rule(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
                     }
+
+                    // #78: the "Rule triggers" grid renders the stored proxyTriggers section; an
+                    // absent section is the zero-triggers reading (definitions predating #65 read
+                    // null with no error). Rows the shared grammar refuses, or that name a verb
+                    // the proxy never relays, are not shown - the next Save rewrites the
+                    // definition without them, same posture as the other grids.
+                    var droppedStoredTriggers = _userControl.LoadProxyTriggers(settings.ProxyTriggers);
+                    if (droppedStoredTriggers > 0)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredTriggers} stored proxy trigger row(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
+                    }
                     _userControl.FillContent();
                     if (configError != WorkspaceConfigError.None)
                     {
@@ -209,6 +220,7 @@ namespace WebContent.Admin
             _userControl.ProxyResponseCapText = WebContentConfiguration.DefaultProxyResponseCapMegabytes.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
             _userControl.LoadProxyTargets(null);
             _userControl.LoadProxyHeaderPolicies(null, null);
+            _userControl.LoadProxyTriggers(null);
             _userControl.FillContent();
 
             if (configError != WorkspaceConfigError.None)
@@ -353,6 +365,24 @@ namespace WebContent.Admin
                 return false;
             }
 
+            // #78: the "Rule triggers" grid. An invalid row (url glob, method filter, or status
+            // filter outside the grammar) refuses the whole save by name - the same posture as the
+            // other grids, and the exact same grammar the Event Server's matcher applies to stored
+            // rows on every refresh, so a row this UI refuses is a row the server would refuse
+            // (and audit) anyway. Triggers are additive: an empty grid stores no section, and a
+            // workspace without triggers keeps the pre-#65 wire shape. Configuration order is
+            // stored as-is: the matcher evaluates top-down and raises at most the FIRST matching
+            // row's event, here and on the Event Server.
+            if (!ProxyTriggerEditor.TryBuildStoredTriggers(
+                    _userControl?.ProxyTriggerRows ?? new List<ProxyTriggerEditorRow>(),
+                    out var proxyTriggers,
+                    out var rejectedTriggerRows))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy trigger row(s): {string.Join(" | ", rejectedTriggerRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyTriggerMessage, string.Join("; ", rejectedTriggerRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
             // What the grid actually stored, in the admin's own entry shape. The MC MIP.log is the
             // storage-side view of the allowlist editor that does not depend on how the WPF grid
             // surfaces through accessibility, so it is what the #81 probe compares against.
@@ -373,6 +403,15 @@ namespace WebContent.Admin
                 false,
                 nameof(WorkspaceItemManager),
                 $"Stored proxy header policy for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): request {proxyRequestHeaders.Count} rule(s) [{ProxyHeaderEditor.DescribeStoredRules(proxyRequestHeaders)}]; response {proxyResponseHeaders.Count} rule(s) [{ProxyHeaderEditor.DescribeStoredRules(proxyResponseHeaders)}].");
+
+            // #78: the stored trigger list, in the admin's own row shape - the same two-channel
+            // contract as the header grids: the audit line names the count AND the verbatim row
+            // renderings, so a probe can pin what was stored without depending on how the WPF
+            // grid surfaces through accessibility.
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WorkspaceItemManager),
+                $"Stored proxy triggers for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): {proxyTriggers.Count} row(s) [{ProxyTriggerEditor.DescribeStoredTriggers(proxyTriggers)}].");
 
             SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
             SetOrRemoveProperty(CurrentItem, "HomeAddress", homeAddress);
@@ -413,6 +452,12 @@ namespace WebContent.Admin
                 // Event Server.
                 settings.ProxyRequestHeaders = proxyRequestHeaders.Count == 0 ? null : proxyRequestHeaders;
                 settings.ProxyResponseHeaders = proxyResponseHeaders.Count == 0 ? null : proxyResponseHeaders;
+
+                // #78: an empty trigger grid stores NO section (the optional member stays
+                // omitted, so a workspace without triggers keeps the pre-#65 wire shape, and
+                // readers treat the absence as zero triggers). Configuration order is stored
+                // as-is: the matcher raises at most the FIRST matching row's event.
+                settings.ProxyTriggers = proxyTriggers.Count == 0 ? null : proxyTriggers;
             }
 
             SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, config.Serialize());

@@ -154,6 +154,15 @@ namespace WebContent.Admin
             return _page.LoadProxyHeaderPolicies(requestStored, responseStored);
         }
 
+        // #78: the "Rule triggers" grid's row surface, forwarded to the item manager exactly like
+        // the other Proxy-tab grids.
+        internal System.Collections.Generic.IReadOnlyList<ProxyTriggerEditorRow> ProxyTriggerRows => _page.ProxyTriggerRows;
+
+        internal int LoadProxyTriggers(System.Collections.Generic.IEnumerable<ProxyTriggerConfiguration> stored)
+        {
+            return _page.LoadProxyTriggers(stored);
+        }
+
         internal void ClearUserControl()
         {
             _page.ClearUserControl();

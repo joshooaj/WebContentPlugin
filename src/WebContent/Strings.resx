@@ -336,6 +336,45 @@
   <data name="InvalidProxyHeaderMessage" xml:space="preserve">
     <value>The proxy header policy has invalid row(s): {0}. Fix the highlighted rows or remove them before saving.</value>
   </data>
+  <data name="ProxyTriggersSectionLabel" xml:space="preserve">
+    <value>Rule triggers</value>
+  </data>
+  <data name="ProxyTriggersHint" xml:space="preserve">
+    <value>One row per trigger: when proxied traffic matches the URL pattern, the method, and the response status, the VMS Event Server raises the XProtect event type shown in the Event raised column ("WebContent proxy request"). Find that event type in the XProtect rule builder to react to it. URL pattern: scheme://host[:port][/path-glob] - * matches any run of characters (including /), ? exactly one; *.foo.bar.com covers that domain's subdomains (never the apex), and a lone * matches any host. Method * means any method; the status filter is blank (any), a class like 4xx, or an exact code. Triggers never widen access - they only decorate traffic the allowlist already admits - and rows are evaluated top-down: one request raises at most the first matching row's event.</value>
+  </data>
+  <data name="ProxyColumnTriggerUrl" xml:space="preserve">
+    <value>URL pattern</value>
+  </data>
+  <data name="ProxyColumnTriggerMethod" xml:space="preserve">
+    <value>Method</value>
+  </data>
+  <data name="ProxyColumnTriggerStatus" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="ProxyColumnTriggerEvent" xml:space="preserve">
+    <value>Event raised</value>
+  </data>
+  <data name="ProxyTriggerAddButton" xml:space="preserve">
+    <value>Add trigger</value>
+  </data>
+  <data name="ProxyTriggerRowCounterFormat" xml:space="preserve">
+    <value>{0} trigger(s)</value>
+  </data>
+  <data name="ProxyTriggerRowErrorUrlRequired" xml:space="preserve">
+    <value>A trigger URL pattern is required.</value>
+  </data>
+  <data name="ProxyTriggerRowErrorUrlInvalid" xml:space="preserve">
+    <value>'{0}' is not a valid trigger URL pattern (scheme://host[:port][/path-glob], or the lone *).</value>
+  </data>
+  <data name="ProxyTriggerRowErrorMethodInvalid" xml:space="preserve">
+    <value>'{0}' is not a method filter (one verb, or * for any method).</value>
+  </data>
+  <data name="ProxyTriggerRowErrorStatusInvalid" xml:space="preserve">
+    <value>'{0}' is not a status filter (blank for any, a class like 4xx, or an exact code 100-599).</value>
+  </data>
+  <data name="InvalidProxyTriggerMessage" xml:space="preserve">
+    <value>The proxy trigger list has invalid row(s): {0}. Fix the highlighted rows or remove them before saving.</value>
+  </data>
   <data name="ProxyLabel" xml:space="preserve">
     <value>Proxy:</value>
   </data>

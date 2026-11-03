@@ -96,6 +96,7 @@ namespace WebContent.Tests
             {
                 "chkProxyEnabled", "lblProxyTargets", "txtProxyTargets", "lblProxyTargetsHint",
                 "lblProxyTestUrl", "txtProxyTestUrl", "btnProxyTestFetch", "lblProxyTestHint", "lblProxyTestResult",
+                "dgProxyTriggers", "btnProxyTriggerAdd",
             })
             {
                 Assert.True(!controlNames.Contains(moved), $"Settings tab carries proxy control '{moved}' - the proxy section lives on the Proxy tab (#81).");
@@ -220,6 +221,70 @@ namespace WebContent.Tests
             {
                 Assert.NotNull(proxy.Descendants().SingleOrDefault(e => (e.Attribute(Xaml + "Name")?.Value) == required));
             }
+        }
+
+        [Fact]
+        public void ProxyTabCarriesTheRuleTriggerGrid()
+        {
+            // #78: the "Rule triggers" grid behind the #65 matcher - URL glob, method dropdown,
+            // status filter, a READ-ONLY Event column naming the one fixed event type, Problem,
+            // Remove. Addressed by a stable AutomationId (per-row ids repeat across the Proxy
+            // tab's grids, so live probes must scope every lookup to the grid element first).
+            var proxy = ConfigPageTabs().Single(t => Name(t) == "tabProxy");
+
+            var grid = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == "dgProxyTriggers");
+            Assert.Equal("proxyTriggersGrid", grid.Attribute("AutomationProperties.AutomationId")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserAddRows")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserDeleteRows")?.Value);
+
+            var expectedColumns = new[]
+            {
+                ("URL pattern", "proxyTriggerRowUrl"),
+                ("Method", "proxyTriggerRowMethod"),
+                ("Status", "proxyTriggerRowStatus"),
+                ("Event raised", "proxyTriggerRowEvent"),
+                ("Problem", "proxyTriggerRowProblem"),
+                ("Remove", "proxyTriggerRowRemove"),
+            };
+            var columns = grid.Descendants()
+                .Where(e => e.Name.LocalName.EndsWith("Column", System.StringComparison.Ordinal))
+                .ToList();
+            Assert.Equal(expectedColumns.Length, columns.Count);
+            for (var i = 0; i < expectedColumns.Length; i++)
+            {
+                Assert.Equal(expectedColumns[i].Item1, columns[i].Attribute("Header")?.Value);
+                Assert.NotNull(columns[i].Descendants()
+                    .Single(e => e.Attribute("AutomationProperties.AutomationId")?.Value == expectedColumns[i].Item2));
+            }
+
+            // The Event cell is read-only TEXT, not an input: every trigger raises the one fixed
+            // event type, and the column exists to tell the admin what to search for in the rule
+            // builder. A TextBox here would let a row "retype" the event - structurally forbidden.
+            var eventCell = grid.Descendants()
+                .Single(e => e.Attribute("AutomationProperties.AutomationId")?.Value == "proxyTriggerRowEvent");
+            Assert.Equal("TextBlock", eventCell.Name.LocalName);
+
+            var addButton = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == "btnProxyTriggerAdd");
+            Assert.Equal("OnProxyTriggerAdd", addButton.Attribute("Click")?.Value);
+            var removeButton = grid.Descendants()
+                .Single(e => e.Attribute("AutomationProperties.AutomationId")?.Value == "proxyTriggerRowRemove");
+            Assert.Equal("OnProxyTriggerRowRemove", removeButton.Attribute("Click")?.Value);
+
+            // Section scaffolding: heading, hint, counter label the probe reads.
+            foreach (var required in new[] { "lblProxyTriggers", "lblProxyTriggersHint", "lblProxyTriggerCounter" })
+            {
+                Assert.NotNull(proxy.Descendants().SingleOrDefault(e => (e.Attribute(Xaml + "Name")?.Value) == required));
+            }
+
+            // Drift guard: the dropdown's XAML verb array must be the SAME set the editor class
+            // pins (any-method "*" first, then exactly the relayed verbs). The XAML array drives
+            // the live combo; the class array decides which stored rows the grid can render -
+            // the two must never disagree.
+            var methodArray = XDocument.Load(PagePath).Descendants()
+                .Single(e => e.Attribute(Xaml + "Key")?.Value == "ProxyTriggerMethods");
+            Assert.Equal(
+                ProxyTriggerEditor.ProxyTriggerMethods,
+                methodArray.Elements().Select(e => e.Value).ToArray());
         }
 
         [Fact]

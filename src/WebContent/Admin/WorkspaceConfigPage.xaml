@@ -17,6 +17,20 @@
         <sys:String>http</sys:String>
         <sys:String>https</sys:String>
       </x:Array>
+      <!-- #78: the one method set the trigger grid's dropdown offers - exactly the verbs the
+           proxy fetch path relays (any-method "*" first). A trigger naming another verb could
+           never match real traffic, so the dropdown never offers it; the grammar itself stays
+           ProxyTriggerPolicy's. -->
+      <x:Array x:Key="ProxyTriggerMethods" Type="{x:Type sys:String}">
+        <sys:String>*</sys:String>
+        <sys:String>GET</sys:String>
+        <sys:String>HEAD</sys:String>
+        <sys:String>POST</sys:String>
+        <sys:String>PUT</sys:String>
+        <sys:String>DELETE</sys:String>
+        <sys:String>OPTIONS</sys:String>
+        <sys:String>PATCH</sys:String>
+      </x:Array>
       <!-- #84: the stock bool→Visibility converter behind the promote button's per-row visibility.
            Built-in WPF type on purpose: anything custom in this page's XAML risks the whole-page
            BAML load failure learned live in the MC-13 walk. -->
@@ -420,6 +434,104 @@
           <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
             <Button x:Name="btnProxyHeaderAddResponse" Content="Add response header" Padding="10,4" Click="OnProxyHeaderAddResponse" />
             <TextBlock x:Name="lblProxyHeaderResponseCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <!--
+            Ticket #78: the per-workspace rule-trigger grid behind the #65 Event Server matcher.
+            Each row is a URL glob + method filter + response-status filter; the row is valid
+            exactly when ProxyTriggerPolicy's normalizers accept it (the SAME grammar the Event
+            Server audits stored rows against), so an invalid glob is flagged per row, its save is
+            refused by name, and nothing is silently dropped. Rows keep configuration order - the
+            matcher evaluates top-down and one fetch raises at most the FIRST matching row's event.
+            The Event column is read-only on purpose: every trigger raises the one fixed XProtect
+            event type, the exact name the admin searches for in the rule builder. Absent stored
+            section reads as zero triggers.
+          -->
+          <TextBlock x:Name="lblProxyTriggers" Style="{StaticResource SectionHeaderStyle}" Margin="0,14,0,2" Text="Rule triggers" />
+          <TextBlock x:Name="lblProxyTriggersHint" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,0,0,2" />
+
+          <DataGrid x:Name="dgProxyTriggers" AutomationProperties.AutomationId="proxyTriggersGrid"
+                    AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="60" MaxHeight="180" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="URL pattern" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!-- PropertyChanged like every other live-editor cell (#81 lesson). -->
+                    <TextBox x:Name="txtProxyTriggerRowUrl" AutomationProperties.AutomationId="proxyTriggerRowUrl"
+                             Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="2048" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Method" Width="100">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <ComboBox x:Name="cmbProxyTriggerRowMethod" AutomationProperties.AutomationId="proxyTriggerRowMethod"
+                              ItemsSource="{StaticResource ProxyTriggerMethods}"
+                              SelectedItem="{Binding Method, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Status" Width="90">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyTriggerRowStatus" AutomationProperties.AutomationId="proxyTriggerRowStatus"
+                             Text="{Binding Status, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="5" TextAlignment="Right" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Event raised" Width="170">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!-- Read-only (one-way binding): the one fixed event type every trigger raises. -->
+                    <TextBlock x:Name="txtProxyTriggerRowEvent" AutomationProperties.AutomationId="proxyTriggerRowEvent"
+                               Text="{Binding Event}" TextWrapping="Wrap"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="190">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyTriggerRowProblem" AutomationProperties.AutomationId="proxyTriggerRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyTriggerRowRemove" AutomationProperties.AutomationId="proxyTriggerRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyTriggerRowRemove" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+          <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="btnProxyTriggerAdd" Content="Add trigger" Padding="10,4" Click="OnProxyTriggerAdd" />
+            <TextBlock x:Name="lblProxyTriggerCounter" Style="{StaticResource SecondaryTextStyle}"
                        Margin="12,0,0,0" VerticalAlignment="Center" />
           </StackPanel>
 

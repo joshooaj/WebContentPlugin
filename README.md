@@ -234,7 +234,15 @@ A trigger row has three parts:
 A row the matcher refuses is reported once per configuration refresh in the Event Server's MIP
 log (`Workspace rows refreshed: N row(s)...` plus a named per-row reason) and never takes down the
 workspace's other rows. Trigger rows live in the workspace configuration alongside the proxy
-allowlist; the Management Client editor for them arrives with the #78 admin story. To confirm the
+allowlist. Administrators maintain them from the **Proxy tab** of the workspace configuration
+dialog, in the **Rule triggers** grid between the permission headers and the test fetch: each row
+has a URL pattern, a Method dropdown (`*` wildcard first, then the relayable verbs), a Status code
+(blank = any, `1xx`–`5xx` class, or an exact code), a read-only **Event raised** column showing
+which event type the row fires (`WebContent proxy request`), and a live problem column. Rows are
+checked against the same grammar the Event Server plugin enforces when it audits proxy traffic, so
+a row the dialog accepts can never be refused at runtime; an invalid row is marked in place and
+refuses the whole save, naming it. Rows are evaluated in the order shown — one request raises at
+most the first matching row's event — and saving with no rows stores no trigger policy at all. To confirm the
 event channel on a freshly deployed Event Server before any rules exist, place a
 `trigger-selftest.flag` file next to the deployed `WebContent.dll` and restart the service — the
 Event Server MIP log shows the probe event raised and seen on the bus with the same id (see
