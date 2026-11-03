@@ -61,6 +61,7 @@ is not evidence the plugin never ran.
 | Installer upgrade with Milestone clients running (MSI force-closes Smart Client / Management Client instead of failing 1603 on locked plugin dlls) | #70 | `build.ps1` structural guard (parses `wix-wid.xml` out of the versioned `.wixpdb`: the `Wix4CloseApplications_*` action is scheduled after InstallInitialize and before RemoveFiles/InstallFiles, RemoveExistingProducts is after InstallFiles, and the three kill targets — `Client.exe`, `VideoOS.Administration.exe`, `VideoOS.OAuth2TokenGenerator.exe` — are in the `Wix4CloseApplication` table) | See IN-1 below - **all live rows PASSED 2026-11-03** on the VMS machine with the clients launched in a real interactive session and `WebContent.dll` proven LOCKED first: uninstall, fresh install, and an upgrade — each with `Client.exe` + `VideoOS.Administration.exe` running — answered exit code 0, killed the clients, and left a hash-verified drop |
 | OS-configured (WinINET) proxy inheritance for non-proxied views, and the deliberate contrast for proxied views (loopback pin wins; no admin-facing proxy-URL setting exists because the OS owns that layer) (#67) | #67 | `ProxyBrowserArgumentsTests` (the pin itself: every scheme routed to the loopback listener, `<-loopback` bypass off - nothing falls back to the system path); the inheritance claim is a live-host fact, pinned by the SC-8 probe rows below (`ScOsProxyInheritanceProbeTests`: WinINET snapshot/apply/restore, a logging forward-proxy harness on loopback, live `Win32_Process` command-line reads of the plugin's browser processes) | See SC-8 below: routing OFF + the per-user WinINET proxy pointed at the harness - the non-proxied view renders the harness marker page for an RFC 2606 `.invalid` host (which can never resolve, so a served page can only have ridden the OS proxy) with the browser's absolute-form GET in the journal and NO proxy switch on any browser command line; routing ON + the SAME OS proxy + the SAME url - the plugin's 403 page renders, the harness journals nothing for the origin, and the live browser command lines carry `--proxy-server=http=http://127.0.0.1:<listener>;...` plus `--proxy-bypass-list=<-loopback>`. **BEAST 2026-11-03: both rows PASSED** (`20261103-035256`, `20261103-040006`) |
 | Managed workspaces: security-relevant Smart Client view settings locked with "Managed by Administrator", cosmetic settings stay per-instance editable (locked-key overrides can never reach runtime) | #71 | `WorkspaceSettingLocksTests` (managed decision from the persisted WorkspaceId/DefinitionFingerprint; the locked set is exactly HomeAddress + legacy Address + ProxyEnabled + ProxyTargets, cosmetic/navigation keys never locked, identity keys never settings; seed decision table - locked/identity keys always enforced, cosmetic keys take the definition as initial value or re-initialise on definition change but a per-instance override survives inside an unchanged definition), `WorkspaceInstancePropertiesTests` #71 rows (hand-edited HomeAddress overwritten; definition proxy posture + allowlist enforced over stored values; cosmetic override kept, absent cosmetic seeded, changed definition re-initialises it; identity/fingerprint always enforced), `ManagedViewPropertiesPaneGuardTests` (home TextBox pins IsEnabled/ToolTip bindings + probe AutomationIds; both admin notices render only for managed items via one converter; NO cosmetic control declares an IsEnabled binding) | See SC-9 below - **live row PASSED 2026-11-03** (run `20261103-043150`, drop `3C777113…F63475`): Home renders disabled with the pinned URL visible + the admin note under Home AND Proxy, the checkbox stays enabled and its per-instance ON-state survives a full exit/re-enter-setup re-seed, locks still locked afterwards, `WebContent workspace seed:` marker in MIPLog; the standalone zero-change branch is pinned by the unit table + pane guard (no standalone view item in the lab) |
+| Untrusted deployment CA: banner for every user on proxied views, setup-mode-only elevated fix through a thumbprint-locked bundled helper, mid-session heal without restart (#72) | #72 | `ProxyCaTrustStateTests` (posture holder: Changed fires only on real flips, case-insensitive thumbprint equality, proxy-off Clear, throwing subscriber swallowed) + `ProxyLoopbackTlsTrustPostureTests` (every mint publishes from the LOCAL root-store probe not the wire, cache short-circuits republication, `InvalidateLeafCache` re-mint flips the posture with no restart); `ProxyTrustHelperTests` (usage matrix, unreadable 3, garbage/oversize/empty refused 2 before parsing, thumbprint mismatch = store never touched, matched = exactly one import with the verified cert, store exit propagates); `ProxyCaTrustBannerWiringGuardTests` (banner elements + Collapsed defaults, setup-only fix gate, `Verb="runas"` + NO in-process LocalMachine write in the view code, 1223 quiet + independent re-verification, invalidate+reload on confirmed fix, navigation re-check heals external fixes, drop ships but never links the helper) | See SC-10 below - **live rows PASSED 2026-11-03** (runs `20261103-053747`/`20261103-053809`/`20261103-053825`, drop `01D9D8A8…3789` both machines): deployed helper refuses every negative path with the pinned exit codes and zero dialogs (incl. the unprivileged store refusal = 4); the helper's FULL success path verified end-to-end ON the Event Server (import -> present -> remove -> absent, self-cleaned); trusted lab state shows no CA chrome on the live proxied view. The untrusted-live row (SC-10 row 4) is an elevated human step: both root stores refuse unattended removal on the client machine |
 
 ## Manual host checks
 
@@ -1470,6 +1471,62 @@ ES synced to the same drop afterwards). Artifacts `sc-managed-locked-home.png` (
 with `http://httpforever.com/` visible, note under Home and Proxy) and
 `sc-managed-after-reseed.png` (same locks intact, "Clear history on exit" still checked after
 the re-seed cycle) show both halves. The seed marker line was found in `MIPLog.txt`.
+
+### SC-10 Untrusted deployment CA: banner, dismiss, setup-mode elevated fix (#72)
+
+When the machine does not trust the deployment CA behind proxied https tunnels, every user of a
+proxied view sees the banner "The proxy certificate is not trusted on this PC - contact your
+administrator." (dismissible per session, back next session); setup mode additionally offers
+**Fix certificate trust**, which runs the bundled `WebContentTrustHelper.exe` elevated. The two
+Windows dialogs (UAC consent + crypt32's root-store warning) are deliberate and never suppressed,
+so the click-through cannot be automated unattended; the helper itself is dumb and auditable - it
+imports exactly the thumbprint-verified CA DER that the leaf mint reported, or refuses loudly.
+After a confirmed import the plugin re-reads the root stores itself, drops the cached leaves and
+reloads proxied https - no Smart Client restart. A navigation-time re-check heals the posture the
+same way when an admin imports the CA manually (no helper involved).
+
+Automated: `ProxyCaTrustStateTests` + `ProxyLoopbackTlsTrustPostureTests` (posture publication,
+local-store probe authority, log-once per (thumbprint, verdict), invalidate -> re-mint flip),
+`ProxyTrustHelperTests` (every refusal BEFORE any store/dialog is reachable),
+`ProxyCaTrustBannerWiringGuardTests` (the source pins of the whole composition).
+
+Live probe: `ScProxyTrustProbeTests` -
+row 1 `ProbeTrustedCaProxiedViewShowsNoBanner` (unattended): proxied https home with the CA
+trusted -> `proxyCaBanner`/`proxyCaFixButton` ABSENT from the UIA tree ("nothing worse than
+today");
+row 2 `ProbeDeployedTrustHelperRefusesEveryNegativePath` (unattended, dialog-free by design): the
+DEPLOYED exe from `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin` - no/bad args =
+1, missing file = 3, garbage/oversize = 2, real-certificate-wrong-thumbprint = 2 stating
+"does not match the expected ... nothing was imported", matched cert + non-elevated process = 4
+("cannot open LocalMachine\Root for write (not elevated?): Access is denied." - proven: NO crypt32
+dialog appears when the open itself fails);
+row 3 `ProbeTrustHelperElevatedEndToEndOnEventServer` (unattended): ON the Event Server, inside an
+elevated remote session, a throwaway CN-scoped CA is minted, the deployed helper imports it
+(exit 0, "imported"), presence in LocalMachine\Root is verified, the certificate is removed by CN
+sweep, absence is verified;
+row 4 `ProbeUntrustedCaBannerDismissAndSetupGate` (opt-in `WEBCONTENT_CA_UNTRUST_LIVE=1`): removes
+the deployment CA from BOTH root stores, launches Smart Client, asserts the banner appears for the
+ordinary user with the not-trusted wording, the fix button is ABSENT in browse mode, dismiss hides
+the banner for the session, and setup mode reveals `proxyCaFixButton` (never clicked unattended -
+see the human step).
+
+**Live record (BEAST + VMS):** 2026-11-03, both machines at drop `WebContent.dll` SHA-256
+`01D9D8A8…3789` (hash-verified local install and remote install; helper exe SHA-256
+`BFDA9B21…6823` identical on both). Row 1 **PASSED** (`20261103-053825`, artifact
+`sc-trust-probe-trusted-no-banner.png`: live proxied view at `https://joshooaj.com/`, no CA
+chrome). Row 2 **PASSED** (`20261103-053747`). Row 3 **PASSED** (`20261103-053809`: helper
+exit=0, `verified present in LocalMachine\Root: EFCA6388…F6228`, `verified absent after cleanup`).
+Row 4 SKIPPED-unattended (`20261103-054246`): removal from CurrentUser\Root itself is store-
+protected (Access Denied without elevation) and no remote channel can substitute for the per-user
+store, so the stores were left untouched (re-verified: CA present in both stores afterwards).
+
+**Human step (row 4 full pass):** from an ELEVATED joshooaj shell run
+`$env:WEBCONTENT_CA_UNTRUST_LIVE='1'; Invoke-psake -taskList TestUI -parameters @{ TestFilter =
+'FullyQualifiedName~ProbeUntrustedCaBannerDismissAndSetupGate' }` - the row then removes the CA
+from both stores directly, drives the live banner/dismiss/setup-gate assertions, and restores the
+CA to both stores in its finally block. The Fix-button CLICK itself (both OS dialogs + the
+post-click leaf-cache invalidation and reload) remains a human-observed flow; the declined-UAC
+(1223) and post-confirm re-verification outcomes are pinned by the unit/guard suites.
 
 ## Installer checks
 

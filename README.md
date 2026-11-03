@@ -110,7 +110,15 @@ authority per deployment (see `docs/adr/0003-event-server-mints-loopback-leaf-ce
    ```
 
    Until that import is done, proxied HTTPS pages load but show a browser certificate error — the plugin
-   never bypasses certificate validation on its own, and its log names this exact import step. If the
+   never bypasses certificate validation on its own. The Smart Client view also says so directly: any
+   proxied view whose deployment CA is missing from the machine's trusted-root stores shows a banner
+   to every user: *"The proxy certificate is not trusted on this PC - contact your administrator."*
+   (dismissible for the session; it returns next session until the CA is trusted). An administrator in
+   **setup mode** additionally gets a **Fix certificate trust** button on that banner: it launches the
+   bundled `WebContentTrustHelper.exe` elevated. Windows shows its elevation consent *and* the
+   certificate-store warning, both deliberately and never suppressed, and the tool imports exactly
+   the reported CA (thumbprint-verified, nothing else). Once the CA is trusted the banner clears and
+   proxied HTTPS pages reload without restarting Smart Client. If the
    button answers that the proxy authority certificate does not exist yet, no CA has been created on the
    Event Server machine — complete step 1 first.
 
