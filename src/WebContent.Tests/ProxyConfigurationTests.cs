@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Xunit;
+
 using WebContent;
+
+using Xunit;
 
 namespace WebContent.Tests
 {
@@ -84,7 +86,7 @@ namespace WebContent.Tests
         {
             var settings = WorkspaceConfiguration.Deserialize(LegacyShapeBlob).GetFirstWebContentSettings();
 
-            Assert.Equal(1, settings.ProxyTargets.Count);
+            Assert.Single(settings.ProxyTargets);
             var entry = settings.ProxyTargets[0];
             Assert.Null(entry.Pattern);
             Assert.Equal("portal.test", entry.Host);

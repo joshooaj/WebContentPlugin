@@ -1,7 +1,8 @@
+using System.Diagnostics;
+
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
-using System.Diagnostics;
 
 namespace WebContent.UxTests.Harness;
 

@@ -1,6 +1,7 @@
+using System.Runtime.InteropServices;
+
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Capturing;
-using System.Runtime.InteropServices;
 
 namespace WebContent.UxTests.Harness;
 

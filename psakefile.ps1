@@ -38,7 +38,9 @@ Task Build -Depends ToolRestore {
 
 Task Lint -Depends ToolRestore {
     Exec {
-        & dotnet format --verify-no-changes $script:ProjectPath
+        & dotnet format .\src\WebContent\WebContent.csproj --verify-no-changes
+        & dotnet format .\src\WebContent.Tests\WebContent.Tests.csproj --verify-no-changes
+        & dotnet format .\tests\ux\WebContent.UxTests\WebContent.UxTests.csproj --verify-no-changes
     }
 }
 

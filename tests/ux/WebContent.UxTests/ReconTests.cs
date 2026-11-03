@@ -1,7 +1,10 @@
 using System.Diagnostics;
+
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
+
 using WebContent.UxTests.Harness;
+
 using Xunit;
 using Xunit.Abstractions;
 
@@ -185,8 +188,11 @@ public class ReconTests
             catch (Exception ex) { Log("tree patterns ERR:" + ex.GetType().Name); }
             var treeParent = tree.Parent;
             if (treeParent != null)
-                try { Log("tree parent: " + treeParent.ControlType + " cls=" + treeParent.ClassName + " patterns=" +
-                        string.Join(",", treeParent.GetSupportedPatterns().Select(p => p.ToString()))); }
+                try
+                {
+                    Log("tree parent: " + treeParent.ControlType + " cls=" + treeParent.ClassName + " patterns=" +
+                        string.Join(",", treeParent.GetSupportedPatterns().Select(p => p.ToString())));
+                }
                 catch (Exception ex) { Log("tree parent ERR:" + ex.GetType().Name); }
         }
 
@@ -330,7 +336,7 @@ public class ReconTests
         ProcessKiller.KillClients("Client", "VideoOS.Administration");
         ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
 
-        using         var sc = ClientSession.Launch(config.SmartClientExe);
+        using var sc = ClientSession.Launch(config.SmartClientExe);
         var scLogin = LoginFlow.WaitForLoginWindow(sc);
         Artifacts.Window(scLogin, "sc-00-login");
         Artifacts.WriteText("sc-00-login-tree.txt", TreeDump.Of(scLogin, 12));

@@ -162,7 +162,7 @@ namespace WebContent.Tests
             var proxy = ConfigPageTabs().Single(t => Name(t) == "tabProxy");
             var grid = proxy.Descendants().Single(e => e.Name.LocalName == "DataGrid");
 
-            string Tighten(string value) => new(value.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
+            static string Tighten(string value) => new(value.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
 
             var offenders = grid.Descendants()
                 .SelectMany(e => e.Attributes())

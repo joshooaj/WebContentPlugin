@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 
@@ -948,7 +949,7 @@ public static class ManagementClientUi
         {
             foreach (var w in session.Windows())
             {
-                string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
+                static string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
                 log.AppendLine($"after AddNew window aid='{Safex(() => w.AutomationId)}' name='{Safex(() => w.Name)}' class='{Safex(() => w.ClassName)}'");
                 try
                 {

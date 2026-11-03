@@ -9,6 +9,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
+
 using Xunit;
 
 namespace WebContent.Tests
@@ -27,7 +28,7 @@ namespace WebContent.Tests
         private readonly Authority _authority = Authority.Create(Sink);
         private readonly List<(string Host, int Port)> _mintCalls = new List<(string, int)>();
         private Func<string, int, byte[], ProxyLeafResponsePayload> _responder;
-        private ProxyLoopbackTls _tls;
+        private readonly ProxyLoopbackTls _tls;
 
         public ProxyLoopbackTlsTests()
         {

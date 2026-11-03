@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 
@@ -79,7 +80,7 @@ public static class SmartClientUi
             dump.AppendLine($"select-workspace-fail for '{workspaceName}' {DateTime.Now:HH:mm:ss}");
             foreach (var w in session.Windows())
             {
-                string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
+                static string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
                 dump.AppendLine($"  window aid='{Safex(() => w.AutomationId)}' class='{Safex(() => w.ClassName)}' name='{Safex(() => w.Name)}'");
             }
             var blocks = mainWindow.FindAllDescendants(cf => cf.ByAutomationId("_textTextBlock"))

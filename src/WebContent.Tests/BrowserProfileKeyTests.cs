@@ -1,7 +1,9 @@
 using System;
 using System.Linq;
-using Xunit;
+
 using WebContent.Client;
+
+using Xunit;
 
 namespace WebContent.Tests
 {

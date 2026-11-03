@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -54,73 +55,73 @@ public static class LoginFlow
         // SUCCESS outcome, not a broken login - recognize it instead of faulting the probe.
         try
         {
-        // A pre-filled dialog with a DEAD Connect button is the client mid-auto-login: the
-        // fields hold the remembered credentials and Connect is disabled for the whole attempt.
-        // Typing into that dialog (select-all, paste) has raced and cancelled the attempt -
-        // leave it untouched and let the session window arrive.
-        var earlyConnect = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect"))
-                           ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
-        if (earlyConnect != null && !TryIsEnabled(earlyConnect) && RememberedUserPresent(loginWindow, config))
-        {
-            LogEntry("dialog pre-filled with remembered user, Connect disabled - auto-login in progress; hands off 30 s");
-            if (WaitForConnected(session, 30))
+            // A pre-filled dialog with a DEAD Connect button is the client mid-auto-login: the
+            // fields hold the remembered credentials and Connect is disabled for the whole attempt.
+            // Typing into that dialog (select-all, paste) has raced and cancelled the attempt -
+            // leave it untouched and let the session window arrive.
+            var earlyConnect = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect"))
+                               ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
+            if (earlyConnect != null && !TryIsEnabled(earlyConnect) && RememberedUserPresent(loginWindow, config))
             {
-                LogEntry("auto-login completed while hands-off waiting; nothing to enter");
-                return;
+                LogEntry("dialog pre-filled with remembered user, Connect disabled - auto-login in progress; hands off 30 s");
+                if (WaitForConnected(session, 30))
+                {
+                    LogEntry("auto-login completed while hands-off waiting; nothing to enter");
+                    return;
+                }
             }
-        }
 
-        // Focus is a hint, not a contract: on a locked/idle desktop UIA SetFocus throws
-        // "Operation is not valid due to the current state of the object" - never let it
-        // abort the login flow when SetValueOrType carries its own entry routes.
-        var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
-        if (serverBox != null && !string.IsNullOrWhiteSpace(config.VmsAddress))
-        {
-            try { serverBox.Focus(); } catch { }
-            SetValueOrType(serverBox, config.VmsAddress);
-        }
-
-        var userCombo = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_userNameComboBox"));
-        var userBox = userCombo?.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
-        if (userBox != null)
-        {
-            try { userBox.Focus(); } catch { }
-            SetValueOrType(userBox, config.VmsUsername);
-        }
-
-        var passwordBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_passwordBox"));
-        if (passwordBox == null) throw new InvalidOperationException("Login dialog has no _passwordBox.");
-        FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
-
-        var connect = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect"))
-                      ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
-        if (connect == null) throw new InvalidOperationException("Login dialog has no connect button.");
-
-        // The client may ALREADY be auto-connecting (Auto-login was remembered from an
-        // interactive session): the dialog shows filled remembered fields, Connect is disabled
-        // for the duration of the attempt, and on success the main window simply appears.
-        // Never fight that dialog - give the auto-login room, then fall back to entering.
-        if (!WaitUntilEnabled(connect, 3))
-        {
-            if (WaitForConnected(session, 20))
+            // Focus is a hint, not a contract: on a locked/idle desktop UIA SetFocus throws
+            // "Operation is not valid due to the current state of the object" - never let it
+            // abort the login flow when SetValueOrType carries its own entry routes.
+            var serverBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
+            if (serverBox != null && !string.IsNullOrWhiteSpace(config.VmsAddress))
             {
-                LogEntry("auto-login completed while waiting; leaving the dialog alone");
-                return;
+                try { serverBox.Focus(); } catch { }
+                SetValueOrType(serverBox, config.VmsAddress);
             }
-            LogEntry($"connect disabled; re-entering password (loginWindow aid='{loginWindow.AutomationId}')");
-            Artifacts.Window(loginWindow, "login-filled-disabled");
-            DumpLoginTree(loginWindow, "login-tree-disabled.txt");
+
+            var userCombo = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_userNameComboBox"));
+            var userBox = userCombo?.FindFirstDescendant(cf => cf.ByAutomationId("PART_EditableTextBox"));
+            if (userBox != null)
+            {
+                try { userBox.Focus(); } catch { }
+                SetValueOrType(userBox, config.VmsUsername);
+            }
+
+            var passwordBox = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_passwordBox"));
+            if (passwordBox == null) throw new InvalidOperationException("Login dialog has no _passwordBox.");
             FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
-            if (!WaitUntilEnabled(connect, 3) && !WaitForConnected(session, 10))
+
+            var connect = loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_btnConnect"))
+                          ?? loginWindow.FindFirstDescendant(cf => cf.ByAutomationId("_connectButton"));
+            if (connect == null) throw new InvalidOperationException("Login dialog has no connect button.");
+
+            // The client may ALREADY be auto-connecting (Auto-login was remembered from an
+            // interactive session): the dialog shows filled remembered fields, Connect is disabled
+            // for the duration of the attempt, and on success the main window simply appears.
+            // Never fight that dialog - give the auto-login room, then fall back to entering.
+            if (!WaitUntilEnabled(connect, 3))
             {
-                DumpLoginTree(loginWindow, "login-tree-disabled2.txt");
-                throw new InvalidOperationException(
-                    "Connect stayed disabled after two password entries and no session window appeared " +
-                    "(see login-entry-log.txt + login-tree-disabled*.txt artifacts).");
+                if (WaitForConnected(session, 20))
+                {
+                    LogEntry("auto-login completed while waiting; leaving the dialog alone");
+                    return;
+                }
+                LogEntry($"connect disabled; re-entering password (loginWindow aid='{loginWindow.AutomationId}')");
+                Artifacts.Window(loginWindow, "login-filled-disabled");
+                DumpLoginTree(loginWindow, "login-tree-disabled.txt");
+                FocusAndType(session, loginWindow, passwordBox, config.VmsPassword);
+                if (!WaitUntilEnabled(connect, 3) && !WaitForConnected(session, 10))
+                {
+                    DumpLoginTree(loginWindow, "login-tree-disabled2.txt");
+                    throw new InvalidOperationException(
+                        "Connect stayed disabled after two password entries and no session window appeared " +
+                        "(see login-entry-log.txt + login-tree-disabled*.txt artifacts).");
+                }
+                if (HasMainSessionWindow(session)) return;
             }
-            if (HasMainSessionWindow(session)) return;
-        }
-        connect.Patterns.Invoke.Pattern.Invoke();
+            connect.Patterns.Invoke.Pattern.Invoke();
         }
         catch (Exception ex) when (ex is InvalidOperationException
                                    || ex is FlaUI.Core.Exceptions.ElementNotAvailableException

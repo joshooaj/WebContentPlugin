@@ -11,6 +11,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Xunit;
 
 namespace WebContent.Tests
@@ -434,7 +435,7 @@ namespace WebContent.Tests
 
         // --- harness -------------------------------------------------------
 
-        private string _tunnelId = "tunnel-" + Guid.NewGuid().ToString("N");
+        private readonly string _tunnelId = "tunnel-" + Guid.NewGuid().ToString("N");
         private readonly List<ProxyTunnelPayload> _toClient = new List<ProxyTunnelPayload>();
 
         private ProxyTunnelServer NewServer()
