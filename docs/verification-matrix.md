@@ -367,9 +367,16 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    EnvironmentManager floor each refusing before any socket opened. The allowlist ended restored
    to its four production lines (the run also cleaned a `http://*` left behind by a run the
    desktop-disconnect killed mid-restore). Re-walked after the #81 grid migration on the same
-   day: green run `20261102-105816` on drop `F1F5D7E8…` — every allowlist line is now typed
+   day: green run `20261102-105816` on drop `F1F5D7E8…` - every allowlist line is now typed
    through the structured grid (there is no free-text box left to type into) and the ES gate
-   verdicts are unchanged.
+   verdicts are unchanged. Epic integration re-pass 2026-11-03 (run `20261103-113046`, one of
+   four cluster probes green in ONE 24 m 33 s `TestUI` run on the merged drop `BA938406…`):
+   wildcard/hatch lines round-trip verbatim; the public target now throttles the ES's 5 s header
+   window, so admission is proven by the DIAL - `http://online.neverssl.com/` and the
+   hatch-opened apex both answer `Timeout ... No response headers ...` at 5.1 s while the apex
+   under the wildcard refuses in 0.0s, and `http://10.20.30.40/` plus `http://vms.joshooaj.com/`
+   still refuse `NotAllowed` 0.0s under `http://*` (the 0.0s-vs-dial contrast is the point).
+   Eight production lines restored with audit + reloaded-pane readback.
 
    LIVE FINDING from this walk: the deployed #76 `dgStatusSessions` carried
    `CanUserResizeRows="Disabled"` — a WinForms tri-state string on a WPF-BOOLEAN property — so
@@ -430,7 +437,15 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    value while the row stored the old one - now pinned by a guard test over every `Mode=TwoWay`
    binding in the grid); the storage de-dupes so probe leftovers double up (the harness now
    treats its own host/hatch rows as not-baseline); and the wildcard banner probe must read the
-   TextBlock, not the peerless Border.
+   TextBlock, not the peerless Border. Epic integration re-pass 2026-11-03 (run
+   `20261103-113716`, drop `BA938406…`): the whole-pane walk green on the merged drop - both
+   refused rows kept inline Problem cells and the notice quoted each row exactly as the row model
+   holds it, the MIP.log marker moved 18 -> 19 keyed on the probe's bad host, refused rows never
+   reached storage, the flag round-tripped (`https://gridprobe.invalid:8443 accept-untrusted` read
+   back ticked from a reloaded pane), the banner was asserted up while the `http://*` row was in
+   the grid and down after its Remove, and the production lines were restored with double
+   verification. (The workspace's production allowlist has since grown to eight lines; the
+   harness treats its own rows as not-baseline either way.)
 
 ### MC-15 Export the deployment CA certificate over MIP messaging (#75)
 
@@ -643,7 +658,14 @@ refused save: 12 -> 12` with `post-refusal fetch -> HTTP 200 - 10485760 bytes fe
 `restored-cap fetch -> ... TooLarge ... 5242880 ... (cap live in both directions)`; `allowlist and
 cap ('5') restored (verified from reloaded panes)`. Four earlier red runs contributed the harness
 truths above (301 on http, 404 on 6Mb.dat, the fill-interrupt readback lie, and the missing
-restore-phase grid edit).
+restore-phase grid edit). Epic integration re-pass 2026-11-03 (run `20261103-114406`, drop
+`BA938406…`): all five phases green on the merged drop. The stored baseline read 20 MB - the
+production cap had been raised since the first run and the harness restores what it finds - so
+the run normalized to the 5 default for the `TooLarge ... 5242880 byte response cap` posture,
+saved 12 (audit line + reloaded pane) and re-polled the SAME 10 MB download to
+`HTTP 200 - 10485760 bytes fetched` inside the 60 s window, refused `99999` BY NAME with the
+cap-audit lines unmoved 55 -> 55 while the ES kept serving the stored cap, re-armed the refusal
+at 5, then restored the 20 MB baseline - the cap live in both directions.
 
 ### MC-18 Per-workspace header policy: store, guardrail, restore (#86)
 
@@ -692,7 +714,12 @@ response 2 rule(s) [X-Probe-Response=probe-response-value; -X-Probe-Strip-Respon
 row(s): Host=evil.example.com / -Host / Proxy-Connection=close / -Proxy-Connection. ...`; four
 `nothing stored by the refusal: ... lines 1 -> 1`; `storage untouched through all four refusals:
 audit lines 1 -> 1`; `saved header policy request=[] response=[] (verified from the audit line
-AND reloaded panes, order-sensitive)`.
+AND reloaded panes, order-sensitive)`. Epic integration re-pass 2026-11-03 (run
+`20261103-115132`, drop `BA938406…`): five phases green on the merged drop - two rules per leg
+stored through the audit line AND order-sensitive reloaded grids, four forbidden-row cycles
+(`Host=evil.example.com` / `-Host` / `Proxy-Connection=close` / `-Proxy-Connection`) each
+pinning the live Problem text, the notice naming the row verbatim, and audit lines unmoved
+44 -> 44; the emptied grids stored `request 0 rule(s) []; response 0 rule(s) []`.
 
 ### MC-19 Per-workspace rule triggers: store, grammar guardrail, restore (#78)
 
