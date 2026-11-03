@@ -109,18 +109,24 @@ namespace WebContent
             {
                 case ProxyForwardDisposition.BadRequest:
                     log(rejectReason);
-                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", rejectReason));
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        400, "Bad Request", ProxyErrorPage.CategoryMalformedRequest,
+                        ProxyErrorPage.Details.ForRequest(request, rejectReason, ProxyErrorPage.DecidedByLocalListener)));
                     return;
 
                 case ProxyForwardDisposition.OriginNotAllowed:
                     log(rejectReason);
                     blocks?.Report(request?.Uri, ProxyBlockReasons.NotAllowed);
-                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", rejectReason));
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        403, "Forbidden", ProxyErrorPage.CategoryNotAllowed,
+                        ProxyErrorPage.Details.ForRequest(request, rejectReason, ProxyErrorPage.DecidedByLocalListener).WithSuggestedAllowlistEntry()));
                     return;
 
                 case ProxyForwardDisposition.MethodNotAllowed:
                     log(rejectReason);
-                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(405, "Method Not Allowed", rejectReason));
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        405, "Method Not Allowed", ProxyErrorPage.CategoryMethodNotAllowed,
+                        ProxyErrorPage.Details.ForRequest(request, rejectReason, ProxyErrorPage.DecidedByLocalListener)));
                     return;
 
                 case ProxyForwardDisposition.ConnectTerminate:
@@ -131,7 +137,9 @@ namespace WebContent
                         var reason = $"The CONNECT to '{request.RawTarget}' cannot be terminated by this proxy; https targets are fetched by the VMS server over tunnels this listener terminates.";
                         log(reason);
                         blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", reason));
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                            502, "Bad Gateway", ProxyErrorPage.CategoryTunnelFailed,
+                            ProxyErrorPage.Details.ForRequest(request, reason, ProxyErrorPage.DecidedByLocalListener)));
                         return;
                     }
 
@@ -176,7 +184,9 @@ namespace WebContent
                         var connectWiring = $"The CONNECT to '{request.RawTarget}' cannot be tunnelled by this listener; ws:// targets ride CONNECT-style byte tunnels the VMS server opens.";
                         log(connectWiring);
                         blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", connectWiring));
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                            502, "Bad Gateway", ProxyErrorPage.CategoryTunnelFailed,
+                            ProxyErrorPage.Details.ForRequest(request, connectWiring, ProxyErrorPage.DecidedByLocalListener)));
                         return;
                     }
 
@@ -235,7 +245,9 @@ namespace WebContent
 
                 case ProxyForwardDisposition.ConnectRefused:
                     log(rejectReason);
-                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", rejectReason + " The workspace proxy supports http(s) allowlisted targets fetched by the VMS server; https pages need a CONNECT tunnel this proxy does not provide."));
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        502, "Bad Gateway", ProxyErrorPage.CategoryNotAllowed,
+                        ProxyErrorPage.Details.ForRequest(request, rejectReason + " The workspace proxy supports http(s) allowlisted targets fetched by the VMS server; https pages need a CONNECT tunnel this proxy does not provide.", ProxyErrorPage.DecidedByLocalListener).WithSuggestedAllowlistEntry()));
                     return;
 
                 case ProxyForwardDisposition.WebSocketTunnel:
@@ -244,7 +256,9 @@ namespace WebContent
                         var tunnelWiring = $"The websocket upgrade to '{request.RawTarget}' cannot be tunnelled by this listener; ws:// targets ride CONNECT-style byte tunnels the VMS server opens.";
                         log(tunnelWiring);
                         blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", tunnelWiring));
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                            502, "Bad Gateway", ProxyErrorPage.CategoryTunnelFailed,
+                            ProxyErrorPage.Details.ForRequest(request, tunnelWiring, ProxyErrorPage.DecidedByLocalListener)));
                         return;
                     }
 
@@ -257,7 +271,9 @@ namespace WebContent
                     {
                         log($"Proxy websocket tunnel open for '{request.RawTarget}' threw: {exception.Message}");
                         blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy tunnel failed to open: {exception.Message}"));
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                            502, "Bad Gateway", ProxyErrorPage.CategoryTunnelFailed,
+                            ProxyErrorPage.Details.ForRequest(request, $"The VMS proxy tunnel failed to open: {exception.Message}", ProxyErrorPage.DecidedByLocalListener)));
                         return;
                     }
 
@@ -268,7 +284,12 @@ namespace WebContent
                             : outcome.ErrorMessage;
                         log($"Proxy websocket tunnel to '{request.RawTarget}' refused (code={outcome?.ErrorCode}): {openFailure}");
                         ReportTunnelOpenFailure(blocks, request, outcome);
-                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", openFailure));
+                        await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                            502, "Bad Gateway", CategoryForFailure(outcome == null ? null : outcome.ErrorCode, ProxyErrorPage.CategoryTunnelFailed),
+                            ProxyErrorPage.Details.ForRequest(
+                                request,
+                                openFailure,
+                                outcome == null ? ProxyErrorPage.DecidedByLocalListener : ProxyErrorPage.DecidedByVmsServer)));
                         return;
                     }
 
@@ -278,6 +299,17 @@ namespace WebContent
             }
 
             await ServeForwardedRequestAsync(request, head.Leftover, input, output, fetch, log, blocks);
+        }
+
+        /// <summary>
+        /// #66: the cause category for a failure the Event Server answered with - its wire code
+        /// maps onto its own distinct category (1:1, never collapsed). Codes the map does not
+        /// know (and the null no-outcome case) fall back to the caller's posture default.
+        /// </summary>
+        private static string CategoryForFailure(string errorCode, string fallbackCategory)
+        {
+            string category;
+            return ProxyErrorPage.TryCategoryForErrorCode(errorCode, out category) ? category : fallbackCategory;
         }
 
         /// <summary>
@@ -361,12 +393,16 @@ namespace WebContent
                     case ProxyForwardDisposition.BadRequest:
                         // A head this broken leaves the stream position untrustworthy: answer and close.
                         log(rejectReason);
-                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", rejectReason));
+                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(
+                            400, "Bad Request", ProxyErrorPage.CategoryMalformedRequest,
+                            ProxyErrorPage.Details.ForRequest(request, rejectReason, ProxyErrorPage.DecidedByLocalListener)));
                         return;
 
                     case ProxyForwardDisposition.MethodNotAllowed:
                         log(rejectReason);
-                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(405, "Method Not Allowed", rejectReason));
+                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(
+                            405, "Method Not Allowed", ProxyErrorPage.CategoryMethodNotAllowed,
+                            ProxyErrorPage.Details.ForRequest(request, rejectReason, ProxyErrorPage.DecidedByLocalListener)));
                         pending = head.Leftover;
                         continue;
 
@@ -378,6 +414,8 @@ namespace WebContent
                         // Every open failure is an explicit 502 page ON the tunnel; the tunnel
                         // stays usable, the upgrade is never fetched and never taken direct.
                         string upgradeFailure = null;
+                        string upgradeCategory = ProxyErrorPage.CategoryTunnelFailed;
+                        string upgradeDecidedBy = ProxyErrorPage.DecidedByLocalListener;
                         ProxyTunnelOpenOutcome upgradeOutcome = null;
                         if (openTunnel == null)
                         {
@@ -409,6 +447,8 @@ namespace WebContent
                                 upgradeFailure = upgradeOutcome == null
                                     ? "The Event Server tunnel opener returned no outcome."
                                     : upgradeOutcome.ErrorMessage;
+                                upgradeDecidedBy = ProxyErrorPage.DecidedByVmsServer;
+                                upgradeCategory = CategoryForFailure(upgradeOutcome == null ? null : upgradeOutcome.ErrorCode, ProxyErrorPage.CategoryTunnelFailed);
                                 log($"Proxy in-tunnel websocket tunnel to '{request.RawTarget}' refused (code={upgradeOutcome?.ErrorCode}): {upgradeFailure}");
                                 ReportTunnelOpenFailure(blocks, request, upgradeOutcome);
                             }
@@ -416,7 +456,9 @@ namespace WebContent
 
                         if (upgradeFailure != null)
                         {
-                            await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", upgradeFailure));
+                            await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(
+                                502, "Bad Gateway", upgradeCategory,
+                                ProxyErrorPage.Details.ForRequest(request, upgradeFailure, upgradeDecidedBy)));
                             pending = head.Leftover;
                             continue;
                         }
@@ -430,7 +472,9 @@ namespace WebContent
                         // accepted origin (codec already blocks that) - refuse and keep the tunnel.
                         log(rejectReason ?? $"In-tunnel request '{request?.RawTarget}' refused.");
                         blocks?.Report(request?.Uri, ProxyBlockReasons.NotAllowed);
-                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", rejectReason ?? "The in-tunnel request was refused."));
+                        await WriteAsync(tunnel, ProxyForwardCodec.RenderErrorResponse(
+                            403, "Forbidden", ProxyErrorPage.CategoryNotAllowed,
+                            ProxyErrorPage.Details.ForRequest(request, rejectReason ?? "The in-tunnel request was refused.", ProxyErrorPage.DecidedByLocalListener).WithSuggestedAllowlistEntry()));
                         pending = head.Leftover;
                         continue;
                 }
@@ -573,7 +617,9 @@ namespace WebContent
             {
                 log($"Proxy fetch for {request.Uri} threw: {exception.Message}");
                 blocks?.Report(request.Uri, ProxyBlockReasons.TunnelRefused);
-                await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", $"The VMS proxy fetcher failed: {exception.Message}"));
+                await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                    502, "Bad Gateway", ProxyErrorPage.CategoryTunnelFailed,
+                    ProxyErrorPage.Details.ForRequest(request, $"The VMS proxy fetcher failed: {exception.Message}", ProxyErrorPage.DecidedByLocalListener)));
                 return null;
             }
 
@@ -587,6 +633,8 @@ namespace WebContent
             // names WHICH side failed - the Smart Client's channel to the VMS, the VMS server
             // itself, or the target behind it. A proxied workspace never falls back to a direct
             // connection, so an unexplained page would be a dead end for the admin.
+            // #66: the page itself is the friendly cause-category page; the failure's verbatim
+            // text rides in the collapsed technical section.
             var message = result == null ? "The VMS proxy fetcher returned no outcome." : result.ErrorMessage;
             if (result == null)
             {
@@ -602,7 +650,8 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
                         503,
                         "Service Unavailable",
-                        $"The VMS server proxy component is not available: {message} A proxied workspace is never loaded direct from this computer - make sure the Web Content plugin is deployed to the XProtect Event Server and the Event Server service is running."));
+                        ProxyErrorPage.CategoryComponentUnavailable,
+                        ProxyErrorPage.Details.ForRequest(request, message, ProxyErrorPage.DecidedByLocalAboutVms)));
                     return bodyOutcome.Remainder;
 
                 case ProxyFetchErrorCodes.NotAllowed:
@@ -612,7 +661,17 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
                         403,
                         "Forbidden",
-                        $"The VMS server also refuses this target, although the local workspace decision allowed it (the two machines' proxy allowlists differ): {message}"));
+                        ProxyErrorPage.CategoryNotAllowed,
+                        new ProxyErrorPage.Details
+                        {
+                            Method = request.Method,
+                            RequestUri = request.Uri,
+                            RawTarget = request.RawTarget,
+                            TechnicalMessage = message,
+                            DecidedBy = ProxyErrorPage.DecidedByVmsServer,
+                            Note = "The VMS server also refuses this target, although the local workspace decision allowed it (the two machines' proxy allowlists differ).",
+                            SuggestedAllowlistEntry = ProxyPolicy.CanonicalOrigin(request.Uri),
+                        }));
                     return bodyOutcome.Remainder;
 
                 case ProxyFetchErrorCodes.Timeout:
@@ -622,7 +681,8 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
                         504,
                         "Gateway Timeout",
-                        $"The VMS server could not get an answer from the target in time: {message}"));
+                        ProxyErrorPage.CategoryTargetTimeout,
+                        ProxyErrorPage.Details.ForRequest(request, message, ProxyErrorPage.DecidedByVmsServer)));
                     return bodyOutcome.Remainder;
 
                 case ProxyFetchErrorCodes.Unreachable:
@@ -630,7 +690,8 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
                         502,
                         "Bad Gateway",
-                        $"The VMS server could not reach the target (connection refused, DNS, or network failure at the server, not at this computer): {message}"));
+                        ProxyErrorPage.CategoryTargetUnreachable,
+                        ProxyErrorPage.Details.ForRequest(request, message, ProxyErrorPage.DecidedByVmsServer)));
                     return bodyOutcome.Remainder;
 
                 case ProxyFetchErrorCodes.TooLarge:
@@ -638,7 +699,8 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
                         502,
                         "Bad Gateway",
-                        $"The target's response exceeded the VMS proxy response size cap and was not relayed: {message}"));
+                        ProxyErrorPage.CategoryResponseTooLarge,
+                        ProxyErrorPage.Details.ForRequest(request, message, ProxyErrorPage.DecidedByVmsServer)));
                     return bodyOutcome.Remainder;
 
                 case ProxyFetchErrorCodes.TlsValidation:
@@ -646,12 +708,31 @@ namespace WebContent
                     await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
                         502,
                         "Bad Gateway",
-                        $"The VMS server refused the target's TLS certificate: {message}"));
+                        ProxyErrorPage.CategoryCertificateUntrusted,
+                        ProxyErrorPage.Details.ForRequest(request, message, ProxyErrorPage.DecidedByVmsServer)));
+                    return bodyOutcome.Remainder;
+
+                case ProxyFetchErrorCodes.NoAuthority:
+                    log($"Proxy fetch for {request.Uri} failed on the VMS server side (code={ProxyFetchErrorCodes.NoAuthority}): {message}");
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        502,
+                        "Bad Gateway",
+                        ProxyErrorPage.CategoryAuthorityUnavailable,
+                        ProxyErrorPage.Details.ForRequest(request, message, ProxyErrorPage.DecidedByVmsServer)));
                     return bodyOutcome.Remainder;
 
                 default:
                     log($"Proxy fetch for {request.Uri} failed (code={result?.ErrorCode}): {message}");
-                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(502, "Bad Gateway", message));
+                    await WriteAsync(output, ProxyForwardCodec.RenderErrorResponse(
+                        502,
+                        "Bad Gateway",
+                        result == null
+                            ? ProxyErrorPage.CategoryTunnelFailed
+                            : CategoryForFailure(result.ErrorCode, ProxyErrorPage.CategoryUnknownFailure),
+                        ProxyErrorPage.Details.ForRequest(
+                            request,
+                            message,
+                            result == null ? ProxyErrorPage.DecidedByLocalListener : ProxyErrorPage.DecidedByVmsServer)));
                     return bodyOutcome.Remainder;
             }
         }
@@ -675,7 +756,9 @@ namespace WebContent
             {
                 var reason = $"The proxy requires a Content-Length on request bodies; the chunked body for '{request.RawTarget}' is refused.";
                 log(reason);
-                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(411, "Length Required", reason));
+                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(
+                    411, "Length Required", ProxyErrorPage.CategoryMalformedRequest,
+                    ProxyErrorPage.Details.ForRequest(request, reason, ProxyErrorPage.DecidedByLocalListener)));
             }
 
             string contentLengthText;
@@ -691,14 +774,28 @@ namespace WebContent
             {
                 var reason = $"The Content-Length '{contentLengthText}' for '{request.RawTarget}' is not a usable size.";
                 log(reason);
-                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", reason));
+                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(
+                    400, "Bad Request", ProxyErrorPage.CategoryMalformedRequest,
+                    ProxyErrorPage.Details.ForRequest(request, reason, ProxyErrorPage.DecidedByLocalListener)));
             }
 
             if (declared > MaxRequestBodyBytes)
             {
                 var reason = $"The request body for '{request.RawTarget}' declares {declared} bytes, past the proxy's {MaxRequestBodyBytes} byte request cap.";
                 log(reason);
-                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(413, "Payload Too Large", reason), ProxyBlockReasons.TooLarge);
+                return RequestBodyOutcome.Refuse(
+                    ProxyForwardCodec.RenderErrorResponse(
+                        413, "Payload Too Large", ProxyErrorPage.CategoryRequestTooLarge,
+                        new ProxyErrorPage.Details
+                        {
+                            Method = request.Method,
+                            RequestUri = request.Uri,
+                            RawTarget = request.RawTarget,
+                            TechnicalMessage = reason,
+                            DecidedBy = ProxyErrorPage.DecidedByLocalListener,
+                            ByteCap = MaxRequestBodyBytes,
+                        }),
+                    ProxyBlockReasons.TooLarge);
             }
 
             if (declared == 0)
@@ -739,7 +836,9 @@ namespace WebContent
             {
                 var reason = $"The request body for '{request.RawTarget}' ended after {taken} bytes, short of its declared {declared}.";
                 log(reason);
-                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(400, "Bad Request", reason));
+                return RequestBodyOutcome.Refuse(ProxyForwardCodec.RenderErrorResponse(
+                    400, "Bad Request", ProxyErrorPage.CategoryMalformedRequest,
+                    ProxyErrorPage.Details.ForRequest(request, reason, ProxyErrorPage.DecidedByLocalListener)));
             }
 
             return RequestBodyOutcome.Accept(buffer, remainder);

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Net;
 using System.Text;
 
 namespace WebContent
@@ -240,15 +239,13 @@ namespace WebContent
         }
 
         /// <summary>
-        /// Render a locally-generated refusal page (400/403/405/502/504) the browser can display,
-        /// explaining the proxy's decision.
+        /// Render a locally-generated refusal page (400/403/405/413/502/503/504) the browser can
+        /// display (#54 framing; friendly cause categories + collapsed technical detail since #66).
+        /// The document itself is <see cref="ProxyErrorPage"/>; this owns only the HTTP framing.
         /// </summary>
-        internal static byte[] RenderErrorResponse(int statusCode, string reasonPhrase, string message)
+        internal static byte[] RenderErrorResponse(int statusCode, string reasonPhrase, string category, ProxyErrorPage.Details details = null)
         {
-            var safeMessage = WebUtility.HtmlEncode(message ?? string.Empty);
-            var bodyBytes = Encoding.UTF8.GetBytes(
-                $"<html><head><title>Web Content proxy: {statusCode}</title></head>" +
-                $"<body><h2>Web Content proxy: {reasonPhrase}</h2><p>{safeMessage}</p></body></html>");
+            var bodyBytes = Encoding.UTF8.GetBytes(ProxyErrorPage.RenderHtml(statusCode, reasonPhrase, category, details));
 
             var head =
                 $"HTTP/1.1 {statusCode} {reasonPhrase}\r\n" +

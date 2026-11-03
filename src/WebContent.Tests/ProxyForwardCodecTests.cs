@@ -169,9 +169,14 @@ namespace WebContent.Tests
         public void RendersErrorResponseWithProxyExplanationBody()
         {
             // Refusals (403 not allowlisted, 405 non-GET, 502 refused tunnel) carry an html body
-            // the browser can show, framed by the proxy itself.
+            // the browser can show, framed by the proxy itself. #66: the body is the friendly
+            // cause-category page; the verbatim refusal text rides inside the technical section.
             var rendered = System.Text.Encoding.UTF8.GetString(
-                ProxyForwardCodec.RenderErrorResponse(403, "Forbidden", "The origin 'http://evil.test' is not allowlisted."));
+                ProxyForwardCodec.RenderErrorResponse(
+                    403,
+                    "Forbidden",
+                    ProxyErrorPage.CategoryNotAllowed,
+                    new ProxyErrorPage.Details { TechnicalMessage = "The origin 'http://evil.test' is not allowlisted." }));
 
             Assert.StartsWith("HTTP/1.1 403 Forbidden\r\n", rendered);
             Assert.Contains("Content-Type: text/html; charset=utf-8\r\n", rendered);

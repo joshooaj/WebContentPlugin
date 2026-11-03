@@ -54,6 +54,7 @@
     <Compile Include="..\WebContent\ProxyLeafIssuer.cs" Link="ProxyLeafIssuer.cs" />
     <Compile Include="..\WebContent\ProxyLeafCorrelation.cs" Link="ProxyLeafCorrelation.cs" />
     <Compile Include="..\WebContent\ProxyForwardCodec.cs" Link="ProxyForwardCodec.cs" />
+    <Compile Include="..\WebContent\ProxyErrorPage.cs" Link="ProxyErrorPage.cs" />
     <Compile Include="..\WebContent\ProxyForwardPolicy.cs" Link="ProxyForwardPolicy.cs" />
     <Compile Include="..\WebContent\ProxyDiagnosticsAggregator.cs" Link="ProxyDiagnosticsAggregator.cs" />
     <Compile Include="..\WebContent\ProxySessionRegistry.cs" Link="ProxySessionRegistry.cs" />
