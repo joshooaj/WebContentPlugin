@@ -56,6 +56,7 @@
     <Compile Include="..\WebContent\ProxyForwardCodec.cs" Link="ProxyForwardCodec.cs" />
     <Compile Include="..\WebContent\ProxyErrorPage.cs" Link="ProxyErrorPage.cs" />
     <Compile Include="..\WebContent\ProxyForwardPolicy.cs" Link="ProxyForwardPolicy.cs" />
+    <Compile Include="..\WebContent\ProxyViewRefusal.cs" Link="ProxyViewRefusal.cs" />
     <Compile Include="..\WebContent\ProxyDiagnosticsAggregator.cs" Link="ProxyDiagnosticsAggregator.cs" />
     <Compile Include="..\WebContent\ProxySessionRegistry.cs" Link="ProxySessionRegistry.cs" />
     <Compile Include="..\WebContent\ProxyBlockReporter.cs" Link="ProxyBlockReporter.cs" />

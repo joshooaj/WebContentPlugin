@@ -14,7 +14,8 @@ namespace WebContent.UxTests;
 /// EXPLICIT proxy error page - never a spinner, never a page fetched direct from the client
 /// machine - for the two refusal families:
 ///   1. a start (home) URL whose origin is not on the workspace proxy allowlist renders the 403
-///      page as the workspace's start document;
+///      page as the workspace's start document (http over the proxy's absolute-form path;
+///      https - which Chromium only transports as CONNECT, #88 - at the view layer);
 ///   2. the Event Server (host of the server-side proxy component) going down mid-session renders
 ///      the 503 page naming that component, and a fresh client session recovers once the service
 ///      is back.
@@ -29,10 +30,19 @@ public class ScProxyErrorProbeTests
 
     /// <summary>
     /// A plain-HTTP origin deliberately NOT on the allowlist: as the workspace home it exercises
-    /// the start-URL refusal without the CONNECT posture (https refusals render at the Chromium
-    /// error surface, so they would not prove OUR page).
+    /// the start-URL refusal over the proxy's absolute-form path (the 403 + friendly page ride
+    /// the proxy response itself).
     /// </summary>
     private const string OffAllowlistHome = "http://neverssl.com/";
+
+    /// <summary>
+    /// #88: the SAME origin as an https home. Chromium transports https to the loopback listener
+    /// only as CONNECT, and a non-2xx CONNECT answer's body is dropped by Chromium (native
+    /// ERR_TUNNEL_CONNECTION_FAILED page), so the friendly refusal page for these refusals is
+    /// answered at the VIEW layer (ProxyViewRefusal via WebResourceRequested) - this row proves
+    /// the friendly page now renders there with the same facts, at the same committed URL.
+    /// </summary>
+    private const string OffAllowlistHttpsHome = "https://neverssl.com/";
 
     /// <summary>
     /// Split live-host run (SC-5): the Management Client phase and the Smart Client view may run on
@@ -158,6 +168,132 @@ public class ScProxyErrorProbeTests
         // the exact canonical allowlist entry that would admit it.
         Assert.Contains("not in the workspace proxy allowlist", bodyText);
         Assert.Contains("Allowlist entry that would admit this origin: http://neverssl.com", bodyText);
+    }
+
+    /// <summary>
+    /// #88: the https sibling of the start-URL row. Chromium routes https to the loopback
+    /// listener as CONNECT only, and Chromium DROPS the body of a non-2xx CONNECT answer - so
+    /// before the #88 view-layer gate this same workspace state rendered Chromium's native
+    /// "can't reach this page / ERR_TUNNEL_CONNECTION_FAILED" page (the pre-fix run of this row
+    /// is the live half of the root-cause repro). With the gate, the friendly 403 page renders
+    /// at the view, committed at the requested URL - the same posture as the http row.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "probe")]
+    public async Task ProbeProxiedStartUrlHttpsOutsideAllowlistShows403Page()
+    {
+        var config = UxConfig.Load();
+        Artifacts.Init(Path.Combine(Path.GetTempPath(), "webcontent-sc-proxy-probe"));
+        _output.WriteLine($"Artifacts: {Artifacts.RunDirectory}");
+
+        var log = new System.Text.StringBuilder();
+        string failure = null;
+        string title = null;
+        string bodyText = null;
+        string documentUrl = null;
+        bool? detailsOpen = null;
+        bool copyButtonPresent = false;
+        string previousHome = null;
+        ClientSession sc = null;
+        try
+        {
+            if (SkipMcProvisioning)
+            {
+                log.AppendLine("CONTROL: UX_SKIP_MC_PROVISIONING=1 - the off-allowlist https home " +
+                               $"was applied from another box against the same VMS ({config.VmsAddress}); this run only drives the view.");
+            }
+            else
+            {
+                previousHome = WorkspaceHomeAddress.Ensure(config, OffAllowlistHttpsHome, log);
+            }
+
+            CdpConnector.CleanStalePortFiles(config.WebView2DataRoot);
+            ProcessKiller.KillClients("Client");
+            ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+
+            sc = ClientSession.Launch(config.SmartClientExe);
+            var login = LoginFlow.WaitForLoginWindow(sc);
+            LoginFlow.Login(sc, login, config);
+            LoginFlow.AcceptCertificateTrust(sc);
+            var main = LoginFlow.WaitForSmartClientMain(sc);
+            SmartClientUi.Maximize(main);
+            Thread.Sleep(1500);
+            main = sc.Windows().First(w => w.AutomationId == "_mainApplicationWindow");
+
+            main = SmartClientUi.SelectWorkspace(main, sc, config.WorkspaceName);
+            var item = SmartClientUi.WaitForMipViewItem(main);
+            Assert.NotNull(item);
+
+            // The fingerprint guard restarts the browser at the NEW home; the first document is
+            // the refusal itself - no address-bar interaction, exactly like the http row.
+            await using var cdp = new CdpConnector();
+            var browser = await cdp.ConnectFirstAvailableAsync(config.WebView2DataRoot);
+            var page = await CdpConnector.WaitForPageAsync(browser, "neverssl.com", timeoutSeconds: 90);
+            await page.WaitForSelectorAsync("body", new PageWaitForSelectorOptions { Timeout = 30000 });
+
+            title = await page.TitleAsync();
+            documentUrl = page.Url;
+            var body = await page.QuerySelectorAsync("body");
+            bodyText = body == null ? null : await body.TextContentAsync();
+
+            detailsOpen = await page.EvalOnSelectorAsync<bool?>("details", "el => el.open");
+            copyButtonPresent = await page.QuerySelectorAsync("#wdc-copy") != null;
+
+            log.AppendLine($"start document -> url='{documentUrl}' title='{title}'");
+            log.AppendLine($"body: {Summarize(bodyText)}");
+
+            await page.ScreenshotAsync(new PageScreenshotOptions { Path = Artifacts.PathOf("sc-error-probe-starturl403-https.png") });
+        }
+        catch (Exception ex)
+        {
+            failure = $"{ex.GetType().Name}: {ex.Message}";
+            log.AppendLine($"probe failed: {failure}{Environment.NewLine}{ex}");
+        }
+        finally
+        {
+            ProcessKiller.KillClients("Client");
+            ProcessKiller.KillClients("VideoOS.Administration");
+            ProcessKiller.KillPluginWebView2Browsers("SmartClient.WebContentData");
+            sc?.Dispose();
+            if (previousHome != null)
+            {
+                try
+                {
+                    WorkspaceHomeAddress.Ensure(config, previousHome.Trim(), log);
+                    log.AppendLine($"workspace home address restored to '{previousHome.Trim()}'");
+                }
+                catch (Exception ex)
+                {
+                    log.AppendLine($"!!! home restore FAILED ('{previousHome.Trim()}'): {ex.Message}");
+                }
+            }
+            Artifacts.WriteText("sc-error-probe-starturl403-https-results.txt", log.ToString());
+            _output.WriteLine(log.ToString());
+        }
+
+        Assert.True(failure == null, $"probe run failed: {failure}{Environment.NewLine}{log}");
+
+        // The refusal committed at the REQUESTED url - history/address-bar posture identical to
+        // the http row (no synthetic error-page url, no cancelled navigation).
+        Assert.NotNull(documentUrl);
+        Assert.StartsWith("https://neverssl.com", documentUrl);
+
+        // Our page, not Chromium's native CONNECT-failure page.
+        Assert.Equal("Web Content proxy: 403", title);
+        Assert.NotNull(bodyText);
+
+        // #66 friendly layer, same posture as the http row.
+        Assert.Contains("Not allowed by the administrator", bodyText);
+        Assert.Contains("This web address is not allowed for this view", bodyText);
+
+        Assert.NotNull(detailsOpen);
+        Assert.False(detailsOpen.Value, "the technical details section is expanded by default");
+        Assert.True(copyButtonPresent, "no Copy diagnostics button on the refusal page");
+
+        // The actionable facts: the verbatim refusal phrase plus the canonical https entry that
+        // would admit this origin (the scheme the user actually requested).
+        Assert.Contains("not in the workspace proxy allowlist", bodyText);
+        Assert.Contains("Allowlist entry that would admit this origin: https://neverssl.com", bodyText);
     }
 
     [Fact]

@@ -257,7 +257,14 @@ Event Server MIP log shows the probe event raised and seen on the bus with the s
   failing side — never a silent direct load and never an endless spinner. Each page carries a
   friendly headline, exactly one **cause category** chip, and a collapsed "Technical details"
   section (exact origin, the canonical allowlist entry that would admit it, the byte cap, the
-  verbatim refusal text, a "Copy diagnostics" button):
+  verbatim refusal text, a "Copy diagnostics" button). Off-allowlist **https** refusals ride the
+  page too (#88): Chromium transports every https target to the loopback proxy only as a CONNECT
+  and drops the body of a refused CONNECT, so the proxy's own page can never reach the screen for
+  those — the browser view answers the same 403 page itself, at the requested URL, before any
+  CONNECT is opened, using the exact same allowlist the proxy gates on. The one remaining
+  asymmetry: **ws:// / wss:// websocket upgrades** are refused at the CONNECT layer and still
+  render Chromium's native error page (websocket requests are not surfaced to the view's
+  interception); fail-closed is identical everywhere — nothing is ever loaded direct.
   - **Not allowed by the administrator** (403) — the target origin is not in the workspace
     allowlist (the details name the origin and the exact entry to add). The same 403 also appears
     when the VMS server and the Smart Client disagree because their allowlists drifted.

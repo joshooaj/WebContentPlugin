@@ -219,6 +219,21 @@ namespace WebContent.Client
             // like the browser's own console clearing on navigation.
             webView.CoreWebView2.NavigationStarting -= CoreWebView2_NavigationStarting;
             webView.CoreWebView2.NavigationStarting += CoreWebView2_NavigationStarting;
+
+            // #88: a proxied browser also gets the https refusal gate. Chromium transports
+            // https targets to the loopback listener ONLY as CONNECT, and Chromium drops the
+            // body of a non-2xx CONNECT answer - the proxy's own 403 page can never reach the
+            // screen for those. WebResourceRequested sits above the proxy dispatch inside the
+            // browser stack, so the view can answer an off-allowlist https refusal there with
+            // the same friendly page, committed at the requested URL, before any CONNECT.
+            // (Plain http keeps riding the proxy's absolute-form 403; ws/wss upgrades are not
+            // surfaced by this event and keep the CONNECT posture - documented asymmetry.)
+            webView.CoreWebView2.WebResourceRequested -= CoreWebView2_WebResourceRequested;
+            if (ProxyListener != null)
+            {
+                webView.CoreWebView2.AddWebResourceRequestedFilter("https://*/*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
+                webView.CoreWebView2.WebResourceRequested += CoreWebView2_WebResourceRequested;
+            }
         }
 
         private void CoreWebView2_NavigationStarting(object sender, Microsoft.Web.WebView2.Core.CoreWebView2NavigationStartingEventArgs e)
@@ -230,6 +245,61 @@ namespace WebContent.Client
             catch (Exception ex)
             {
                 EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Blocked-resource reset failed for browser {Id}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// #88: the view-layer https refusal. The filter is registered only for proxied browsers;
+        /// allowlisted origins fall through untouched (no response set = the request proceeds to
+        /// the loopback listener exactly as before), and every refusal decision runs the ONE
+        /// shared ProxyPolicy matcher over the listener's live entry set - the view cannot
+        /// disagree with the listener, and nothing here can widen what loads. The block rides the
+        /// #83 tally (which forwards to the #69 ES reporter) exactly like the listener's own 403.
+        /// </summary>
+        private void CoreWebView2_WebResourceRequested(object sender, Microsoft.Web.WebView2.Core.CoreWebView2WebResourceRequestedEventArgs e)
+        {
+            try
+            {
+                var listener = ProxyListener;
+                var core = WebView?.CoreWebView2;
+                if (listener == null || core == null || e.Request == null)
+                {
+                    return;
+                }
+
+                if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri))
+                {
+                    return;
+                }
+
+                if (!ProxyViewRefusal.TryRefuseHttpsRequest(
+                        listener.CanonicalTargets,
+                        listener.VmsFloorHosts,
+                        uri,
+                        e.Request.Method,
+                        out var rejectReason,
+                        out var refusalHtml))
+                {
+                    return;
+                }
+
+                ProxyBlocks?.Report(uri, ProxyBlockReasons.NotAllowed);
+                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance),
+                    $"WebContent proxy: view-level https refusal for browser {Id}: {e.Request.Method} '{e.Request.Uri}' - {rejectReason} No CONNECT was opened and the browser is never taken direct.");
+
+                var content = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(refusalHtml));
+                e.Response = core.Environment.CreateWebResourceResponse(
+                    content,
+                    403,
+                    "Forbidden",
+                    "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff");
+            }
+            catch (Exception ex)
+            {
+                // A failing gate never becomes a browser fault: the request simply proceeds and
+                // the loopback listener's own decision table answers it (fail-closed unchanged).
+                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance),
+                    $"View-level https refusal gate failed for browser {Id}: {ex.Message}");
             }
         }
 
@@ -380,6 +450,7 @@ namespace WebContent.Client
                         {
                             WebView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
                             WebView.CoreWebView2.NavigationStarting -= CoreWebView2_NavigationStarting;
+                            WebView.CoreWebView2.WebResourceRequested -= CoreWebView2_WebResourceRequested;
                         }
                     }
 
