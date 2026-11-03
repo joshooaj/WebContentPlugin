@@ -53,6 +53,8 @@ is not evidence the plugin never ran.
 | MC exports the deployment proxy CA certificate over MIP messaging (provenance-independent, read-only, size-capped single frame) | #75 | `ProxyCaExportTests` (responder postures: authority present → Success with base64 DER + thumbprint + validity window; absent → `NoAuthority` with the actionable "does not exist yet" sentence, never an empty answer; expired/not-yet-valid and malformed entries refused by code, never silently skipped past; the fixed-CN finder opens `LocalMachine\Personal` with `ReadOnly | OpenExistingOnly` only — a source guard pins that no write/create flag can enter the export path — and several copies prefer the private-key one; wire codec round-trips the payloads as one JSON string with optional-member tolerance; correlation deadline silence → `ServerUnavailable`; the MC view builder NEVER yields a save for a success that carries no bytes — it renders the error copy instead; size caps: a REAL 2048-bit CA's DER frames under `MaxAuthorityDerBytes` (8 KiB) and its full response wire form stays under `MaxResponseWireChars` (16 KiB), the caps themselves pinned far under the proven ~87K-char single fetch-chunk headroom), `ProxyFetchContractGuardTests` extended (both new payloads stay plugin-namespace `[Serializable]` public-field types; `WebContent.Proxy.CaExportRequest`/`…Response` declared in `PluginDefinedMessageIds`; ids never end in "Command" so SecurityLevel.Normal clients can send) | See MC-15 below - **live row PASSED 2026-11-02** (run `20261102-154554`): the button answers for a CA this build did NOT create (legacy-script provenance, thumbprint `E4D254D5…`), and the `.cer` the Save As dialog writes is byte-identical to the certificate in the Event Server machine's live store |
 | MC Diagnostics tab: recently-blocked origins from the ES ring, one-click allowlist promotion into the Proxy grid (tab-gated polling on the Status query pair, same Manage gate, fail-closed) | #84 | `ProxyDiagnosticsViewTests` (failure postures mirror the Status tab - a lost query is never an empty table, the ES code survives, unknown workspace and no-channel read their own sentences; zero blocked origins is the honest empty message naming the in-memory/reset semantics; rows arrive pre-formatted newest-first with an origin-ordinal tiebreak, hits floored at 1, future timestamps clamp to "just now", never negative; the allowlist annotation runs the SAME shared `ProxyPolicy.IsRequestAllowed` matcher as the three gates - a wildcard entry or the VMS floor hosts marks a row already covered and drops its button; `CertUntrusted` rows never get the button, every other certified posture does; an unparsable origin names itself and refuses promotion), `ProxyAllowlistEditorTests` promotion section (the promotion IS a grid row: exact scheme+host+port, accept-untrusted never set, default ports canonicalise, dedupe is by canonical entry not typing, junk outside the exact-entry grammar refuses without touching the grid, the promoted row saves through the ordinary build as a structured record, `ValidCanonicalEntries` covers unsaved edits and skips broken rows), `WorkspaceTabShellGuardTests` (Diagnostics starts `Collapsed` + the identical Granted-only gate theory; the live tab carries exactly one read-only grid, its buttons carry only the two pinned handlers, the promote button hides via its `CanPromote` converter rather than disabling, no configuration input control anywhere on the tab, and the in-memory/resets copy is pinned as prose) | See MC-16 below - **live row PASSED 2026-11-02** (run `20261102-182628`): a live Smart Client refusal renders `http://172.16.128.210:18131 | not allowed by administrator` within the cadence while only the Diagnostics tab arms the marker loop; one click lands the exact origin in the Proxy grid UNSAVED, annotates the row `on allowlist`, hides its own button, arms Save, and the ordinary save discipline (audit line + reloaded-pane readback) stores it; after a pane reload the row re-annotates from stored config; allowlist restored with verified readback |
 
+| Per-workspace proxy response cap (5 MB default, hard 20 MB ceiling, clamp-on-read, MC Proxy-tab field) | #85 | `ProxyResponseCapStoreTests` (never-resolved store / unknown workspace / absent member / malformed 0-negative all answer the 5 MB default, never a refusal; a stored cap answers verbatim; a past-ceiling stored value clamps to 20 MB and gets exactly one audit line naming the workspace per refresh; a resolver failure after a good resolve keeps last-known-good caps; flap resilience across alternating refreshes; the 60 s window means one resolve per burst; `ForResponseCapBytes` factories clamp identically), `ProxyConfigurationTests` cap section (pre-#85 definitions read `ProxyMaxResponseBytes=0`; a stored value round-trips VERBATIM even past the ceiling - the clamp is on every read, never a silent rewrite at save time; the default stores 0 and the blob never grows the member - `EmitDefaultValue=false`), `ConfigResilienceTests` cap section (blank/whole-MB-inside-1..20 accepted, everything else refused BY NAME with the rejected text - no silent zoom-style clamp in the UI; MB→bytes mapping stores 0 for the default; bytes→display clamps honestly both ways; the admin ceiling and the contract's `MaxAllowedResponseBytes` are pinned in lockstep), `ProxyFetchCorrelationTests` (the client receive guard bounds allocation against the 20 MB PROTOCOL ceiling, not the old 5 MB default - a hostile `ceiling+1` declaration still errors, while a 6 MB framed answer reassembles), `WorkspaceTabShellGuardTests` (the Proxy tab carries `lblProxyResponseCap`/`txtProxyResponseCapMB`/`lblProxyResponseCapHint`, the field's explicit AutomationId and `OnProxyResponseCapTextChanged` handler pinned) | See MC-17 below - **live rows PASSED 2026-11-02** (run `20261102-210935`): the default posture refuses a REAL 10 MB download with `TooLarge ... exceeded the 5242880 byte response cap`; saving 12 MB flips the SAME download to `HTTP 200 - 10485760 bytes fetched` inside the 60 s ES refresh window (which also proves the raised client receive guard); `99999` refuses the whole save by name with zero new cap-audit lines while the ES keeps serving the stored cap; restoring 5 re-arms the refusal |
+
 ## Manual host checks
 
 Run after deploying new build output (`Invoke-psake -taskList Build, DeployLocally, DeployToVms`;
@@ -573,6 +575,62 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    audit enumerated all seven entries, the reloaded pane read it back, re-opening Diagnostics
    re-annotated `on allowlist` from stored config (`41s ago`), and the six-line allowlist was
    restored with audit+readback verified.
+
+### MC-17 Per-workspace response cap: default, raise, refusal, restore (#85)
+
+Needs the drop deployed on BOTH machines (the cap store lives on the Event Server; the field and
+the fetch harness live in the MC). The probe (`McProxyResponseCapProbeTests`, run via
+`Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~McProxyResponseCap' }`)
+pins five things, each by a live round trip:
+
+1. Provisioning: the probe origin (`https://proof.ovh.net`) goes into the Proxy grid AND the cap
+   field is normalized to the default in ONE save — the idempotent baseline, since an interrupted
+   earlier run may have left a raised cap stored.
+2. Default posture: fetching `https://proof.ovh.net/files/10Mb.dat` through the Proxy-tab harness
+   answers `Proxy fetch TooLarge ... exceeded the 5242880 byte response cap.` — the refusal names
+   the cap that produced it.
+3. Raised cap: typing `12` + Save writes the `Stored proxy response cap ... : 12 MB.` audit line
+   and the reloaded pane reads back `12`; polling the SAME fetch flips to
+   `HTTP 200 - 10485760 bytes fetched` within the store's 60 s refresh window. The success also
+   proves the CLIENT receive guard moved to the 20 MB protocol ceiling — a client still guarding
+   at the old default would reject the 10 MB answer on the way back in.
+4. Refusal: typing `99999` + Save raises the `Invalid address` notice naming the rejected text,
+   the MC MIP.log gains `invalid proxy response cap '99999'`, NO new cap-audit line appears, and
+   the ES keeps serving the stored cap (the fetch still succeeds) — nothing partial reached storage.
+5. Restore: typing `5` + Save re-arms the TooLarge refusal at 5242880 within a refresh window —
+   the cap is live in BOTH directions; then the workspace's own allowlist and cap are restored,
+   verified audit + reloaded pane, teardown answers `Save changes?` with NO (`RejectPendingModal`).
+
+Harness truths the live rows taught (each one burned a run, MC-17):
+
+* `proof.ovh.net` answers `HTTP 301` on plain http (the harness does not follow cross-scheme
+  redirects) — use the https origin and allowlist it as `https://...`; and the classic `6Mb.dat`
+  is gone (404) while `10Mb.dat` (10 485 760 bytes) is the live fixed-size file.
+* A refused cap edit proves storage untouched SERVER-SIDE, not by pane readback: on reselecting
+  the same tree item the MC runs the platform fill through a state where its dirty chain throws
+  `Not valid to set dirty state at this time!!!` — a TextBox interrupted mid-fill keeps whatever
+  the user typed, so the "reloaded pane still reads the old value" claim is only honest when the
+  stored value and the typed value differ ONLY via audit lines and ES behavior. Phase 5 asserts
+  the cap-audit line count does NOT move and the fetch keeps succeeding instead.
+* The baseline must self-heal: a stored cap equal to the probe's own raise value is leftover from
+  an interrupted run and normalizes to the default, exactly like probe-host allowlist rows.
+* The ES cap store refreshes at most every 60 s, and the window may have just been armed by the
+  pre-change fetch — the raise phase polls the fetch itself (up to 120 s) and the poll trail is
+  the evidence of the refresh cadence, not a sleep.
+
+Record (MC-17) - **live rows PASSED 2026-11-02**, green run `20261102-210935` (6 m 14 s), drop
+`WebContent.dll` SHA-256 `3627C762.` (1 388 032 bytes) hash-verified in the local install folder
+and deployed to the Event Server via `DeployToVms`. Chain from the results file: baseline cap `5`
+after leftover normalization; `default-cap fetch -> Proxy fetch TooLarge after 2.1s - Response body
+from https://proof.ovh.net exceeded the 5242880 byte response cap.`; `stored cap '12' MB verified
+from the audit line AND a reloaded pane`; three `TooLarge ... (re-polling)` rows inside the refresh
+window then `raised-cap fetch -> HTTP 200 - 10485760 bytes fetched in 9.4s`; `refusal notice:
+Invalid address OK '99999' is not a valid proxy response size ...`; `cap audit lines after the
+refused save: 12 -> 12` with `post-refusal fetch -> HTTP 200 - 10485760 bytes fetched in 9.2s`;
+`restored-cap fetch -> ... TooLarge ... 5242880 ... (cap live in both directions)`; `allowlist and
+cap ('5') restored (verified from reloaded panes)`. Four earlier red runs contributed the harness
+truths above (301 on http, 404 on 6Mb.dat, the fill-interrupt readback lie, and the missing
+restore-phase grid edit).
 
 ### SC-1 End-to-end proxied page load (#54)
 
@@ -1179,4 +1237,4 @@ ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all 
   ever refactored, extract the policy into a pure class first and move MC-4's backoff
   assertions into the suite.
 - WebView2/Smart Client UI behavior (actual page render, WPF address-bar visuals) cannot be
-  unit-tested at the pure seams; MC-1–MC-15 (plus ES-1 and SC-1) are the release gate for those.
+  unit-tested at the pure seams; MC-1-MC-17 (plus ES-1 and SC-1) are the release gate for those.
