@@ -241,29 +241,48 @@ page and the OS-proxy harness never sees a single request for that origin.
 ### The server side is the XProtect EVENT SERVER
 
 The component that performs the fetches runs **inside the XProtect Event Server process — not the
-Management Server**. The plugin drop (the MSI, or the build output) must be installed on the
-machine running the Event Server as well as on every Smart Client machine. The plugin definition
-loads in the `Service` environment, and the Event Server only loads MIP plugins at **service
-start**, so a deployment includes a service restart. Use the release MSI on that machine, or run
-the documented script from any admin workstation:
+Management Server**. The machine running the Event Server needs the plugin drop installed on it as
+well as on every Smart Client machine. The plugin definition loads in the `Service` environment, and
+the Event Server only loads MIP plugins at **service start**, so a deployment includes a service
+restart.
 
-```powershell
-.\scripts\deploy-event-server-plugin.ps1 -ComputerName <event-server> -Credential <VMS admin account>
-```
+**The supported way to deploy to that machine is the release MSI, run on the machine itself** — the
+same `CascadiaWebContentPlugin.<version>.msi` as everywhere else. On an Event Server machine it:
 
-The script stops the Event Server service and waits for it to stop (the dll is locked while it
-runs), copies the drop into `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin`,
-verifies every copied file by **SHA-256 hash against the source** (timestamps prove nothing — the
-copy preserves them), and restarts the service. Two follow-ups matter after any Event Server
-plugin deployment:
+- stops `MilestoneEventServerService` (waiting for the real stop, no fixed sleep) **only** when the
+  plugin is already installed there, copies the files into
+  `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin`, and restarts the service per the
+  wizard's **Restart the Event Server now?** choice — first installs never stop the running service,
+  and machines without an Event Server see none of this (see the install section above);
+- on a first install with the service running, installs the files without touching the service —
+  the plugin then loads at the next Event Server start;
+- runs unattended as `msiexec /i CascadiaWebContentPlugin.<version>.msi /qn` (add
+  `RESTART_EVENT_SERVER=0` to leave the restart scheduled by hand).
+
+Verify any deployment by **SHA-256 hash against the build drop**, never by timestamp (the copy
+preserves `LastWriteTime`), and confirm the fetcher loaded by checking the Event Server's MIP log
+for `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest)` — or use the
+Management Client workspace page's **Test proxy fetch** row for an end-to-end check.
+
+One caveat for a machine whose drop was previously placed by file copy rather than by the installer:
+files a `Copy-Item` left behind are untracked by MSI, and a stray at the **same file version** as the
+MSI's payload shadows it during an upgrade — the registration bumps while the stray stays. The
+supported migration is a pure-`msiexec` uninstall/install cycle: stop `MilestoneEventServerService`,
+`msiexec /x {product-code} /qn` (this also removes the strays, which the upgrade has now registered),
+confirm the drop folder is gone, then run the new MSI. Verified live in `docs/verification-matrix.md`
+(IN-3).
+
+`scripts/deploy-event-server-plugin.ps1` (and the psake `DeployToVms` task) are **dev/test shortcuts**:
+the remote, repeatable file-copy form of the old procedure for lab machines. They are not the
+supported deployment path, and they explicitly do **not** set up proxy support — the certificate
+authority for `https://` targets is the separate one-time setup above either way.
+
+Two follow-ups matter after any Event Server plugin deployment:
 
 - **Restart every Smart Client that was connected before the restart.** The Event Server restart
   disposes each client's messaging channel; without a Smart Client restart every proxied page
   fails with the proxy's "server proxy component is not available" error page (and the log shows
   `Call to TransmitMessage after call to Dispose?`).
-- Confirm the fetcher loaded by checking the Event Server's MIP log for
-  `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest)` — or use the
-  Management Client workspace page's **Test proxy fetch** row for an end-to-end check.
 
 ### Rule triggers (fire VMS rules from proxied requests)
 

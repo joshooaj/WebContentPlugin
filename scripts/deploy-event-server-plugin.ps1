@@ -1,8 +1,11 @@
 <#
 .SYNOPSIS
-  Deploy (or update) the Web Content plugin drop on the machine running the
-  XProtect Event Server, so the server-side proxy component (fetcher, leaf
-  issuer, tunnel server) is loaded there. Ticket #59.
+  DEV/TEST shortcut (#68): deploy (or update) the Web Content plugin drop on the machine
+  running the XProtect Event Server, so the server-side proxy component (fetcher, leaf
+  issuer, tunnel server) is loaded there. Ticket #59. The SUPPORTED deployment path on
+  that machine is the release MSI run THERE (README + verification-matrix IN-3); a
+  file-copy deploy leaves untracked strays that shadow a later MSI upgrade at equal
+  file version, and it never sets up proxy support (the CA setup is separate either way).
 
 .DESCRIPTION
   The proxied-workspace feature is both-machine: Smart Client needs the plugin
@@ -40,9 +43,10 @@
   - The one-time certificate-authority setup for https targets is
     provision-event-server-authority.ps1 (README), run after this deployment.
 
-  The MSI installer from the release does the same placement on the Event
-  Server machine when run there interactively; this script is the remote and
-  repeatable form of the same procedure.
+  The release MSI run ON the Event Server machine is the SUPPORTED path (#68): it does
+  the same placement and - since #82 - drives the service stop/wait/restart itself for
+  existing installs. This script is the remote, repeatable form kept only as a dev/test
+  shortcut for lab machines.
 
 .PARAMETER ComputerName
   The machine running the XProtect Event Server.

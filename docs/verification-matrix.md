@@ -60,6 +60,7 @@ is not evidence the plugin never ran.
 | Per-workspace proxy rule triggers: MC Proxy-tab "Rule triggers" grid (URL/method/status), whole-save grammar guardrail sharing the Event Server's `ProxyTriggerPolicy` matcher grammar | #78 | `ProxyTriggerEditorTests` (blank rows skipped not refused; url-required / mid-host-wildcard url / out-of-grammar status each refused by code; the WHOLE build refused by name with nothing partial returned; configuration order preserved and null members kept compact (any-method `*` and blank status store as null); stored rows with unrenderable method verbs dropped at Load and counted for the log; the fixed event type and the method dropdown set pinned to the matcher's constants; the grid's validation and the Event Server's matcher ACCEPT AND REFUSE THE SAME ROWS - `ProxyTriggerPolicy`'s normalizers are the single grammar both call), `WorkspaceTabShellGuardTests` (the trigger grid + Add button + hint carry their AutomationIds on the Proxy tab, not the Settings tab; every row's Event cell is a non-editable TextBlock; the XAML method array never drifts from `ProxyTriggerEditor.ProxyTriggerMethods`) | See MC-19 below - **live rows PASSED 2026-11-03** (run `20261103-031310`): a two-row trigger list (an exact-status row + an any-method wildcard-host row) stores through the audit line AND order-sensitive reloaded-grid readback with the fixed event type shown in the read-only Event column on every row, typed AND reloaded; three invalid-row cycles (mid-host-wildcard url / status `600` / a method with no url) each pin the live Problem text, the notice naming the row verbatim, the `invalid proxy trigger row(s)` MIP.log marker, and zero new audit lines; an emptied grid stores no trigger section (`0 row(s) []`) |
 | Installer upgrade with Milestone clients running (MSI force-closes Smart Client / Management Client instead of failing 1603 on locked plugin dlls) | #70 | `build.ps1` structural guard (parses `wix-wid.xml` out of the versioned `.wixpdb`: the `Wix4CloseApplications_*` action is scheduled after InstallInitialize and before RemoveFiles/InstallFiles, RemoveExistingProducts is after InstallFiles, and the three kill targets - `Client.exe`, `VideoOS.Administration.exe`, `VideoOS.OAuth2TokenGenerator.exe` - are in the `Wix4CloseApplication` table) | See IN-1 below - **all live rows PASSED 2026-11-03** on the VMS machine with the clients launched in a real interactive session and `WebContent.dll` proven LOCKED first: uninstall, fresh install, and an upgrade - each with `Client.exe` + `VideoOS.Administration.exe` running - answered exit code 0, killed the clients, and left a hash-verified drop |
 | Plugin upgrade on an Event Server machine dying on the running service's locked drop, or racing a half-stopped service: the MSI stops `MilestoneEventServerService` only for existing installs, waits for the REAL Stopped state (no fixed sleep), installs, and restarts it per the wizard's finish-page choice - first installs and no-ES machines never stop or prompt | #82 | `EventServerServiceCtlTests` (exit-code decision table), `InstallerEsServiceFlowGuardTests` (authored condition/sequence/Binary pins), `build.ps1` compiled-package guard (1026 actions at 1502/4001, condition needles, choice-page hop) | See IN-2 below - **all live rows PASSED 2026-11-03** on the VMS machine with a 250 ms service-state journal: upgrade-Yes (stop->copy->start), upgrade-No (left Stopped), first-install (never stopped, start only on Yes), uninstall (untouched), and the no-ES machine (both actions skipped) - each exit 0 with the drop hash-verified |
+| MSI on the Event Server machine is THE supported deployment path; remote Copy-Item (psake `DeployToVms`, `deploy-event-server-plugin.ps1`) is a dev/test shortcut that never sets up proxy support and whose unregistered strays shadow an upgrade at equal file version | #68 | Docs + live rows (no new code surface); consumes the #70/#82 build-time guards | See IN-3 below - **live rows 2026-11-03** on the VMS machine: upgrade `0.1.282.22971` (+`0.1.284.59742` Copy-Item drift) → `0.1.287.14301` exit 1641 caught the shadow (12/13 hash-identical, the `1.0.0.0`-versioned trust-helper stray survived); the supported pure-`msiexec` uninstall/install migration then ended **13/13 hash-identical**, single registration, stop-action skipped, restart-action started the service, `Proxy fetcher ready` marker after the install, ES left Running |
 | OS-configured (WinINET) proxy inheritance for non-proxied views, and the deliberate contrast for proxied views (loopback pin wins; no admin-facing proxy-URL setting exists because the OS owns that layer) (#67) | #67 | `ProxyBrowserArgumentsTests` (the pin itself: every scheme routed to the loopback listener, `<-loopback` bypass off - nothing falls back to the system path); the inheritance claim is a live-host fact, pinned by the SC-8 probe rows below (`ScOsProxyInheritanceProbeTests`: WinINET snapshot/apply/restore, a logging forward-proxy harness on loopback, live `Win32_Process` command-line reads of the plugin's browser processes) | See SC-8 below: routing OFF + the per-user WinINET proxy pointed at the harness - the non-proxied view renders the harness marker page for an RFC 2606 `.invalid` host (which can never resolve, so a served page can only have ridden the OS proxy) with the browser's absolute-form GET in the journal and NO proxy switch on any browser command line; routing ON + the SAME OS proxy + the SAME url - the plugin's 403 page renders, the harness journals nothing for the origin, and the live browser command lines carry `--proxy-server=http=http://127.0.0.1:<listener>;...` plus `--proxy-bypass-list=<-loopback>`. **BEAST 2026-11-03: both rows PASSED** (`20261103-035256`, `20261103-040006`) |
 | Managed workspaces: security-relevant Smart Client view settings locked with "Managed by Administrator", cosmetic settings stay per-instance editable (locked-key overrides can never reach runtime) | #71 | `WorkspaceSettingLocksTests` (managed decision from the persisted WorkspaceId/DefinitionFingerprint; the locked set is exactly HomeAddress + legacy Address + ProxyEnabled + ProxyTargets, cosmetic/navigation keys never locked, identity keys never settings; seed decision table - locked/identity keys always enforced, cosmetic keys take the definition as initial value or re-initialise on definition change but a per-instance override survives inside an unchanged definition), `WorkspaceInstancePropertiesTests` #71 rows (hand-edited HomeAddress overwritten; definition proxy posture + allowlist enforced over stored values; cosmetic override kept, absent cosmetic seeded, changed definition re-initialises it; identity/fingerprint always enforced), `ManagedViewPropertiesPaneGuardTests` (home TextBox pins IsEnabled/ToolTip bindings + probe AutomationIds; both admin notices render only for managed items via one converter; NO cosmetic control declares an IsEnabled binding) | See SC-9 below - **live row PASSED 2026-11-03** (run `20261103-043150`, drop `3C777113…F63475`): Home renders disabled with the pinned URL visible + the admin note under Home AND Proxy, the checkbox stays enabled and its per-instance ON-state survives a full exit/re-enter-setup re-seed, locks still locked afterwards, `WebContent workspace seed:` marker in MIPLog; the standalone zero-change branch is pinned by the unit table + pane guard (no standalone view item in the lab) |
 | Untrusted deployment CA: banner for every user on proxied views, setup-mode-only elevated fix through a thumbprint-locked bundled helper, mid-session heal without restart (#72) | #72 | `ProxyCaTrustStateTests` (posture holder: Changed fires only on real flips, case-insensitive thumbprint equality, proxy-off Clear, throwing subscriber swallowed) + `ProxyLoopbackTlsTrustPostureTests` (every mint publishes from the LOCAL root-store probe not the wire, cache short-circuits republication, `InvalidateLeafCache` re-mint flips the posture with no restart); `ProxyTrustHelperTests` (usage matrix, unreadable 3, garbage/oversize/empty refused 2 before parsing, thumbprint mismatch = store never touched, matched = exactly one import with the verified cert, store exit propagates); `ProxyCaTrustBannerWiringGuardTests` (banner elements + Collapsed defaults, setup-only fix gate, `Verb="runas"` + NO in-process LocalMachine write in the view code, 1223 quiet + independent re-verification, invalidate+reload on confirmed fix, navigation re-check heals external fixes, drop ships but never links the helper) | See SC-10 below - **live rows PASSED 2026-11-03** (runs `20261103-053747`/`20261103-053809`/`20261103-053825`, drop `01D9D8A8…3789` both machines): deployed helper refuses every negative path with the pinned exit codes and zero dialogs (incl. the unprivileged store refusal = 4); the helper's FULL success path verified end-to-end ON the Event Server (import -> present -> remove -> absent, self-cleaned); trusted lab state shows no CA chrome on the live proxied view. The untrusted-live row (SC-10 row 4) is an elevated human step: both root stores refuse unattended removal on the client machine |
@@ -1242,6 +1243,10 @@ the view (title `Web Content proxy: <status>`) whose body names which side faile
 
 ### DP-1 Event Server deployment script and rollout records (#59)
 
+> **Superseded as the deployment path by #68 (2026-11-03):** the SUPPORTED way to deploy to the
+> Event Server machine is the MSI run on that machine (see IN-3); the script below remains the
+> dev/test remote shortcut. The records below stay as the historical rollout evidence.
+
 The proxied feature is both-machine; the Event Server side has a deployment the installer
 cannot shortcut (plugins load only at service start). `scripts/deploy-event-server-plugin.ps1`
 is the remote, repeatable form of the documented procedure: local pre-check that the drop
@@ -1759,6 +1764,59 @@ plugin was already installed), the **Restart the Event Server now** checkbox TIC
 client-disconnect warning paragraph, through to the finish page — 2026-11-03, screenshots reviewed. The
 same package on the same machine WITHOUT the forced property showed no option page at all (the
 requirement-3 posture, observed in the UI, not just in the action table).
+
+### IN-3 MSI as the supported Event Server deployment path (#68)
+
+The supported way to bring the Event Server machine current is the release MSI run THERE
+(README "The server side is the XProtect EVENT SERVER"); remote `Copy-Item` (psake `DeployToVms`,
+`scripts/deploy-event-server-plugin.ps1`) is demoted to a dev/test shortcut: not supported for
+real deployments, and it never sets up proxy support (the CA one-time setup is separate either way).
+The live rows below ran on `vms.joshooaj.com` (XProtect 2024 R2) against
+`CascadiaWebContentPlugin.0.1.287.14301.msi` built from HEAD `37dd625` by `.\build.ps1` (the #70/#82
+compiled-package guards green in the same build), staged into the machine's temp folder via
+`Copy-Item -ToSession` on a credential WinRM session (`.env` + `.secretstore` bootstrapping) and
+hash-verified remotely (MSI SHA-256 `C76A6E56…D3D05F4`) before every `msiexec` call. A 500 ms
+service-state poller journaled `MilestoneEventServerService` from a second session.
+
+1. **Upgrade over a drifted machine - PASSED with a caught shadow, 2026-11-03 12:36.** Machine
+   state deliberately reflects the dev-shortcut legacy: MSI registration `0.1.282.22971`, drop
+   files Copy-Item-bumped to `0.1.284.59742` (`WebContent.dll` `BA938406…A5A803`). `msiexec /i
+   <msi> /qn /l*v <log>` (RESTART_EVENT_SERVER default Yes) → **exit 1641** (WebView2 piece
+   requests a reboot; same as IN-2 row 1), journal `Running → StopPending → Stopped (…57.3) →
+   StartPending (…58.8) → Running (…59.3)` with the MSI log carrying `StopEventServerService`
+   (type 1026, `stop MilestoneEventServerService`) and `RestartEventServerService` (1026, `restart
+   MilestoneEventServerService`), `MainEngineThread is returning 1641`, and the registration
+   bumped to exactly ONE entry `0.1.287.14301`. **Hash verification caught the drift shadow:
+   12/13 files identical - the trust-helper exe kept the old 284-build content.** Root cause: the
+   Copy-Item stray is unregistered by MSI, `WebContentTrustHelper.exe` carries file version
+   `1.0.0.0` (the helper csproj is not version-stamped by nbgv like the plugin dll), and the copy
+   rules do not replace an existing file at an EQUAL version. Registered versioned files
+   (`WebContent.dll` 0.1.284→0.1.287) replaced fine.
+2. **Supported migration of a drifted machine (pure-`msiexec` uninstall/install) - PASSED
+   2026-11-03 12:44.** Stop `MilestoneEventServerService` and wait for the real Stopped (the
+   documented uninstall precondition - #82 deliberately stops nothing on REMOVE);
+   `msiexec /x {C1D583C8-0F70-4B92-B4CC-A8F219D22486} /qn /l*v <log>` → **exit 0**, registrations
+   1→0, **drop files 13→0**: the upgrade had registered the stray under the new product, so the
+   pure-MSI uninstall removed it too - no manual folder cleanup needed;
+   `msiexec /i <same msi> /qn /l*v <log>` → **exit 0** - a true first-install posture:
+   `Skipping action: StopEventServerService (condition is false)` (drop absent at costing),
+   `Doing action: RestartEventServerService` started the service (journal
+   `Stopped → StartPending (…29.99) → Running (…30.99)`), one registration `0.1.287.14301`.
+   **Drop hash verification PASSED: 13/13 files identical** (`WebContent.dll`
+   `C3CF5B4D…08240BC6`, `WebContentTrustHelper.exe` `EE1BDB25…6D86981C`). The Event Server LOADED
+   the MSI drop: `%ProgramData%\Milestone\XProtect Event Server\logs\MIP.log` gained
+   `Proxy fetcher ready (concurrency=3, request id=WebContent.Proxy.FetchRequest, …)` at
+   `2026-11-03 12:44:37.837-08:00`, service left `Running`. Remote temp (MSI copy + both verbose
+   logs + journal) cleaned after the run.
+
+Machine state after the rows: ES on the HEAD-built `0.1.287.14301`, MSI-registered, hash-identical
+to `output\WebContent\`; Smart Clients connected before 12:44 need the usual restart. The dev
+machine keeps its `0.1.284.59742` Copy-Item drop (no acceptance row required it; a local MSI
+install would need elevation). Pre-existing noise, NOT deployment fallout: the ES MIP log carries
+`ResourceLoader.get_CompanyLogo` stack lines at service start (568 hits in the current log,
+including pre-migration entries written by the 284 dll) while the fetcher still comes up ready.
+Follow-up filed for the versionless helper (future upgrades self-heal over drifted labs once its
+file version rides the build version like `WebContent.dll` does).
 
 ## Known high-risk regressions → pinned by
 

@@ -36,6 +36,8 @@ Smart Client MIP plugin (WebView2 browser view). Plugin project `src/WebContent`
 
 ## Deploy for live-host testing
 
+The SUPPORTED deployment path (since #68) is the release MSI run on each machine — including the Event Server machine, where the installer's #82 flow stops/starts `MilestoneEventServerService` for existing installs (see README "The server side is the XProtect EVENT SERVER" + verification-matrix IN-3). The psake deploy tasks below (Copy-Item over PSSession) are a **dev/test shortcut** — fine for lab iteration, explicitly not supported for real deployments, and they do not set up proxy support. They also leave unregistered files that shadow a later MSI upgrade at equal file version (the #82 `WEBCONTENTPLUGINPRESENT` probe covers the service-stop; the supported repair for a drifted machine is a pure-`msiexec` stop-service → `/x {product-code} /qn` → `/i <msi> /qn` cycle, verified live in IN-3).
+
 Use the psake deploy tasks (see Build); they encode the procedure below.
 
 1. Local machine: `Invoke-psake -taskList Build, DeployLocally` — kills plugin hosts (`Client`, `VideoOS.Administration`), wipes and recreates `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin` (the `INSTALLFOLDER` from `src/Setup/setup.wxs`), copies the drop. No elevation needed: the current user has full control on that folder (deliberate ACL grant on this machine — `C:\Program Files\VideoOS\MIPPlugins` is the MIP root; both `Milestone\MIPPlugins` and `VideoOS\MIPPlugins` are valid roots, OEM compatibility). If a copy ever fails on access denied, re-check the ACL before reaching for `Start-Process -Verb runas`; if hosts survive the Stop-Process, escalate to `-Force`.
