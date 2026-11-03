@@ -54,6 +54,16 @@ namespace WebContent.Client
 
         internal ProxyViewSessionContext Session => _session;
 
+        /// <summary>
+        /// #88: the live gate state the view-layer https refusal consults - the exact entries the
+        /// listener itself matches, swapped live by <see cref="UpdateTargets"/>. The view and the
+        /// listener consume ONE <see cref="ProxyPolicy"/> matcher over ONE entry set, so a request
+        /// the view refuses is a request the listener would have refused (and vice versa).
+        /// </summary>
+        internal IReadOnlyList<string> CanonicalTargets => _canonicalTargets;
+
+        internal IReadOnlyList<string> VmsFloorHosts => _vmsFloorHosts;
+
         internal LoopbackProxyListener(
             IReadOnlyList<string> canonicalTargets,
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
