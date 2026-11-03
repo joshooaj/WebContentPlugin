@@ -66,7 +66,20 @@ also carries a `CascadiaWebContentPlugin.<version>.msi.sha256.txt` file that you
 Click **Keep**, and if your browser asks again, click **Keep anyway**. The installation experience will improve when I
 get a code signing certificate setup.
 
-The installer is very simple and has no options. Acknowledge the license, and then it will install the Microsoft Edge
+The installer has one page beyond the license: when the machine runs an **Event Server** (`MilestoneEventServerService`)
+and the plugin is already installed there, the wizard shows an **Event Server options** page with a
+**Restart the Event Server now?** checkbox (checked by default). Upgrading the plugin on that machine stops the service
+first (waiting for the real stop), copies the files, and the checkbox decides whether the installer starts it again at
+the end — clearing it leaves the service stopped so you can schedule the restart yourself. The restart matters: the new
+plugin files only load when the Event Server (re)starts, and **restarting it disconnects every connected Smart Client's
+plugin channel — restart those Smart Clients afterwards**. On machines without an Event Server, or when the plugin is
+being installed on that Event Server for the first time, that page never appears and the service is never stopped.
+For unattended installs the choice is a property: `msiexec /i <msi> /qn RESTART_EVENT_SERVER=0` declines the restart.
+One deliberate caveat: **uninstalling** the plugin while the Event Server is running does not stop the service either —
+stop `MilestoneEventServerService` first or the service keeps the plugin files locked (see the Event Server deployment
+notes below).
+
+Beyond that the installer is simple: acknowledge the license, and it will install the Microsoft Edge
 WebView2 Runtime if necessary, and place the plugin files in `C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin\`.
 
 ### HTTPS targets: deployment certificate authority (one-time setup)

@@ -112,27 +112,24 @@ try {
     # actions - a still-running Event Server locks the drop DLLs. The restart action
     # (finish-page choice) must land after InstallFiles so the service comes back on
     # the new files, and before InstallFinalize so it stays a deferred SYSTEM action.
-    function Get-CustomActionRow([string]$xml, [string]$action) {
-        $rows = Get-MsiTableRows $xml 'CustomAction'
-        $rows | Where-Object { $_.Count -ge 1 -and $_[0] -eq $action } | Select-Object -First 1
-    }
+    $ca = Get-MsiTableRows $widXml 'CustomAction'
     foreach ($action in 'StopEventServerService', 'RestartEventServerService') {
-        $row = Get-CustomActionRow $widXml $action
+        $row = $ca | Where-Object { $_.Count -ge 3 -and $_[0] -eq $action } | Select-Object -First 1
         if ($null -eq $row) {
             throw "Installer service-flow guard (#82): CustomAction table has no $action row."
         }
         # 1026 = exe streamed from the Binary table, deferred, return check, non-impersonating.
-        if ($row[1] -ne '1026') {
-            throw "Installer service-flow guard (#82): $action must be a deferred (SYSTEM) exe custom action (type 1026), found type $($row[1])."
+        if ($row[1] -notmatch '1026') {
+            throw "Installer service-flow guard (#82): $action must be a deferred (SYSTEM) exe custom action (type 1026), found row: $($row -join ' / ')."
         }
-        if ($row[2] -ne 'WebContentServiceCtl.exe') {
-            throw "Installer service-flow guard (#82): $action must run the WebContentServiceCtl.exe binary stream, found $($row[2])."
+        if ($row -notcontains 'WebContentServiceCtl.exe') {
+            throw "Installer service-flow guard (#82): $action must run the WebContentServiceCtl.exe binary stream, found row: $($row -join ' / ')."
         }
         if (-not $seq.ContainsKey($action)) {
             throw "Installer service-flow guard (#82): $action missing from InstallExecuteSequence."
         }
     }
-    $stopCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'StopEventServerService' })[0][1]
+    $stopCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'StopEventServerService' } | ForEach-Object { $_.Count -ge 2 ? $_[1] : '' }) -join ';'
     foreach ($needle in 'NOT REMOVE', 'EVENTSERVERSERVICEPRESENT', 'WIX_UPGRADE_DETECTED', 'WEBCONTENTPLUGINPRESENT') {
         if ($stopCondition -notlike "*$needle*") {
             throw "Installer service-flow guard (#82): StopEventServerService condition '$stopCondition' lost '$needle' - the stop must fire only on install/upgrade, only when the Event Server service exists, and only when plugin files are already installed."
@@ -147,7 +144,7 @@ try {
     if ($seq['RestartEventServerService'] -lt $seq['InstallFiles'] -or $seq['RestartEventServerService'] -ge $seq['InstallFinalize']) {
         throw "Installer service-flow guard (#82): RestartEventServerService ($($seq['RestartEventServerService'])) must run after InstallFiles ($($seq['InstallFiles'])) and before InstallFinalize ($($seq['InstallFinalize']))."
     }
-    $restartCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'RestartEventServerService' })[0][1]
+    $restartCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'RestartEventServerService' } | ForEach-Object { if ($_.Count -ge 2) { $_[1] } else { '' } }) -join ';'
     if ($restartCondition -notlike '*RESTART_EVENT_SERVER*') {
         throw "Installer service-flow guard (#82): RestartEventServerService condition '$restartCondition' lost the RESTART_EVENT_SERVER choice."
     }
