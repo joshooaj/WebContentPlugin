@@ -215,6 +215,22 @@ namespace WebContent.Admin
     }
 
     /// <summary>
+    /// #84: outcome of one one-click "Add to allowlist" promotion from the Diagnostics tab.
+    /// </summary>
+    internal enum ProxyPromotionOutcome
+    {
+        /// <summary>A new valid exact-origin row landed in the grid (the dirty chain fired).</summary>
+        Added = 0,
+
+        /// <summary>A valid row already carries this exact canonical entry — nothing was added.</summary>
+        AlreadyPresent = 1,
+
+        /// <summary>The origin is not a promotable exact http(s) origin (blank, wildcard-shaped,
+        /// or outside the shared grammar) — refused, no row touched.</summary>
+        Refused = 2,
+    }
+
+    /// <summary>
     /// #81: the row collection behind the Management Client's structured allowlist grid, and the
     /// one place that turns rows into stored <see cref="ProxyTargetConfiguration"/> records. It
     /// replaces the free-text line parsing the old txtProxyTargets box pushed through
@@ -292,6 +308,66 @@ namespace WebContent.Admin
             }
 
             return dropped;
+        }
+
+        /// <summary>
+        /// #84: the canonical entries the grid currently holds — saved rows and unsaved edits
+        /// alike, valid rows only (an invalid row promises no entry). This is what the Diagnostics
+        /// tab feeds through <see cref="ProxyPolicy.IsRequestAllowed"/> to annotate already-
+        /// allowed rows, so the annotation and the eventual gate decision speak the same matcher.
+        /// </summary>
+        internal List<string> ValidCanonicalEntries()
+        {
+            var entries = new List<string>();
+            foreach (var row in Rows)
+            {
+                if (row != null && row.ErrorCode == ProxyTargetRowError.None && row.CanonicalEntry != null)
+                {
+                    entries.Add(row.CanonicalEntry);
+                }
+            }
+
+            return entries;
+        }
+
+        /// <summary>
+        /// #84: the one-click "Add to allowlist" promotion. Writes the blocked origin's EXACT
+        /// canonical entry (scheme + host + port, no wildcard, no accept-untrusted flag) as a new
+        /// grid row — the identical shape the grid itself would save, so a later Save lands the
+        /// structured <see cref="ProxyTargetConfiguration"/> record the admin can then edit into a
+        /// wildcard. A row already carrying the entry (or the same canonical string) is not
+        /// duplicated; an origin outside the exact-entry grammar is refused, never half-written.
+        /// Adding fires the row-collection chain the page uses to dirty the pane.
+        /// </summary>
+        internal ProxyPromotionOutcome TryAddExactOrigin(string origin, out ProxyTargetEditorRow row)
+        {
+            row = null;
+            if (string.IsNullOrWhiteSpace(origin) ||
+                !ProxyPolicy.TrySplitCanonicalEntry(origin.Trim(), out var scheme, out var pattern, out var port) ||
+                pattern.IndexOf('*') >= 0)
+            {
+                return ProxyPromotionOutcome.Refused;
+            }
+
+            foreach (var existing in Rows)
+            {
+                if (existing != null &&
+                    existing.ErrorCode == ProxyTargetRowError.None &&
+                    string.Equals(existing.CanonicalEntry, origin.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return ProxyPromotionOutcome.AlreadyPresent;
+                }
+            }
+
+            row = new ProxyTargetEditorRow
+            {
+                Scheme = scheme,
+                Host = pattern,
+                PortText = port == 0 ? string.Empty : port.ToString(CultureInfo.InvariantCulture),
+                AcceptUntrusted = false,
+            };
+            Rows.Add(row);
+            return ProxyPromotionOutcome.Added;
         }
 
         /// <summary>

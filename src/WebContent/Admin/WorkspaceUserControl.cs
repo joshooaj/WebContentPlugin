@@ -178,6 +178,15 @@ namespace WebContent.Admin
         }
 
         /// <summary>
+        /// #84: forwards the Diagnostics tab role-gate decision (same edit-rights check) to the
+        /// WPF page.
+        /// </summary>
+        internal void SetDiagnosticsTabVisible(bool visible)
+        {
+            _page.SetDiagnosticsTabVisible(visible);
+        }
+
+        /// <summary>
         /// #76: tells the Status tab which workspace item to ask the Event Server about.
         /// </summary>
         internal void SetWorkspaceItemId(string workspaceItemId)

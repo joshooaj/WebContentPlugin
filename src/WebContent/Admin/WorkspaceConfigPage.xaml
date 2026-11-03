@@ -17,6 +17,10 @@
         <sys:String>http</sys:String>
         <sys:String>https</sys:String>
       </x:Array>
+      <!-- #84: the stock bool→Visibility converter behind the promote button's per-row visibility.
+           Built-in WPF type on purpose: anything custom in this page's XAML risks the whole-page
+           BAML load failure learned live in the MC-13 walk. -->
+      <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     </ResourceDictionary>
   </UserControl.Resources>
 
@@ -24,12 +28,13 @@
     Ticket #74: the workspace config page is now a tabbed shell. The Settings tab carries the
     existing content verbatim; Proxy/Diagnostics are landing panels for the epic tickets (#81,
     #85, #86, #84) and hold NO input controls - a placeholder tab must never dirty the pane. Status
-    is live since #76 and is strictly read-only. Status starts collapsed: the item manager shows it
-    only after the workspace item's SecurityActions Manage (edit-rights) check passes for the
-    current MC user.
+    is live since #76 and is strictly read-only. Status AND Diagnostics (#84) start collapsed: the
+    item manager shows them only after the workspace item's SecurityActions Manage (edit-rights)
+    check passes for the current MC user.
     #81 took the Proxy tab live: the whole proxy section (routing toggle, the structured allowlist
     grid, the wildcard warning, the fetch harness) now lives there - the Settings tab keeps no
-    proxy controls. Diagnostics stays a placeholder until #84.
+    proxy controls. #84 took the Diagnostics tab live: the Event Server's recently-blocked list
+    with one-click exact-origin promotion into the Proxy tab's allowlist grid.
     Tab x:Names are UIA AutomationIds - the ux probes and later tickets select tabs by them.
   -->
   <TabControl x:Name="workspaceTabs" Background="White"
@@ -255,14 +260,68 @@
       </ScrollViewer>
     </TabItem>
 
-    <TabItem x:Name="tabDiagnostics" Header="Diagnostics">
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel MaxWidth="760" Margin="20,16,20,24">
-          <TextBlock x:Name="txtDiagnosticsTabHeading" Style="{StaticResource SectionHeaderStyle}" Margin="0,0,0,6" Text="Diagnostics" />
-          <TextBlock x:Name="txtDiagnosticsTabPlaceholder" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap"
-                     Text="Recently blocked proxy resources for this workspace, with one-click promotion into the allowlist, land on this tab (#69/#84)." />
+    <TabItem x:Name="tabDiagnostics" Header="Diagnostics" Visibility="Collapsed">
+      <!--
+        Ticket #84: the recently-blocked list from the Event Server's in-memory ring (#69),
+        pulled by the same status query pair the Status tab uses and only while this tab (or the
+        Status tab) is selected. Read the grid: it never writes configuration by itself. The one
+        write affordance is the per-row "Add to allowlist" promotion, which drops the exact-origin
+        entry into the Proxy tab's allowlist grid (marked unsaved there, like any grid edit) -
+        CertUntrusted rows never get the button (the fix there is the CA trust path). Like Status,
+        the tab starts Collapsed: the same SecurityActions Manage (edit-rights) gate decides.
+      -->
+      <Grid Margin="20,16,20,24">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="txtDiagnosticsTabHeading" Style="{StaticResource SectionHeaderStyle}"
+                   Margin="0,0,0,6" Text="Diagnostics" />
+        <TextBlock Grid.Row="1" x:Name="txtDiagnosticsSummary" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,8">
+          <Button x:Name="btnDiagnosticsRefresh" Content="Refresh now" Padding="10,4" Click="OnDiagnosticsRefresh" />
+          <TextBlock x:Name="txtDiagnosticsCadence" Style="{StaticResource SecondaryTextStyle}" Margin="10,0,0,0"
+                     VerticalAlignment="Center" TextWrapping="Wrap"
+                     Text="Blocked resources refresh on their own while this tab is open; polling stops the moment you leave it. The list lives in the Event Server's memory and resets when the Event Server service restarts." />
         </StackPanel>
-      </ScrollViewer>
+
+        <DataGrid Grid.Row="3" x:Name="dgDiagnosticsBlocked" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False"
+                  CanUserResizeRows="False" CanUserSortColumns="False" CanUserReorderColumns="False"
+                  GridLinesVisibility="Horizontal" SelectionMode="Single"
+                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Origin" Binding="{Binding Origin}" Width="*" />
+            <DataGridTextColumn Header="Reason" Binding="{Binding ReasonLabel}" Width="180" />
+            <DataGridTextColumn Header="Hits" Binding="{Binding Hits}" Width="60" />
+            <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="110" />
+            <DataGridTextColumn x:Name="colDiagnosticsStatus" Header="Status" Binding="{Binding StatusText}" Width="180" />
+            <DataGridTemplateColumn Header="" Width="150">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <!-- Per-row promotion: exact scheme+host+port entry into the Proxy tab grid.
+                       The stock converter hides the button for cert-trust and already-covered rows -
+                       an absent button, not a disabled one. -->
+                  <Button x:Name="btnDiagnosticsRowPromote" AutomationProperties.AutomationId="diagnosticsRowPromote"
+                          Content="Add to allowlist" Padding="6,2" Margin="2"
+                          VerticalAlignment="Center" Click="OnDiagnosticsPromote"
+                          Visibility="{Binding CanPromote, Converter={StaticResource BoolToVisibility}}" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <Border Grid.Row="4" x:Name="diagnosticsError" Style="{StaticResource ErrorBannerStyle}"
+                Visibility="Collapsed" Margin="0,10,0,0">
+          <TextBlock x:Name="txtDiagnosticsError" Style="{StaticResource ErrorBannerTextStyle}" TextWrapping="Wrap" />
+        </Border>
+      </Grid>
     </TabItem>
 
     <TabItem x:Name="tabStatus" Header="Status" Visibility="Collapsed">

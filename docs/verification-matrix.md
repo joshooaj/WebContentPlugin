@@ -43,7 +43,7 @@ is not evidence the plugin never ran.
 | Server-side deployment + rollout docs for proxied connections (#59) | #59 | `scripts/deploy-event-server-plugin.ps1` refuses a drop whose `plugin.def` lacks the `Service` environment before touching the server; stop-wait/stop, copy, per-file SHA-256 verification against the source, restart-wait, and the two rollout follow-ups (client restart, fetcher-ready marker) are printed by the script itself | See DP-1 below: the script validated live end-to-end against the Event Server machine (11 files hash-identical, `Proxy fetcher ready` after restart); README/log-path/version claims checked against the lab; fresh-both-machine blocked-egress smoke PASSED with both machines at the same hash-verified drop |
 | wss:// websockets tunnelled through a terminated TLS tunnel (Event Server dials a validated TLS leg, replays the rebuilt handshake, admits only 101) | #60 | `ProxyForwardPolicyTests` (the entry scheme IS the posture: an in-tunnel upgrade GET against an allowlisted https origin — or absolute wss:// against an https entry — becomes `WebSocketTunnel`, never 501; an http twin alone is 403 for the upgrade; the `WebSocketTunnelRefused` posture is deleted outright), `ProxyForwardConnectionTests` (in-tunnel upgrade opens the byte tunnel, the target's verbatim 101 rides back ON the terminated tunnel, then both directions pump decrypted frames over the tunnel stream; open failure renders an explicit 502 page on the tunnel and the tunnel keeps serving), `ProxyTunnelServerTests` (in-process `TlsWsTarget` with a self-signed SAN certificate: an https-scheme tunnel target gets a TLS leg authenticated against the target host before the handshake is replayed, 101-only admission, frames echo over both pumps; untrusted chain → explicit `TlsValidation` error naming the origin and the Event Server as the failing side; production resolver is null = SslStream full chain validation), `ProxyWebSocketHandshakeTests` (rebuilt handshake pins the https origin's Host for https-scheme tunnel targets) | See SC-6 below - **both live rows PASSED 2026-11-01** (runs `20261101-174151` + `20261101-174657`): with the probe certificate imported into the Event Server's trust store, a wss-echo page in a proxied Smart Client browser shows `WS-OK:<token>` while the wss server journals TLS-HANDSHAKE + WS-HANDSHAKE + WS-ECHO; the fail-closed row's target journals the TLS leg dialed + negotiated but never the upgrade - the Event Server refused the chain there |
 | wss tunnel legs honour the per-target accept-untrusted override (the #56 flag reaches the tunnel leg, scoped to its own origin) | #61 | `ProxyServerAllowlistTests` (`TunnelTlsValidationCallback`: null = SslStream default full-chain validation for every unflagged posture - no flag, explicit false, the http twin of another origin, a never-resolved closed gate - while the flagged entry's callback accepts chain errors; the flag rides wildcard entries to subdomains with scheme/port exactness, never the apex or another port), `ProxyTunnelServerTests` (allowlist-WIRED resolver end to end: the self-signed `TlsWsTarget` opens and pumps frames only when its entry carries the flag; without it the same wiring fails with the SAME explicit named-side `TlsValidation` error; two self-signed targets with ONE flag → the flagged tunnel opens, the neighbour's TLS dial never replays the upgrade - the flag is never a global pass), `EventServerTunnelTlsWiringGuardTests` (the ES constructs the tunnel server with the resolver, never the null #60 slot; the resolver delegates to the single scoped allowlist lookup; the fetcher source never touches `ServicePointManager`) | See SC-6 below - **override row PASSED 2026-11-02** (run `20261102-113540`), and the two #60 twin rows re-passed on the same drop (fail-closed `20261102-114705`, trusted-echo `20261102-115053`) |
-| MC workspace config tab shell (Settings \| Proxy \| Diagnostics \| Status; Status behind the SecurityActions edit-rights gate) | #74 | `WorkspaceTabShellGuardTests` (the XAML declares exactly the four tabs in shell order with stable AutomationIds; Status defaults `Collapsed` so the gate fails closed before any fill; EVERY pre-existing settings/proxy control still lives on the Settings tab under the same AutomationId the ux probes read; placeholder tabs contain zero write-capable input and carry a probe-assertable placeholder marker), `WorkspaceTabPolicy` decision table (Status renders only on an explicit `Granted` — `Denied`/`LookupFailed` hide the whole tab) | See MC-11 below - **admin half live row PASSED 2026-11-02** (run `20261102-012719`): four tabs render on the live MC with Status granted to the admin, walking the placeholder tabs never enables Save, and the Settings fields read back identically; the View-only denial half stays manual |
+| MC workspace config tab shell (Settings \| Proxy \| Diagnostics \| Status; Status and Diagnostics behind the SecurityActions edit-rights gate) | #74 | `WorkspaceTabShellGuardTests` (the XAML declares exactly the four tabs in shell order with stable AutomationIds; Status and Diagnostics each default `Collapsed` so the gate fails closed before any fill; EVERY pre-existing settings/proxy control still lives on the Settings tab under the same AutomationId the ux probes read; no placeholder tab is left since #84 - both live read tabs are guarded down to their buttons' exact handlers instead), `WorkspaceTabPolicy` decision table (Status AND Diagnostics render only on an explicit `Granted` - `Denied`/`LookupFailed` hide the whole tab) | See MC-11 below - **admin half live row PASSED 2026-11-02** (run `20261102-012719`): four tabs render on the live MC with Status granted to the admin, walking the tabs never enables Save, and the Settings fields read back identically; the View-only denial half stays manual |
 | Proxy diagnostics substrate (block reports, session lifecycle, Event Server aggregation, status query) | #69 | `ProxyDiagnosticsAggregatorTests` (blocked ring dedup + accumulating counts + recency eviction at the 200-origin cap, new-entry-only transition signal; session open/heartbeat/close and the idle sweep; fetch/tunnel traffic counters and req/min; workspaces stay isolated), `ProxySessionRegistryTests` (client-side per-view registry: open/close, heartbeat payloads, bounded), `ProxyBlockReporterTests` (report carries the workspace identity + canonical origin; blank or workspace-less reports drop; a throwing send seam never reaches the browser flow), `ProxyDiagnosticsWireTests` (every diagnostics payload round-trips as one JSON string; an unset session is an explicit null member; a frame shaped by another build is refused, never half-bound), `ProxyForwardConnectionTests` (each client-visible refusal reaches the reporter — local 403, tunnel-open fault, dead fetch channel — while an ES-answered refusal is never re-reported, so counts do not double), `ProxyFetchContractGuardTests` (four new payloads stay plugin-namespace `[Serializable]` public-field types inside the whitelist; the new ids declared in `PluginDefinedMessageIds`) | See ES-2 below - **load half observed live 2026-11-02**: the restarted Event Server logs `Proxy fetcher ready (..., diagnostics=WebContent.Proxy.BlockReport/WebContent.Proxy.SessionEvent/WebContent.Proxy.StatusRequest)` on a drop hash-identical to the Smart Client machine's. The ingress markers (session open, block recorded) need a proxied Smart Client session, which only an interactive desktop can drive |
 | MC Status tab: live proxy sessions (polling tied to the open tab, read-only, role-gated by the #74 grant) | #76 | `ProxyStatusViewTests` (failure postures: a lost query is never rendered as an empty table, the Event Server's own code survives, a blank code falls back to `ServerUnavailable`; zero sessions is an honest success with no rows; rows arrive as pre-formatted display strings with `(unknown)` placeholders; rate differencing over the ES's cumulative counters needs two sightings, impossible deltas (non-later snapshot, backwards counters, unknown ids) answer zero, `Reset` drops the baseline; culture-invariant byte/rate/per-minute/duration formatting incl. NaN/Infinity/negative clamps), `WorkspaceTabShellGuardTests` (the Status tab is no longer a placeholder: exactly one `IsReadOnly` DataGrid with add/delete off, every button on the tab wired to `OnStatusRefresh`, zero configuration input controls - walking it can never dirty the pane; probe-selectable surface ids pinned) | See MC-12 below - **live row PASSED 2026-11-02** (run `20261102-074407`): opening the Status tab starts the pull loop (MIP.log markers at cadence), this machine's proxied Smart Client view renders as a session row within the cadence, leaving the tab flattens the markers, re-selecting resumes, and Save never enabled through the whole probe |
 | MC structured allowlist grid on the Proxy tab (scheme/host/port/accept-untrusted rows, inline refusal, wildcard banner) | #81 | `ProxyAllowlistEditorTests` (row validation IS the shared grammar — mid-label wildcard, `*x`, `*.`, path, inner space, port out of range, port-with-blank-host all refused while exact hosts/IPv6/`*.tail`/the lone `*` pass; blank rows are not entries; canonicalization of case and scheme-default ports; only the lone `*` is the full-host hatch; both stored shapes render forever with corrupt records dropped and counted; a legacy `host`-shape workspace opens and saves back to structured `pattern` records without losing entries or flags; invalid rows refuse the build BY NAME and never vanish; duplicate rows collapse with any flagged duplicate flagging the entry; touching the flag never changes validation), `WorkspaceTabShellGuardTests` (the Proxy tab carries the grid with the six pinned columns in order and every per-row AutomationId, the warning banner starts `Collapsed`, rows are added/removed only by explicit buttons with `CanUserAddRows`/`CanUserDeleteRows` off, the proxy section is asserted ABSENT from the Settings tab, and neither `txtProxyTargets` nor any admin-facing `accept-untrusted` token survives in the page or its strings) | See MC-14 below |
@@ -51,6 +51,7 @@ is not evidence the plugin never ran.
 
 | Rule triggers: a matched proxied fetch raises the fixed `WebContent proxy request` analytics event on the Event Server bus | #65 | `ProxyTriggerPolicyTests` (url glob grammar: absolute or the lone `*` hatch only; scheme http/https/`*`; host exact — empty labels refused — leftmost-label `*.tail`, or lone `*`; port explicit 1-65535 or absent = the url's own scheme default, so an explicit non-default port never matches an absent-port row; anchored path glob where `*` spans `/` and `?` is exactly one char, query/fragment never participate; method verb tokens; status class `1xx..5xx` or exact 100-599; seeded-Random property pins over the glob engine with a wildcard-safe alphabet on the pattern side), `ProxyTriggerMatcherTests` (store closed before the first resolve; rows evaluate against their own workspace only; first matching row wins — one fetch raises at most one event; absent sections tolerated silently; a refused row is audited by reason without taking down the workspace's other rows; a resolver failure after a good resolve keeps serving last-known-good rows; `Prime` logs what the configuration actually loaded), `ProxyConfigurationTests` (raw `proxyTriggers` rows survive the serialized roundtrip — grammar is decided only on read; a pre-#65 definition reads `ProxyTriggers=null` with no error; empty `method`/`status` members optional; a workspace without rows never grows an empty section), `ProxyFetchWireCodecTests` + `ProxyDiagnosticsWireTests` (#65-revised skew contract: the request wire's members are explicitly optional on read so an older Smart Client's frame decodes as an unattributed fetch, while a frame that names no url stays an unusable null; the tunnel wire keeps the strict inferred contract), `EventServerTriggerWiringGuardTests` (event header carries ID/Timestamp/Message=the one fixed event type with per-row context in CustomTag; the raise goes through `EnvironmentManager.SendMessage` with a TYPED platform `AnalyticsEvent` + `RelatedFQID` — never raw `TransmitMessage`, which the live transmit layer refuses for system Command ids; the plugin observes `Server.NewEventIndication` and detaches at Close; the store is primed in `Init` and logs; the self-test probe stays behind the env/flag switch; attribution chain: stamped request → diagnostics session map → fail closed) | See ES-3 below - **live gate PASSED 2026-11-02** (run `20261102-141512`, drop `WebContent.dll` SHA-256 `2B974839…`): the flag-file probe raised with a real workspace source and the SAME event id came back through the plugin's NewEventIndication observer (`d9ea7200…` on all three markers); the two refusal postures were learned live - raw `TransmitMessage` of a system Command id (`Discarding message Server.NewEventCommand`) and a sourceless event (`ArgumentException: Invalid event`) |
 | MC exports the deployment proxy CA certificate over MIP messaging (provenance-independent, read-only, size-capped single frame) | #75 | `ProxyCaExportTests` (responder postures: authority present → Success with base64 DER + thumbprint + validity window; absent → `NoAuthority` with the actionable "does not exist yet" sentence, never an empty answer; expired/not-yet-valid and malformed entries refused by code, never silently skipped past; the fixed-CN finder opens `LocalMachine\Personal` with `ReadOnly | OpenExistingOnly` only — a source guard pins that no write/create flag can enter the export path — and several copies prefer the private-key one; wire codec round-trips the payloads as one JSON string with optional-member tolerance; correlation deadline silence → `ServerUnavailable`; the MC view builder NEVER yields a save for a success that carries no bytes — it renders the error copy instead; size caps: a REAL 2048-bit CA's DER frames under `MaxAuthorityDerBytes` (8 KiB) and its full response wire form stays under `MaxResponseWireChars` (16 KiB), the caps themselves pinned far under the proven ~87K-char single fetch-chunk headroom), `ProxyFetchContractGuardTests` extended (both new payloads stay plugin-namespace `[Serializable]` public-field types; `WebContent.Proxy.CaExportRequest`/`…Response` declared in `PluginDefinedMessageIds`; ids never end in "Command" so SecurityLevel.Normal clients can send) | See MC-15 below - **live row PASSED 2026-11-02** (run `20261102-154554`): the button answers for a CA this build did NOT create (legacy-script provenance, thumbprint `E4D254D5…`), and the `.cer` the Save As dialog writes is byte-identical to the certificate in the Event Server machine's live store |
+| MC Diagnostics tab: recently-blocked origins from the ES ring, one-click allowlist promotion into the Proxy grid (tab-gated polling on the Status query pair, same Manage gate, fail-closed) | #84 | `ProxyDiagnosticsViewTests` (failure postures mirror the Status tab - a lost query is never an empty table, the ES code survives, unknown workspace and no-channel read their own sentences; zero blocked origins is the honest empty message naming the in-memory/reset semantics; rows arrive pre-formatted newest-first with an origin-ordinal tiebreak, hits floored at 1, future timestamps clamp to "just now", never negative; the allowlist annotation runs the SAME shared `ProxyPolicy.IsRequestAllowed` matcher as the three gates - a wildcard entry or the VMS floor hosts marks a row already covered and drops its button; `CertUntrusted` rows never get the button, every other certified posture does; an unparsable origin names itself and refuses promotion), `ProxyAllowlistEditorTests` promotion section (the promotion IS a grid row: exact scheme+host+port, accept-untrusted never set, default ports canonicalise, dedupe is by canonical entry not typing, junk outside the exact-entry grammar refuses without touching the grid, the promoted row saves through the ordinary build as a structured record, `ValidCanonicalEntries` covers unsaved edits and skips broken rows), `WorkspaceTabShellGuardTests` (Diagnostics starts `Collapsed` + the identical Granted-only gate theory; the live tab carries exactly one read-only grid, its buttons carry only the two pinned handlers, the promote button hides via its `CanPromote` converter rather than disabling, no configuration input control anywhere on the tab, and the in-memory/resets copy is pinned as prose) | See MC-16 below - **live row PASSED 2026-11-02** (run `20261102-182628`): a live Smart Client refusal renders `http://172.16.128.210:18131 | not allowed by administrator` within the cadence while only the Diagnostics tab arms the marker loop; one click lands the exact origin in the Proxy grid UNSAVED, annotates the row `on allowlist`, hides its own button, arms Save, and the ordinary save discipline (audit line + reloaded-pane readback) stores it; after a pane reload the row re-annotates from stored config; allowlist restored with verified readback |
 
 ## Manual host checks
 
@@ -171,7 +172,8 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    `WebContent.Proxy.StatusRequest` answered with a snapshot) has its sender since #76 landed in
    the Management Client drop (2026-11-02): the Status tab sends one query every ~3 s while it is
    the selected tab and logs one MC marker per pull (`Proxy status snapshot for workspace '...'
-   answered: N live session(s).`). The MC↔ES round trip went live with MC-12's probe (run
+   answered: N live session(s), M blocked origin(s).` - the blocked clause joined the line with the #84
+   Diagnostics tab; the MC-12 probe counts the unchanged prefix). The MC↔ES round trip went live with MC-12's probe (run
    `20261102-074407`): the deployed ES answered the tab's queries and this machine's proxied view
    rendered as a session row; its remaining semantics (unknown workspace answers `Success=false` +
    `BadRequest`, client-side deadline silence completes as `ServerUnavailable`) stay pinned by the
@@ -236,8 +238,9 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    is on Settings and behaves exactly as before (MC-9 steps still pass without any tab click).
    Since #81 the proxy routing toggle, the allowlist grid and the test-fetch harness live on the
    **Proxy** tab instead — Settings must realize no proxy control at all.
-2. The Proxy tab is live since #81 (structured allowlist grid — MC-14); Diagnostics still renders
-   its placeholder notice only (Status is live since #76 — MC-12). Click through all tabs:
+2. The Proxy tab is live since #81 (structured allowlist grid - MC-14), the Diagnostics tab since
+   #84 (read-only blocked-origin grid - MC-16), and Status since #76 (MC-12). Click through all
+   tabs:
    the shell's **Save must never become enabled** (selecting a tab holds no inputs and fires no
    change events); returning to Settings shows the same values as before the walk.
 3. Status-tab role gate: with a full administrator the Status tab is visible. Assign a test role
@@ -463,6 +466,113 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    the client's own window list (desktop-wide window scan needed), and typing the path via
    `ValuePattern.SetValue` gets honoured only for the NAME - the dialog saves into its OWN folder, so
    the probe types the path with keystrokes and commits with ENTER.
+
+### MC-16 MC Diagnostics tab: live blocked list + one-click promotion (#84)
+
+1. Restart the Management Client with the new drop. `Invoke-psake -taskList Build, DeployLocally`
+   is enough - #84 is MC-side only; the Event Server's deployed drop already accepts block reports
+   and answers `StatusRequest` snapshots with the `Blocked` ring (#69). Open a Web Content workspace
+   as a user holding its Manage action: the **Diagnostics tab is visible** (the identical gate as
+   Status - MC-11 step 3 applies to it verbatim), rendering `dgDiagnosticsBlocked`, a summary line,
+   and a "Refresh now" button. The summary and the empty-state copy both say out loud that the list
+   lives in the Event Server's memory only and **resets when the Event Server service restarts**.
+2. Selecting Diagnostics (like selecting Status) arms the ONE status query pair; every pull logs
+   exactly one MC marker - `Proxy status snapshot for workspace '<item id>' answered: N live
+   session(s), M blocked origin(s).` or the query-failure variant - and leaving BOTH tabs stops the
+   markers. The tab never writes: walking it, "Refresh now" included, cannot enable Save (guard-
+   pinned: the grid is read-only, the only handlers are `OnDiagnosticsRefresh`/`OnDiagnosticsPromote`).
+3. A live Smart Client view whose subresources point at a non-allowlisted origin (the SC-7 page
+   pair: origin 18125 allowlisted, asset origin 18131 not) puts a row on the grid within the
+   cadence: canonical origin, shared reason label (`not allowed by administrator`), hit count,
+   recency, and an "Add to allowlist" button. Rows order newest-first, ties stable by origin.
+4. One click on the button: MC marker `Proxy allowlist promotion for workspace '<item id>': origin
+   '<origin>' added to the allowlist grid (grid edit, not yet saved - Save writes it).`; the row
+   re-annotates `on allowlist` and its button is GONE (hidden, not disabled - a double click cannot
+   stack duplicates; the probe's rule for "gone" is no VISIBLE promote peer, since a collapsed WPF
+   button leaves an off-screen UIA peer with a zero rect); the Proxy tab's grid now carries the
+   exact scheme+host+port row **unsaved**, and Save is armed. Rows the promotion cannot help -
+   `certificate not trusted`, already covered (exact or wildcard, through the same shared matcher
+   incl. the SSRF/VMS floor), unparsable - never get the button in the first place.
+5. Saving goes through the ordinary allowlist save discipline (MC-9/MC-14): audit line
+   `Stored proxy targets for workspace '<name>' (FQID: ...)` names the promoted entry, and the grid
+   re-renders it from a RELOADED pane. Re-opening Diagnostics after the reload re-annotates the row
+   `on allowlist` from STORED config - the "survives a workspace re-read" acceptance.
+6. Automatable: `McDiagnosticsTabProbeTests.ProbeDiagnosticsTabPromotesLiveBlockedOriginIntoTheSavedAllowlist`
+   (probe category; it MUTATES the workspace allowlist briefly and restores it verbatim with the
+   audit+reloaded-pane verification, run alone; drives Smart Client + Management Client on one
+   machine); artifacts `mc-diagnostics-{row,after-promote,annotated}.png` + `mc-diagnostics-probe-results.txt`
+   (which ends with a cell-by-cell `grid dump` of the Diagnostics grid: every promote peer UIA can
+   see, with its row, rect and on/off-screen state) under `%TEMP%\webcontent-mc-diagnostics-probe\<run>`.
+   The probe's own order is part of the record: it clears any earlier run's probe line from the
+   allowlist BEFORE the Smart Client page load, and its teardown answers the shell's "Save changes?"
+   prompt with NO (`ManagementClientUi.RejectPendingModal`), never Yes.
+
+   Record (MC-16) - **live row PASSED 2026-11-02**, green run `20261102-182628` (3 m 20 s), drop
+   `WebContent.dll` SHA-256 `A718A87B.` hash-verified in the local install folder: the ES ring
+   carried 5 blocked origins (other views' refusals included); the fresh refusal rendered
+   `http://172.16.128.210:18131 | not allowed by administrator | 3 | 35s ago` with its button while
+   the Diagnostics tab alone drove the snapshot markers; the Invoke logged the promotion marker at
+   18:27:45.653, annotated the row `on allowlist`, and its button vanished (screenshot: among the 5
+   rows only 18131 shows `on allowlist` and carries no button - the other four keep theirs); the
+   Proxy grid carried `http://172.16.128.210:18131` before any save; the save audit enumerated all
+   seven entries including the promoted one, the reloaded-pane readback matched, and re-opening
+   Diagnostics re-annotated from stored config (`1m 16s ago`); the six-line allowlist restored with
+   audit+readback verified. The `CertUntrusted` no-button posture stays pinned in the unit layer
+   (a live untrusted-https blocked origin would need the SC-6 certificate posture end to end).
+
+   Failure signatures: opening Diagnostics with no markers = the tab never armed the shared timer
+   (MC-12's cadence discipline is the twin); a plain `not allowed` row WITHOUT a button = the
+   annotation matcher thinks an entry already covers the origin - check the grid and the floor hosts
+   (unit matrix pins the matcher, the live row names the entry); Save still disabled after the
+   click = the promotion bypassed the grid's row-collection chain; the promoted origin absent from
+   the audit line = the promotion wrote somewhere other than the editor's grid.
+
+   Harness truths the live rows taught (each one burned a run, MC-16):
+     * **UIA containment lies.** Flattening a DataGrid row with `FindAllDescendants` surfaces
+       SIBLING rows' buttons, so row-scoped Name joins are not evidence. The Grid pattern is the
+       addressing authority: `dgDiagnosticsBlocked` answers `GridPattern` (6 columns for its 6
+       columns) and `GetItem(row, column)` isolates one cell; the geometry check (the button's
+       centre inside the row's own rect) is only the fallback when the pattern is missing.
+     * **A hidden WPF button still has a UIA peer.** `Visibility=Collapsed` leaves the peer with a
+       zero rect and `IsOffscreen=true` - live, the promoted row's `diagnosticsRowPromote` peer is
+       still enumerable right after its annotation flips to `on allowlist`. "Peer exists" is not
+       "button offered": the probe's rule is a VISIBLE button (non-zero rect, not off-screen), and
+       the results file prints a cell-by-cell `grid dump` naming every promote peer with its rect
+       and on/off-screen state - in the green run the four uncovered origins are
+       `on-screen rect={X=2305,...}` and the two covered ones `offscreen
+       rect={X=0,Y=0,Width=0,Height=0}`.
+     * **Empty WPF `DataGridCell`s answer a SYNTHESIZED Name** (`Item:
+       WebContent.Admin.ProxyBlockedRowView, Column Display Index: 4`), which leaks into any
+       Name-join of a row - the blank Status cell showed exactly that. Cell text comes from the
+       `Text` peers first, with a synthesized fallback name read as empty.
+     * **Probe order is load-bearing, and teardown must not save.** Clear any earlier run's probe
+       line from the allowlist BEFORE the Smart Client page load: with the line still stored the
+       listener FORWARDS the subresources and the ring row arrives as `target timed out`, not
+       `not allowed by administrator`. And a teardown that answers "Save changes?" with YES
+       persists a mid-run promotion - the ring keeps same-origin entries until the Event Server
+       restarts, so the stale row then satisfies a reason-blind row lookup. Teardown uses
+       `ManagementClientUi.RejectPendingModal` (No/Cancel), and the row lookup filters on the
+       reason fragment.
+     * Known residue for a future sweep: `McAllowlistGridProbeTests`, `McProxyStatusProbeTests` and
+       `McWildcardAllowlistProbeTests` still close with `AcceptPendingModal`, i.e. they would
+       persist an interrupted edit the way MC-16's first run did.
+
+   Record (MC-16, hardened probe) - **live row PASSED again 2026-11-02**, green run
+   `20261102-193021` (3 m 07 s, the run of exactly this probe source; the identical chain went
+   green one run earlier as `20261102-192322`), drop `WebContent.dll` SHA-256 `6271ED81.`
+   (1 381 376 bytes) hash-verified in the local install folder - the plugin source is unchanged
+   since the first green run, only the probe was hardened. The ring held 6 rows (three unrelated
+   live browser refusals included); the probe's fresh refusal was row 0 - `http://172.16.128.210:18131
+   | not allowed by administrator | 15 | just now` with an on-screen button - while the stale
+   same-origin `target timed out` entry from the mis-ordered run sat at row 4 already annotated
+   `on allowlist` (the shared matcher annotates every covering entry; the reason fragment is what
+   keeps the probe on its OWN row). One Invoke logged the promotion marker, the row re-annotated
+   `on allowlist`, and the cell dump (`rows=6 cols=6`) shows both covered rows' promote peers
+   `offscreen rect={X=0,Y=0,Width=0,Height=0}` while the four uncovered origins kept
+   `on-screen rect={X=2305,...}` buttons; the unsaved Proxy grid carried the exact origin, the save
+   audit enumerated all seven entries, the reloaded pane read it back, re-opening Diagnostics
+   re-annotated `on allowlist` from stored config (`41s ago`), and the six-line allowlist was
+   restored with audit+readback verified.
 
 ### SC-1 End-to-end proxied page load (#54)
 

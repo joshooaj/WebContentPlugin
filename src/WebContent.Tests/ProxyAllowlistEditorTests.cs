@@ -289,5 +289,123 @@ namespace WebContent.Tests
 
             Assert.Equal(string.Empty, ProxyAllowlistEditor.DescribeStoredTargets(null));
         }
+
+        // ---- #84: the one-click promotion write path ----------------------------------------
+
+        [Fact]
+        public void PromotionAddsAnExactRowInTheGridsOwnShape()
+        {
+            // The Diagnostics tab's Add-to-allowlist button lands the blocked origin as an exact
+            // scheme+host+port row - no wildcard, no accept-untrusted flag, no stored-record
+            // shortcut around the grid.
+            var editor = new ProxyAllowlistEditor();
+            var changed = 0;
+            editor.Rows.CollectionChanged += (s, e) => changed++;
+
+            var outcome = editor.TryAddExactOrigin("http://172.16.128.210:18131", out var row);
+
+            Assert.Equal(ProxyPromotionOutcome.Added, outcome);
+            Assert.NotNull(row);
+            Assert.Equal("http", row.Scheme);
+            Assert.Equal("172.16.128.210", row.Host);
+            Assert.Equal("18131", row.PortText);
+            Assert.False(row.AcceptUntrusted);
+            Assert.Equal("http://172.16.128.210:18131", row.CanonicalEntry);
+            Assert.Equal(1, editor.Count);
+            Assert.True(changed > 0, "the row-collection chain the page dirties the pane through never fired.");
+        }
+
+        [Theory]
+        [InlineData("https://Corp.Example", "https://corp.example", "")]      // scheme default port canonicalises away
+        [InlineData("http://cdn.example.com:8080", "http://cdn.example.com:8080", "8080")]
+        [InlineData("https://[::1]:8443", "https://[::1]:8443", "8443")]
+        public void PromotionRowsCarryTheCanonicalOriginAndItsParts(string origin, string canonical, string portText)
+        {
+            var editor = new ProxyAllowlistEditor();
+            Assert.Equal(ProxyPromotionOutcome.Added, editor.TryAddExactOrigin(origin, out var row));
+            Assert.Equal(canonical, row.CanonicalEntry);
+            Assert.Equal(portText, row.PortText);
+        }
+
+        [Fact]
+        public void PromotionDedupesAgainstAnEquivalentRowNotItsTyping()
+        {
+            // The grid already carries the entry (loaded from storage, differently typed): the
+            // promotion must not double it - the canonical entry is the identity, exactly like
+            // the save's duplicate collapse.
+            var editor = new ProxyAllowlistEditor();
+            editor.Load(new List<ProxyTargetConfiguration>
+            {
+                new ProxyTargetConfiguration { Scheme = "HTTPS", Host = "Example.COM", Port = 443 },
+            });
+
+            var outcome = editor.TryAddExactOrigin("https://example.com", out var row);
+
+            Assert.Equal(ProxyPromotionOutcome.AlreadyPresent, outcome);
+            Assert.Null(row);
+            Assert.Equal(1, editor.Count);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData("not an origin")]
+        [InlineData("ftp://files.example")]
+        [InlineData("http://*.cdn.example")]     // the wildcard grammar is the admin's edit, not the button's
+        [InlineData("http://*")]
+        [InlineData("http://example.com/path")]
+        public void PromotionRefusesAnythingOutsideTheExactEntryGrammarWithoutTouchingTheGrid(string origin)
+        {
+            var editor = new ProxyAllowlistEditor();
+            editor.AddBlankRow();
+
+            var outcome = editor.TryAddExactOrigin(origin, out var row);
+
+            Assert.Equal(ProxyPromotionOutcome.Refused, outcome);
+            Assert.Null(row);
+            Assert.Equal(1, editor.Count);
+        }
+
+        [Fact]
+        public void APromotedRowSavesAsTheStructuredRecordTheEditorItselfWouldWrite()
+        {
+            // #84 AC: "promotion produces a config write equivalent to the allowlist editor's
+            // save". The promoted row is an ordinary grid row, so the ordinary save build lands
+            // it as a structured pattern record - identical to what typing the row in by hand
+            // would store.
+            var editor = new ProxyAllowlistEditor();
+            Assert.Equal(ProxyPromotionOutcome.Added, editor.TryAddExactOrigin("http://172.16.128.210:18131", out _));
+
+            Assert.True(editor.TryBuildStoredTargets(out var targets, out var rejected));
+            Assert.Empty(rejected);
+            var record = Assert.Single(targets);
+            Assert.Equal("http", record.Scheme);
+            Assert.Equal("172.16.128.210", record.EffectivePattern);
+            Assert.Equal(18131, record.Port);
+            Assert.False(record.AcceptUntrusted);
+        }
+
+        [Fact]
+        public void ValidCanonicalEntriesCoverUnsavedEditsAndSkipBrokenRows()
+        {
+            // The Diagnostics annotation feeds this through ProxyPolicy.IsRequestAllowed, so it
+            // must list every row that PROMISES an entry - saved rows, hand-added rows, and
+            // promoted rows alike - and never a row the save would refuse.
+            var editor = new ProxyAllowlistEditor();
+            editor.Load(new List<ProxyTargetConfiguration>
+            {
+                new ProxyTargetConfiguration { Scheme = "http", Pattern = "*.cam.example", Port = 0 },
+            });
+            editor.AddBlankRow();                                            // blank: promises nothing
+            editor.AddBlankRow().Host = "bad.*.host";                        // invalid: refused at save
+            editor.TryAddExactOrigin("https://promoted.example", out _);     // unsaved promotion
+
+            var entries = editor.ValidCanonicalEntries();
+
+            Assert.Contains("http://*.cam.example", entries);
+            Assert.Contains("https://promoted.example", entries);
+            Assert.Equal(2, entries.Count);
+        }
     }
 }

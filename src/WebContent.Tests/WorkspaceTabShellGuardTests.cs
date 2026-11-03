@@ -10,14 +10,16 @@ namespace WebContent.Tests
 {
     /// <summary>
     /// Ticket #74: the Management Client workspace config page is a four-tab WPF shell
-    /// (Settings | Proxy | Diagnostics | Status). The policy tests pin the Status tab role gate
-    /// (fail closed); the XAML guards pin the tab order/identity, that every existing settings
-    /// control moved verbatim onto Settings, and that the placeholder tabs carry no input
-    /// control that could write configuration ("no config writes from placeholder tabs").
-    /// #81 took the Proxy tab live, and the same guards now pin the structured allowlist grid
-    /// (column order + per-row AutomationIds, the collapsed-by-default wildcard banner, rows
-    /// added/removed only by explicit buttons), that the proxy section left the Settings tab, and
-    /// that the free-text allowlist box and its accept-untrusted token are gone from the admin UI.
+    /// (Settings | Proxy | Diagnostics | Status). The policy tests pin the Status and Diagnostics
+    /// tab role gates (fail closed); the XAML guards pin the tab order/identity and that every
+    /// existing settings control moved verbatim onto Settings. No placeholder tab is left: #81
+    /// took the Proxy tab live and #84 took Diagnostics live, and the "reads only" guards now
+    /// pin both live read tabs - the Status session table and the Diagnostics blocked-origin
+    /// table - down to the per-row AutomationIds and the buttons' exact handlers. The same
+    /// guards pin the structured allowlist grid (column order + per-row AutomationIds, the
+    /// collapsed-by-default wildcard banner, rows added/removed only by explicit buttons), that
+    /// the proxy section left the Settings tab, and that the free-text allowlist box and its
+    /// accept-untrusted token are gone from the admin UI.
     /// </summary>
     public class WorkspaceTabShellGuardTests
     {
@@ -32,6 +34,18 @@ namespace WebContent.Tests
         {
             var permission = (WorkspaceManagePermission)System.Enum.Parse(typeof(WorkspaceManagePermission), permissionName);
             Assert.Equal(expected, WorkspaceTabPolicy.ShowStatusTab(permission));
+        }
+
+        [Theory]
+        [InlineData("Granted", true)]
+        [InlineData("Denied", false)]
+        [InlineData("LookupFailed", false)]
+        public void DiagnosticsTabRendersOnlyOnExplicitGrant(string permissionName, bool expected)
+        {
+            // #84: the Diagnostics tab rides the identical Manage gate - one affordance on it
+            // writes the allowlist, so it cannot be visible to users who may not save.
+            var permission = (WorkspaceManagePermission)System.Enum.Parse(typeof(WorkspaceManagePermission), permissionName);
+            Assert.Equal(expected, WorkspaceTabPolicy.ShowDiagnosticsTab(permission));
         }
 
         [Fact]
@@ -202,29 +216,71 @@ namespace WebContent.Tests
         }
 
         [Fact]
-        public void PlaceholderTabsCarryNoConfigWriteControls()
+        public void DiagnosticsTabStartsCollapsedSoTheGateFailsClosedBeforeAnyFill()
         {
-            // #81 took the Proxy tab live, so Diagnostics (#84) is the only placeholder left: an
-            // interactive input there could fire the dirty chain or land in the save. Status is
-            // guarded on its own below.
-            var writeCapable = new[]
-            {
-                "TextBox", "CheckBox", "Button", "Slider", "ComboBox", "ListBox",
-                "RadioButton", "PasswordBox", "DataGrid", "TreeView", "Menu",
-            };
+            var diagnostics = ConfigPageTabs().Single(t => Name(t) == "tabDiagnostics");
+            Assert.Equal("Collapsed", diagnostics.Attribute("Visibility")?.Value);
+        }
 
-            foreach (var placeholder in new[] { "tabDiagnostics" })
+        [Fact]
+        public void DiagnosticsTabReportsThenPromotesAndCanNeverWriteAnythingElse()
+        {
+            // #84: the Diagnostics tab is live - the blocked-origin table, its summary line, the
+            // failure banner, and one promotion affordance per row. The table reads; the ONLY
+            // write path is the per-row "Add to allowlist" button, which edits the Proxy tab's
+            // grid through the page code (verified in the page/pure layers) - walking the tab
+            // with any other input is impossible, so Save only arms through that button.
+            var diagnostics = ConfigPageTabs().Single(t => Name(t) == "tabDiagnostics");
+
+            var grid = diagnostics.Descendants().Single(e => e.Name.LocalName == "DataGrid");
+            Assert.Equal("dgDiagnosticsBlocked", grid.Attribute(Xaml + "Name")?.Value);
+            Assert.Equal("True", grid.Attribute("IsReadOnly")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserAddRows")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserDeleteRows")?.Value);
+            Assert.Equal("False", grid.Attribute("CanUserResizeRows")?.Value);
+
+            // Every button on the tab is one of the two pinned handlers; nothing else can fire.
+            foreach (var button in diagnostics.Descendants().Where(e => e.Name.LocalName == "Button"))
             {
-                var tab = ConfigPageTabs().Single(t => Name(t) == placeholder);
-                var offenders = tab.Descendants()
-                    .Select(e => e.Name.LocalName)
-                    .Where(n => writeCapable.Contains(n))
-                    .ToArray();
-                Assert.True(offenders.Length == 0, $"{placeholder} contains write-capable input(s): {string.Join(", ", offenders)}.");
-                Assert.True(
-                    tab.Descendants().Any(e => e.Attribute(Xaml + "Name")?.Value == placeholder.Replace("tab", "txt") + "TabPlaceholder"),
-                    $"{placeholder} has no placeholder marker TextBlock for the ux probes to assert.");
+                var handler = button.Attribute("Click")?.Value;
+                Assert.True(handler == "OnDiagnosticsRefresh" || handler == "OnDiagnosticsPromote",
+                    $"{Name(button)} carries unexpected handler '{handler}'.");
             }
+
+            // The promote button: hidden (not merely disabled) for rows the promotion cannot
+            // apply to, and addressed by the ux probes through its scoped AutomationId.
+            var promote = diagnostics.Descendants()
+                .Single(e => e.Attribute("AutomationProperties.AutomationId")?.Value == "diagnosticsRowPromote");
+            Assert.Equal("OnDiagnosticsPromote", promote.Attribute("Click")?.Value);
+            Assert.Equal("Add to allowlist", promote.Attribute("Content")?.Value);
+            var promoteVisibility = promote.Attribute("Visibility")?.Value ?? string.Empty;
+            Assert.Contains("CanPromote", promoteVisibility, System.StringComparison.Ordinal);
+            Assert.Contains("Converter", promoteVisibility, System.StringComparison.Ordinal);
+
+            // No free input anywhere on the tab.
+            var settingsInput = new[] { "TextBox", "CheckBox", "Slider", "ComboBox", "ListBox", "RadioButton", "PasswordBox" };
+            var offenders = diagnostics.Descendants()
+                .Select(e => e.Name.LocalName)
+                .Where(n => settingsInput.Contains(n))
+                .ToArray();
+            Assert.True(offenders.Length == 0, $"Diagnostics tab contains configuration input(s): {string.Join(", ", offenders)}.");
+
+            var names = diagnostics.Descendants()
+                .Select(e => e.Attribute(Xaml + "Name")?.Value)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .ToList();
+            foreach (var required in new[] { "txtDiagnosticsSummary", "dgDiagnosticsBlocked", "diagnosticsError", "txtDiagnosticsError", "btnDiagnosticsRefresh" })
+            {
+                Assert.True(names.Contains(required), $"Diagnostics tab lost the probe surface '{required}'.");
+            }
+
+            // #84 AC, pinned as prose: the tab says out loud that the list is in the Event
+            // Server's memory and resets when the service restarts.
+            var cadence = diagnostics.Descendants()
+                .Single(e => (e.Attribute(Xaml + "Name")?.Value) == "txtDiagnosticsCadence")
+                .Attribute("Text")?.Value ?? string.Empty;
+            Assert.Contains("memory", cadence, System.StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("restart", cadence, System.StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]

@@ -102,8 +102,10 @@ namespace WebContent.Admin
         {
             if (_userControl == null) return;
             _userControl.ClearUserControl();
-            // #74: no item context after a clear, so the Status role gate cannot grant anything.
+            // #74/#84: no item context after a clear, so the Status/Diagnostics role gate cannot
+            // grant anything.
             _userControl.SetStatusTabVisible(false);
+            _userControl.SetDiagnosticsTabVisible(false);
         }
 
         public override void ReleaseUserControl()
@@ -120,8 +122,12 @@ namespace WebContent.Admin
 
             // #74 role gate: the Status tab renders only when this user holds the workspace's
             // Manage security action; every denial or failed lookup hides the whole tab.
-            _userControl.SetStatusTabVisible(
-                WorkspaceTabPolicy.ShowStatusTab(WorkspaceManagePermissionEvaluator.Check(item)));
+            var managePermission = WorkspaceManagePermissionEvaluator.Check(item);
+            _userControl.SetStatusTabVisible(WorkspaceTabPolicy.ShowStatusTab(managePermission));
+
+            // #84: the Diagnostics tab rides the same gate - status-derived data plus the one
+            // allowlist-writing affordance, both for edit-rights holders only.
+            _userControl.SetDiagnosticsTabVisible(WorkspaceTabPolicy.ShowDiagnosticsTab(managePermission));
 
             // #76: the Status tab queries the Event Server for this item's live sessions, and the
             // id has to travel in the same form the Smart Client reports blocks under.
