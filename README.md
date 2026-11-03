@@ -54,6 +54,12 @@ analysis.
 Download the installer from the [latest release](https://github.com/joshooaj/WebContentPlugin/releases/latest). Run the
 file named `CascadiaWebContentPlugin.<version>.msi`.
 
+The installer **closes running Milestone applications** (Smart Client, Management Client) so
+upgrades never fail on locked plugin files. These apps do not cooperate with Windows' restart
+manager, so they are closed without a chance to save — close Smart Client yourself if you have
+unsaved view or layout changes. In the full UI the installer shows a warning first and lets you
+abort, retry, or proceed.
+
 The installer is not currently signed, so your browser will warn you that the file is potentially unsafe. The release
 also carries a `CascadiaWebContentPlugin.<version>.msi.sha256.txt` file that you can use to validate the installer hash.
 

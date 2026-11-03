@@ -15,6 +15,7 @@ named log marker. An area is **verified** only when all of its rows pass.
 | CI | `Tests` job in `.github/workflows/ci.yml` (runs on PRs and pushes) | job green before merge to `main`; the installer only publishes from `main` |
 | Deploy | `Invoke-psake -taskList DeployLocally, DeployToVms` (see `AGENTS.md`) | local drop hash-identical to `output\WebContent\`; ES restarts and logs its ready marker |
 | Manual host checks | Steps below, run against a deployed plugin per `AGENTS.md` | each row's expected outcome and log marker observed |
+| Full installer build | `.\build.ps1 [-Version x.y.z]` (also caches the WebView2 runtime and builds `src/Setup/setup.wixproj`) | exit 0; SBOM guard green; #70 sequencing guard throws unless the MSI force-closes the Milestone clients before RemoveFiles/InstallFiles with RemoveExistingProducts late |
 
 Manual-check logs: Smart Client → `%ProgramData%\Milestone\XProtect Smart Client\MIPLog.txt`
 (no `Logs\` subfolder); Management Client → `Logs\MIP.log` under its own ProgramData folder.
@@ -55,6 +56,7 @@ is not evidence the plugin never ran.
 
 | Per-workspace proxy response cap (5 MB default, hard 20 MB ceiling, clamp-on-read, MC Proxy-tab field) | #85 | `ProxyResponseCapStoreTests` (never-resolved store / unknown workspace / absent member / malformed 0-negative all answer the 5 MB default, never a refusal; a stored cap answers verbatim; a past-ceiling stored value clamps to 20 MB and gets exactly one audit line naming the workspace per refresh; a resolver failure after a good resolve keeps last-known-good caps; flap resilience across alternating refreshes; the 60 s window means one resolve per burst; `ForResponseCapBytes` factories clamp identically), `ProxyConfigurationTests` cap section (pre-#85 definitions read `ProxyMaxResponseBytes=0`; a stored value round-trips VERBATIM even past the ceiling - the clamp is on every read, never a silent rewrite at save time; the default stores 0 and the blob never grows the member - `EmitDefaultValue=false`), `ConfigResilienceTests` cap section (blank/whole-MB-inside-1..20 accepted, everything else refused BY NAME with the rejected text - no silent zoom-style clamp in the UI; MB→bytes mapping stores 0 for the default; bytes→display clamps honestly both ways; the admin ceiling and the contract's `MaxAllowedResponseBytes` are pinned in lockstep), `ProxyFetchCorrelationTests` (the client receive guard bounds allocation against the 20 MB PROTOCOL ceiling, not the old 5 MB default - a hostile `ceiling+1` declaration still errors, while a 6 MB framed answer reassembles), `WorkspaceTabShellGuardTests` (the Proxy tab carries `lblProxyResponseCap`/`txtProxyResponseCapMB`/`lblProxyResponseCapHint`, the field's explicit AutomationId and `OnProxyResponseCapTextChanged` handler pinned) | See MC-17 below - **live rows PASSED 2026-11-02** (run `20261102-210935`): the default posture refuses a REAL 10 MB download with `TooLarge ... exceeded the 5242880 byte response cap`; saving 12 MB flips the SAME download to `HTTP 200 - 10485760 bytes fetched` inside the 60 s ES refresh window (which also proves the raised client receive guard); `99999` refuses the whole save by name with zero new cap-audit lines while the ES keeps serving the stored cap; restoring 5 re-arms the refusal |
 | Per-workspace proxy header policy: add/override/strip rows on BOTH fetch legs, forbidden-header guardrail enforced at save AND at runtime | #86 | `ProxyHeaderPolicyTests` (the canonical forbidden set: exact hop-by-hop/Host/Content-Length/Transfer-Encoding/TE/Upgrade names + every `Proxy-*` prefix, case-insensitive; RFC 9110 token-name grammar, CR/LF in a value refused; the apply model: add/override replaces all same-name entries case-insensitively, rules apply in configuration order with LAST rule winning, forbidden rules never applied even when hand-fed past the store), `ProxyHeaderPolicyStoreTests` (60 s refresh / last-known-good / Prime-at-Init; forbidden and malformed stored rows refused with one audit line per refresh naming workspace + raw text; corrupt blobs = empty policy, never a refusal), `ProxyHeaderEditorTests` (the MC build refuses the WHOLE policy by name with nothing partial returned; strip-without-value is valid; strip does NOT unlock a forbidden name; Load drops unrenderable stored rows counted for the log), `ProxyConfigurationTests` header section (round-trips keep forbidden names VERBATIM on the wire - readers refuse, nobody censors; empty grids store no section, pre-#86 wire shape preserved), `EventServerHeaderPolicyWiringGuardTests` (request rules applied before the fetch, response rules before the frame and only for a real upstream status, store Prime at Init, all three block sets derived from the one canonical set), `WorkspaceTabShellGuardTests` (both grids on the Proxy tab: name-keyed lookups, per-AutomationId column pinning for both legs, the PropertyChanged binding guard across every Proxy-tab grid) | See MC-18 below - **live rows PASSED 2026-11-02** (run `20261102-224611`): a two-rule policy per leg stores through the audit line AND order-sensitive reloaded-pane readback; four forbidden-row cycles (request+response, add+strip) each pin the live Problem text, the notice naming the row verbatim, the refusal marker, and zero new audit lines; empty grids store the empty policy |
+| Installer upgrade with Milestone clients running (MSI force-closes Smart Client / Management Client instead of failing 1603 on locked plugin dlls) | #70 | `build.ps1` structural guard (parses `wix-wid.xml` out of the versioned `.wixpdb`: the `Wix4CloseApplications_*` action is scheduled after InstallInitialize and before RemoveFiles/InstallFiles, RemoveExistingProducts is after InstallFiles, and the three kill targets — `Client.exe`, `VideoOS.Administration.exe`, `VideoOS.OAuth2TokenGenerator.exe` — are in the `Wix4CloseApplication` table) | See IN-1 below - **all live rows PASSED 2026-11-03** on the VMS machine with the clients launched in a real interactive session and `WebContent.dll` proven LOCKED first: uninstall, fresh install, and an upgrade — each with `Client.exe` + `VideoOS.Administration.exe` running — answered exit code 0, killed the clients, and left a hash-verified drop |
 
 ## Manual host checks
 
@@ -1264,6 +1266,50 @@ toggles expansion) — workspace children never realize without a real double-cl
 MC-provisioning phase is input-injection-dependent by nature (FlaUI SendInput fails with
 ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all work).
 
+## Installer checks
+
+### IN-1 Installer force-closes running Milestone clients (#70)
+
+The MSI must never fail (1603) because `Client.exe` / `VideoOS.Administration.exe` hold the
+plugin dlls. WiX v7 removed the restart-manager `CloseApplications` element, so `setup.wxs`
+authores `util:CloseApplication` rows that **force-kill** the three plugin-hosting processes
+(`Client.exe`, `VideoOS.Administration.exe`, and the observed alternate host
+`VideoOS.OAuth2TokenGenerator.exe`) — neither Milestone app is RestartManager-cooperative, so
+unsaved client state is lost. In the full UI (`MUILevel=5`) each app gets an Abort/Retry/Ignore
+warning first (default Ignore); silent runs (`/qn`) take the no-prompt twin row. The kill is
+scheduled right after InstallInitialize (1501), well before RemoveFiles (3500)/InstallFiles
+(4000), and `MajorUpgrade Schedule="afterInstallExecute"` keeps RemoveExistingProducts late
+(6501) — safe because old and new packages share identical component GUIDs, so MSI reference
+counting preserves shared files.
+
+Automated (build-time): `build.ps1` fails the installer build unless the compiled MSI's
+`InstallExecuteSequence` keeps that ordering and the `Wix4CloseApplication` table carries the
+three targets (see the matrix row above).
+
+Manual live rows:
+
+1. Uninstall with clients running: `msiexec /x {product-code} /qn` → exit 0, clients gone, drop
+   folder and uninstall registry entry gone.
+2. First install with clients running: `msiexec /i <msi> /qn` → exit 0, clients killed, drop
+   hash-identical to `output\WebContent\`, product registered.
+3. **The #70 scenario** — upgrade with clients running (old version installed, `WebContent.dll`
+   proven LOCKED by an exclusive-open probe first): `msiexec /i <new msi> /qn` → exit 0 (not
+   1603), clients killed, version bumped, drop hash-identical. The log shows the deferred
+   `WixCloseApplicationsDeferred` custom action with `MSI_LUA ... sufficient privileges` and
+   `MainEngineThread is returning 0`.
+
+The full-UI Abort/Retry/Ignore dialog is structurally verified only (the prompt rows and
+`Description` strings are in the compiled tables); nobody clicked through it live.
+
+**All three live rows PASSED 2026-11-03** on the VMS machine (`vms.joshooaj.com`), clients
+launched into the real interactive session 3 via scheduled tasks, `MilestoneEventServerService`
+stopped around the MSI operations (it also holds the drop dlls; see #68 for its own upgrade
+story) and restarted afterwards. Uninstall of `0.1.259.40320` (`uninstall.log`), fresh install
+of `0.1.259.40320` (`install-fresh.log`), and the upgrade `0.1.259.40320 → 0.1.999.1`
+(`upgrade.log`) each exited 0 with the clients killed; the final production reinstall verified
+`WebContent.dll` hash-identical (`52B303DA…868C1E`) to the local build drop. Test artifacts and
+scheduled tasks removed afterwards.
+
 ## Known high-risk regressions → pinned by
 
 | Regression (remediation it would undo) | Pinned by |
@@ -1300,6 +1346,7 @@ ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all 
 | A wildcard allowlist entry reaching the apex, a literal IP, `localhost`, or the VMS's own hosts - SSRF widening of every gate AND the mint policy at once (#73) | `ProxyPolicyTests` (seeded apex/subdomain/floor invariants over random hosts and IPv4s), `ProxyAllowlistGateAgreementTests` (ES fetch, client forward, and leaf mint reach identical verdicts on one matrix), MC-13 |
 | A tri-state string on a WPF-boolean DataGrid attribute taking the whole Management Client config page down at BAML parse time (#76, found in the MC-13 walk) | `WorkspaceTabShellGuardTests` (every `CanUser*` on every page DataGrid pinned to a real bool), MC-13 |
 | A CA export writing an EMPTY file when no authority exists, guessing the CA's provenance (a script-provisioned certificate invisible to the export), reaching any cert store WRITE flag, or outgrowing the MIP frame limits mid-reply (#75) | `ProxyCaExportTests` (`NoAuthority` "does not exist yet" posture; fixed-CN read-only `LocalMachine\Personal` resolve with source guards on the open flags; view builder never offers a save without bytes; 8 KiB DER / 16 KiB wire caps pinned under the proven chunk headroom with a real 2048-bit CA under the cap), MC-15 (live bytes byte-identical to the legacy-script-provisioned store entry) |
+| MSI upgrade dying with 1603 because a running Smart Client / Management Client locks the plugin dlls, or the force-close drifting after RemoveFiles/InstallFiles so the files are still locked when the MSI reaches them (#70) | `build.ps1` installer sequencing guard (compiled-MSI action order + kill-target table pins), IN-1 (live uninstall/fresh-install/upgrade rows with the dll proven LOCKED, all exit 0) |
 
 ## Scope notes (deliberate)
 
