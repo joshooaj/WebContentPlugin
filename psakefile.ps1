@@ -39,6 +39,7 @@ Task Build -Depends ToolRestore {
 Task Lint -Depends ToolRestore {
     Exec {
         & dotnet format .\src\WebContent\WebContent.csproj --verify-no-changes
+        & dotnet format .\src\WebContentTrustHelper\WebContentTrustHelper.csproj --verify-no-changes
         & dotnet format .\src\WebContent.Tests\WebContent.Tests.csproj --verify-no-changes
         & dotnet format .\tests\ux\WebContent.UxTests\WebContent.UxTests.csproj --verify-no-changes
         Invoke-ScriptAnalyzer -Settings .\PSScriptAnalyzerSettings.psd1 . -ErrorAction Stop

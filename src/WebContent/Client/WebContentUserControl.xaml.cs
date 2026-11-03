@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -38,6 +41,24 @@ namespace WebContent.Client
         private ProxyBlockTally _blockTally;
         private bool _blockedPanelOpen;
         private int _blockRefreshQueued;
+
+        /// <summary>
+        /// #72: the deployment-CA trust posture of the browser behind this control (proxied views
+        /// only). Fires its Changed event from the listener's mint threads; banner work is
+        /// marshalled to this control's dispatcher exactly like the #83 tally.
+        /// </summary>
+        private ProxyCaTrustState _caTrust;
+        private int _caRefreshQueued;
+        private int _caFixRunning;
+
+        /// <summary>
+        /// #72: banner dismissals for the lifetime of this plugin-host process - dismissal is per
+        /// session, so a fresh Smart Client session shows the notice again while the condition
+        /// persists (acceptance). Keyed by CA thumbprint so a rotated deployment CA is a new,
+        /// undismissed notice.
+        /// </summary>
+        private static readonly HashSet<string> CaBannerDismissedThumbprints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object CaBannerDismissedSync = new object();
 
         public override bool ShowToolbar => false;
         public override bool Selectable => false;
@@ -86,6 +107,10 @@ namespace WebContent.Client
             NavPrint.ToolTip = Strings.AddressBarPrintToolTip;
             addressBar.PlaceholderText = Strings.AddressBarPlaceholder;
             blockedIndicator.ToolTip = Strings.BlockedResourcesToolTip;
+            proxyCaBannerText.Text = Strings.ProxyCaBannerText;
+            proxyCaFixButtonText.Text = Strings.ProxyCaFixButtonLabel;
+            proxyCaFixButton.ToolTip = Strings.ProxyCaFixButtonToolTip;
+            proxyCaDismissButton.ToolTip = Strings.ProxyCaDismissButtonToolTip;
         }
 
         private void OnAddressBarTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
@@ -121,6 +146,7 @@ namespace WebContent.Client
                 _viewModel.Init();
                 RegisterActiveControl(browser.Id);
                 BindBlockTally(browser);
+                BindCaTrust(browser);
 
                 if (browser.WebView == null)
                 {
@@ -176,6 +202,7 @@ namespace WebContent.Client
             {
                 _isClosed = true;
                 UnbindBlockTally();
+                UnbindCaTrust();
                 if (_viewModel != null)
                 {
                     _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
@@ -366,6 +393,7 @@ namespace WebContent.Client
             if (e.PropertyName == nameof(WebContentViewModel.IsSetupState))
             {
                 UpdateBlockedIndicator();
+                UpdateCaBanner();
             }
         }
 
@@ -478,6 +506,284 @@ namespace WebContent.Client
                 row.Children.Add(reason);
                 row.Children.Add(count);
                 blockedResourcesRows.Children.Add(row);
+            }
+        }
+
+        #endregion
+
+        #region Untrusted deployment-CA banner (#72)
+
+        /// <summary>Bundled elevated import helper; lives next to the plugin assembly in the drop.</summary>
+        private const string TrustHelperExecutableName = "WebContentTrustHelper.exe";
+
+        /// <summary>ShellExecute elevation the user declined at the Windows consent prompt.</summary>
+        private const int ErrorCancelled = 1223;
+
+        /// <summary>
+        /// Attach this control to the browser's deployment-CA trust posture. Like the #83 tally
+        /// it is browser-owned, so it survives listener rewires and WebView recreation; only a
+        /// different browser (or none) needs a re-subscription.
+        /// </summary>
+        private void BindCaTrust(BrowserInstance browser)
+        {
+            var trust = browser?.ProxyCaTrust;
+            if (!ReferenceEquals(_caTrust, trust))
+            {
+                UnbindCaTrust();
+                _caTrust = trust;
+                if (_caTrust != null)
+                {
+                    _caTrust.Changed += CaTrust_Changed;
+                }
+            }
+
+            UpdateCaBanner();
+        }
+
+        private void UnbindCaTrust()
+        {
+            if (_caTrust != null)
+            {
+                _caTrust.Changed -= CaTrust_Changed;
+                _caTrust = null;
+            }
+        }
+
+        private void CaTrust_Changed()
+        {
+            // Fires on the listener's mint threads (and on the UI thread from the fix/dismissal
+            // paths); coalesce bursts into one dispatcher pass exactly like the #83 tally.
+            if (_isClosed)
+            {
+                return;
+            }
+
+            if (System.Threading.Interlocked.Exchange(ref _caRefreshQueued, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    System.Threading.Interlocked.Exchange(ref _caRefreshQueued, 0);
+                    if (!_isClosed)
+                    {
+                        UpdateCaBanner();
+                    }
+                }), DispatcherPriority.Background);
+            }
+            catch (Exception)
+            {
+                // Dispatcher shutdown mid-teardown: the control is going away anyway.
+            }
+        }
+
+        private static bool IsCaBannerDismissed(string thumbprint)
+        {
+            lock (CaBannerDismissedSync)
+            {
+                return CaBannerDismissedThumbprints.Contains(thumbprint);
+            }
+        }
+
+        /// <summary>
+        /// The banner shows for EVERY user (setup or runtime) of a proxied view whose minted
+        /// leaves chain to a deployment CA this machine does not trust - the browser itself
+        /// shows its own certificate error behind this strip, and this names the fix instead of
+        /// leaving a bare Chromium page. Ordinary users get information + per-session dismissal
+        /// only; the elevated "Fix certificate trust" button is setup-mode-only. Trusted,
+        /// unknown (nothing minted yet), or dismissed this session: collapsed.
+        /// </summary>
+        private void UpdateCaBanner()
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            var trust = _caTrust;
+            var thumbprint = trust?.AuthorityThumbprint;
+            if (trust != null && trust.IsUntrustedConfirmed && !string.IsNullOrEmpty(thumbprint) && IsCaBannerDismissed(thumbprint))
+            {
+                proxyCaBanner.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            if (trust != null && trust.IsUntrustedConfirmed)
+            {
+                proxyCaBanner.Visibility = Visibility.Visible;
+                proxyCaFixButton.Visibility = _viewModel?.IsSetupState == true ? Visibility.Visible : Visibility.Collapsed;
+            }
+            else
+            {
+                proxyCaBanner.Visibility = Visibility.Collapsed;
+                proxyCaFixButton.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void proxyCaDismissButton_Click(object sender, RoutedEventArgs e)
+        {
+            var thumbprint = _caTrust?.AuthorityThumbprint;
+            if (string.IsNullOrEmpty(thumbprint))
+            {
+                return;
+            }
+
+            lock (CaBannerDismissedSync)
+            {
+                CaBannerDismissedThumbprints.Add(thumbprint);
+            }
+
+            EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl),
+                $"WebContent proxy: untrusted-CA banner dismissed for CA {thumbprint} for the rest of this Smart Client session (the notice reappears next session while the condition persists).");
+            UpdateCaBanner();
+        }
+
+        /// <summary>
+        /// Setup-mode-only fix. Deliberate UX cost (from the ticket's grilling): the flow raises
+        /// TWO Windows dialogs - the UAC elevation consent and crypt32's modal trusted-root
+        /// warning - and neither is suppressed. The plugin hands the helper the EXACT DER the
+        /// mint reported plus its thumbprint; the helper re-verifies the thumbprint before it
+        /// touches a store, and the plugin independently re-reads the root stores afterwards, so
+        /// "success" is proven, not claimed. There is no automatic or silent trust path anywhere.
+        /// </summary>
+        private void proxyCaFixButton_Click(object sender, RoutedEventArgs e)
+        {
+            var trust = _caTrust;
+            if (trust == null || !trust.IsUntrustedConfirmed || _viewModel?.IsSetupState != true)
+            {
+                return;
+            }
+
+            byte[] authorityDer;
+            try
+            {
+                authorityDer = Convert.FromBase64String(trust.AuthorityDerBase64 ?? string.Empty);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl),
+                    $"WebContent proxy: certificate-trust fix refused - the deployment CA DER from the leaf mint is not decodable: {exception.Message}");
+                return;
+            }
+
+            if (authorityDer.Length == 0 || string.IsNullOrEmpty(trust.AuthorityThumbprint))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl),
+                    "WebContent proxy: certificate-trust fix refused - no deployment CA material to import.");
+                return;
+            }
+
+            if (System.Threading.Interlocked.Exchange(ref _caFixRunning, 1) == 1)
+            {
+                return;
+            }
+
+            var thumbprint = trust.AuthorityThumbprint;
+            EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl),
+                $"WebContent proxy: certificate-trust fix requested for CA {thumbprint}; starting the elevated helper (expect the Windows elevation prompt, then crypt32's root-store warning).");
+
+            // The helper may wait on the UAC consent and crypt32's warning for as long as a human
+            // takes; the wait lives off the UI thread and the banner stays put meanwhile.
+            Task.Run(() => RunTrustFixHelper(thumbprint, authorityDer));
+        }
+
+        private void RunTrustFixHelper(string thumbprint, byte[] authorityDer)
+        {
+            var exitCode = int.MinValue;
+            string note = null;
+            string tempFile = null;
+            try
+            {
+                var helperPath = Path.Combine(
+                    Path.GetDirectoryName(typeof(WebContentUserControl).Assembly.Location) ?? string.Empty,
+                    TrustHelperExecutableName);
+                if (!File.Exists(helperPath))
+                {
+                    note = $"the bundled {TrustHelperExecutableName} is missing from the plugin folder - reinstall the plugin";
+                }
+                else
+                {
+                    tempFile = Path.Combine(Path.GetTempPath(), "webcontent-proxy-ca-" + Guid.NewGuid().ToString("N") + ".der");
+                    File.WriteAllBytes(tempFile, authorityDer);
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = helperPath,
+                        Arguments = "\"" + tempFile + "\" " + thumbprint,
+                        UseShellExecute = true,
+                        // The deliberate elevation gate: the plugin process must never write a
+                        // trust store itself, so the import only ever runs through UAC.
+                        Verb = "runas",
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                    };
+                    using (var process = Process.Start(startInfo))
+                    {
+                        process.WaitForExit();
+                        exitCode = process.ExitCode;
+                    }
+                }
+            }
+            catch (System.ComponentModel.Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
+            {
+                note = "the elevation was declined at the Windows prompt (ERROR_CANCELLED)";
+            }
+            catch (Exception exception)
+            {
+                note = exception.Message;
+            }
+            finally
+            {
+                try { if (tempFile != null) File.Delete(tempFile); } catch { }
+            }
+
+            // Prove the flip by re-reading the root stores ourselves; the helper's exit code is
+            // only a hint. Then the leaf cache drops and the next mint re-publishes the posture.
+            var nowTrusted = exitCode == 0
+                && ProxyLoopbackTrust.IsRootTrusted(thumbprint, message => EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl), message));
+
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    System.Threading.Interlocked.Exchange(ref _caFixRunning, 0);
+                    if (_isClosed)
+                    {
+                        return;
+                    }
+
+                    if (nowTrusted)
+                    {
+                        EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl),
+                            $"WebContent proxy: certificate-trust fix confirmed - CA {thumbprint} is now in this machine's trusted roots; invalidating cached leaves for browser {_viewModel?.Browser?.Id} and reloading proxied https content (no Smart Client restart needed).");
+                        _caTrust?.Publish(thumbprint, Convert.ToBase64String(authorityDer), true);
+                        var browser = _viewModel?.Browser;
+                        browser?.ProxyListener?.InvalidateLeafCache();
+
+                        // A proxied https document that is sitting on Chromium's certificate error
+                        // needs one reload to re-dial the tunnel against the newly anchored chain.
+                        if (Uri.TryCreate(browser?.Address, UriKind.Absolute, out var address)
+                            && string.Equals(address.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _viewModel?.ReloadCommand?.Execute(null);
+                        }
+                    }
+                    else
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(WebContentUserControl),
+                            "WebContent proxy: certificate-trust fix did not complete"
+                            + (note != null ? $" - {note}." : $" - the helper exited with code {exitCode}.")
+                            + " The banner stays; nothing was trusted silently and the browser posture is unchanged.");
+                    }
+
+                    UpdateCaBanner();
+                }), DispatcherPriority.Background);
+            }
+            catch (Exception)
+            {
+                // Dispatcher shutdown: the fix outcome dies with the control; the store state is
+                // whatever the elevated helper actually did, which is auditable in its own log.
             }
         }
 

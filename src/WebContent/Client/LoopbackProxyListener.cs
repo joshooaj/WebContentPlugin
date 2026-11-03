@@ -45,6 +45,13 @@ namespace WebContent.Client
         /// of this listener.
         /// </summary>
         private readonly ProxyBlockTally _tally;
+
+        /// <summary>
+        /// #72: the browser view's deployment-CA trust posture this listener feeds on every leaf
+        /// mint (and re-checks after <see cref="InvalidateLeafCache"/>). Owned by the browser,
+        /// like the tally; the Smart Client banner renders it.
+        /// </summary>
+        private readonly ProxyCaTrustState _caTrust;
         private IReadOnlyList<string> _canonicalTargets;
         private IReadOnlyList<string> _vmsFloorHosts;
         private TcpListener _listener;
@@ -69,11 +76,13 @@ namespace WebContent.Client
             Func<ProxyFetchQuery, Task<ProxyFetchResult>> fetch,
             ProxyViewSessionContext session = null,
             ProxyBlockTally tally = null,
-            IEnumerable<string> vmsFloorHosts = null)
+            IEnumerable<string> vmsFloorHosts = null,
+            ProxyCaTrustState caTrust = null)
         {
             _canonicalTargets = canonicalTargets ?? new string[0];
             _vmsFloorHosts = vmsFloorHosts == null ? new string[0] : (IReadOnlyList<string>)new List<string>(vmsFloorHosts);
             _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));
+            _caTrust = caTrust;
             _session = session ?? new ProxyViewSessionContext
             {
                 SessionId = Guid.NewGuid().ToString("N"),
@@ -92,7 +101,14 @@ namespace WebContent.Client
                 message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
             _tally = tally ?? new ProxyBlockTally(message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
             _tally.SetForwarder(_blocks);
-            _tls = new ProxyLoopbackTls(RequestLeafAsync, message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
+            _tls = new ProxyLoopbackTls(RequestLeafAsync, message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message), _caTrust);
+        }
+
+        /// <summary>#72: drop the cached leaves so the next proxied https tunnel re-mints and
+        /// re-checks the deployment CA trust posture (called when a fix made the CA trusted).</summary>
+        internal void InvalidateLeafCache()
+        {
+            _tls.InvalidateLeafCache();
         }
 
         /// <summary>Swap the allowlist gate live (an admin target edit needs no browser restart).

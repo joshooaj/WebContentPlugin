@@ -1130,5 +1130,41 @@ namespace WebContent {
                 return ResourceManager.GetString("ProxyCaExportSavedFormat", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy certificate is not trusted on this PC - contact your administrator..
+        /// </summary>
+        internal static string ProxyCaBannerText {
+            get {
+                return ResourceManager.GetString("ProxyCaBannerText", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Fix certificate trust.
+        /// </summary>
+        internal static string ProxyCaFixButtonLabel {
+            get {
+                return ResourceManager.GetString("ProxyCaFixButtonLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Starts the bundled elevated helper to import this proxy&apos;s certificate authority into this machine&apos;s Trusted Root store. Windows will show its elevation prompt and its own root-store warning - import this certificate only if you trust the VMS administrator who deployed the proxy..
+        /// </summary>
+        internal static string ProxyCaFixButtonToolTip {
+            get {
+                return ResourceManager.GetString("ProxyCaFixButtonToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Dismiss this notice for the rest of this Smart Client session. It reappears in the next session while the certificate is still not trusted..
+        /// </summary>
+        internal static string ProxyCaDismissButtonToolTip {
+            get {
+                return ResourceManager.GetString("ProxyCaDismissButtonToolTip", resourceCulture);
+            }
+        }
     }
 }

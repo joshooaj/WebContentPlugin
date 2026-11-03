@@ -40,6 +40,11 @@ namespace WebContent
 
         private readonly ProxyLeafMintChannel _mint;
         private readonly Action<string> _log;
+        private readonly Func<string, bool> _rootTrustProbe;
+
+        /// <summary>#72: per-browser-view trust posture this manager feeds on every mint; null
+        /// when nobody observes it (unit seams, non-view listeners).</summary>
+        private readonly ProxyCaTrustState _trustState;
         private readonly object _gate = new object();
         private readonly Dictionary<string, X509Certificate2> _leaves =
             new Dictionary<string, X509Certificate2>(StringComparer.OrdinalIgnoreCase);
@@ -47,10 +52,16 @@ namespace WebContent
         private readonly HashSet<string> _authorityTrustReported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool _disposed;
 
-        internal ProxyLoopbackTls(ProxyLeafMintChannel mint, Action<string> log)
+        internal ProxyLoopbackTls(
+            ProxyLeafMintChannel mint,
+            Action<string> log,
+            ProxyCaTrustState trustState = null,
+            Func<string, bool> rootTrustProbe = null)
         {
             _mint = mint ?? throw new ArgumentNullException(nameof(mint));
             _log = log ?? delegate { };
+            _trustState = trustState;
+            _rootTrustProbe = rootTrustProbe ?? (thumbprint => ProxyLoopbackTrust.IsRootTrusted(thumbprint, _log));
         }
 
         /// <summary>
@@ -133,8 +144,38 @@ namespace WebContent
             }
 
             _log("WebContent proxy: Event Server minted loopback TLS leaf for " + cacheKey);
-            ReportAuthorityTrustState(response.AuthorityThumbprint);
+            PublishAuthorityTrustState(response.AuthorityThumbprint, response.AuthorityDerBase64);
             return leaf;
+        }
+
+        /// <summary>
+        /// #72: drop every cached leaf (and its local key container) so the next proxied https
+        /// tunnel re-mints. The trigger is a deployment CA that became trusted after the leaves
+        /// were minted (the setup-mode fix helper, or a manual Import-Certificate mid-session):
+        /// the re-mint re-publishes the trust posture against the fresh root stores, and the
+        /// browser re-validates each new tunnel against the now-anchored chain - no Smart Client
+        /// restart. A live tunnel already handshake-d on a disposed leaf drops; it was riding the
+        /// untrusted posture anyway, and the next request reconnects cleanly.
+        /// </summary>
+        internal void InvalidateLeafCache()
+        {
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _leaves.Clear();
+                foreach (var owner in _leafOwners)
+                {
+                    try { owner.Dispose(); } catch { }
+                }
+
+                _leafOwners.Clear();
+            }
+
+            _log("WebContent proxy: loopback TLS leaf cache invalidated (a fresh mint will re-check the deployment CA trust posture).");
         }
 
         /// <summary>
@@ -201,26 +242,39 @@ namespace WebContent
         }
 
         /// <summary>
-        /// Log the machine's trust posture for this deployment CA exactly once per thumbprint:
-        /// either confirmation, or the exact one-time elevated step the operator still owes.
-        /// Reading the root stores never needs elevation; only the import does.
+        /// #72 (was #56's log-only report): on EVERY mint, read this machine's trust posture for
+        /// the reported deployment CA and publish it (thumbprint + public DER + verdict) to the
+        /// per-view <see cref="ProxyCaTrustState"/>, which raises Changed only on a real flip.
+        /// The log names the exact one-time elevated step exactly once per (thumbprint, verdict)
+        /// pair so a CA that becomes trusted mid-session gets its confirmation line too. Reading
+        /// the root stores never needs elevation; only the import does, and that path lives in
+        /// the setup-mode banner fix (the bundled elevated helper), never here.
         /// </summary>
-        private void ReportAuthorityTrustState(string authorityThumbprint)
+        private void PublishAuthorityTrustState(string authorityThumbprint, string authorityDerBase64)
         {
             if (string.IsNullOrEmpty(authorityThumbprint))
             {
                 return;
             }
 
-            lock (_gate)
+            var trusted = _rootTrustProbe(authorityThumbprint);
+            if (_trustState != null)
             {
-                if (!_authorityTrustReported.Add(authorityThumbprint))
-                {
-                    return;
-                }
+                _trustState.Publish(authorityThumbprint, authorityDerBase64, trusted);
             }
 
-            if (ProxyLoopbackTrust.IsRootTrusted(authorityThumbprint, _log))
+            bool logLine;
+            lock (_gate)
+            {
+                logLine = _authorityTrustReported.Add(authorityThumbprint + "|" + (trusted ? "trusted" : "untrusted"));
+            }
+
+            if (!logLine)
+            {
+                return;
+            }
+
+            if (trusted)
             {
                 _log("WebContent proxy: deployment CA " + authorityThumbprint + " is present in this machine's trusted roots.");
                 return;

@@ -142,6 +142,14 @@ namespace WebContent.Client
         /// </summary>
         internal ProxyBlockTally ProxyBlocks { get; set; }
 
+        /// <summary>
+        /// Ticket #72: the deployment-CA trust posture for this browser's proxied tunnels
+        /// (null for an unproxied browser). Browser-owned so it survives a listener rewire;
+        /// every mint through the current listener republishes it, and the Smart Client view
+        /// renders an untrusted posture as its banner.
+        /// </summary>
+        internal ProxyCaTrustState ProxyCaTrust { get; set; }
+
         internal string ProxyBrowserArguments { get; set; }
 
         /// <summary>
@@ -245,6 +253,51 @@ namespace WebContent.Client
             catch (Exception ex)
             {
                 EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Blocked-resource reset failed for browser {Id}: {ex.Message}");
+            }
+
+            // #72: a top-level navigation is also the cheap re-check point for a deployment CA
+            // this process last saw as untrusted (the fix helper, an admin's Import-Certificate,
+            // or a GPO push can land trust mid-session). When the store now holds it, drop the
+            // cached leaves so the very next https tunnel re-mints and re-publishes the trusted
+            // posture - the proxied page then renders without restarting Smart Client.
+            RecheckProxyCaTrust();
+        }
+
+        /// <summary>
+        /// #72: re-reads the root stores for a posture this browser previously saw as untrusted
+        /// and, when the CA has become trusted, invalidates the listener's leaf cache so the next
+        /// mint re-publishes the flipped posture. Never writes a store; a null/unproxied or
+        /// already-trusted posture costs nothing.
+        /// </summary>
+        private void RecheckProxyCaTrust()
+        {
+            var trust = ProxyCaTrust;
+            if (trust == null || !trust.IsUntrustedConfirmed)
+            {
+                return;
+            }
+
+            var thumbprint = trust.AuthorityThumbprint;
+            if (string.IsNullOrEmpty(thumbprint) || ProxyListener == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!ProxyLoopbackTrust.IsRootTrusted(thumbprint, message => EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), message)))
+                {
+                    return;
+                }
+
+                EnvironmentManager.Instance.Log(false, nameof(BrowserInstance),
+                    $"WebContent proxy: deployment CA {thumbprint} newly present in this machine's trusted roots; invalidating cached leaves for browser {Id} so the next mint re-publishes the trusted posture.");
+                ProxyListener.InvalidateLeafCache();
+                trust.Publish(thumbprint, trust.AuthorityDerBase64, true);
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Deployment-CA trust re-check failed for browser {Id}: {ex.Message}");
             }
         }
 

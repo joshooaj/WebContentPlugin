@@ -477,4 +477,16 @@
   <data name="ProxyCaExportSavedFormat" xml:space="preserve">
     <value>Saved {0} (thumbprint {1}). Distribute it to Smart Client machines' LocalMachine\Root trusted-root store - the recommended path is Active Directory Group Policy; see the plugin README.</value>
   </data>
+  <data name="ProxyCaBannerText" xml:space="preserve">
+    <value>The proxy certificate is not trusted on this PC - contact your administrator.</value>
+  </data>
+  <data name="ProxyCaFixButtonLabel" xml:space="preserve">
+    <value>Fix certificate trust</value>
+  </data>
+  <data name="ProxyCaFixButtonToolTip" xml:space="preserve">
+    <value>Starts the bundled elevated helper to import this proxy's certificate authority into this machine's Trusted Root store. Windows will show its elevation prompt and its own root-store warning - import this certificate only if you trust the VMS administrator who deployed the proxy.</value>
+  </data>
+  <data name="ProxyCaDismissButtonToolTip" xml:space="preserve">
+    <value>Dismiss this notice for the rest of this Smart Client session. It reappears in the next session while the certificate is still not trusted.</value>
+  </data>
 </root>

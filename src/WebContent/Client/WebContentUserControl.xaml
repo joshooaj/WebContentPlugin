@@ -57,6 +57,29 @@
                 <StackPanel Name="blockedResourcesRows" />
             </Border>
         </StackPanel>
+        <!-- #72: untrusted deployment-CA banner, shown for ALL users of a proxied view whose
+             loopback leaf chains to a CA this machine's trusted-root stores do not hold (the
+             browser itself shows its own certificate error under this strip). Informational for
+             ordinary users: dismiss for this session only. The "Fix certificate trust" button is
+             setup-mode-only and launches the bundled elevated helper (WebContentTrustHelper.exe);
+             Windows' elevation prompt and crypt32's root-store warning both ride it, unsuppressed.
+             Collapsed while the CA is trusted, unknown (no mint yet), or dismissed this session. -->
+        <Border Name="proxyCaBanner" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0 2" Padding="6 4" BorderThickness="1" BorderBrush="#80C8860E" Background="#40C8860E">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Name="proxyCaBannerText" Grid.Column="0" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="White" />
+                <platformUiControls:VideoOSButtonTransparentSmall Name="proxyCaFixButton" Grid.Column="1" Visibility="Collapsed" Click="proxyCaFixButton_Click" Margin="8 0 2 0">
+                    <TextBlock Name="proxyCaFixButtonText" VerticalAlignment="Center" Margin="2 0" />
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <platformUiControls:VideoOSButtonTransparentSmall Name="proxyCaDismissButton" Grid.Column="2" Click="proxyCaDismissButton_Click" Margin="2 0 0 0">
+                    <TextBlock Text="&#x2715;" VerticalAlignment="Center" Margin="2 0" />
+                </platformUiControls:VideoOSButtonTransparentSmall>
+            </Grid>
+        </Border>
         <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown">
             <TextBlock Name="FloatingPlaceholder" Visibility="{Binding IsWorkspaceFloating, Converter={StaticResource BooleanToVisibilityConverter}}"
                        HorizontalAlignment="Center" VerticalAlignment="Center"

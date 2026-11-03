@@ -48,6 +48,11 @@ namespace WebContent.Client
             // empty for a non-proxied browser - there is nothing client-side to refuse.
             var blocks = new ProxyBlockTally(message => EnvironmentManager.Instance.Log(true, nameof(BrowserManager), message));
 
+            // #72: one deployment-CA trust posture per proxied browser, likewise browser-owned
+            // so the banner survives a listener rewire; every listener's leaf mint republishes
+            // it. A non-proxied browser keeps none - there is no CA behind it.
+            var caTrust = proxyProfile == null ? null : new ProxyCaTrustState();
+
             LoopbackProxyListener listener = null;
             string proxyArguments = null;
             string proxyUserDataFolder = null;
@@ -67,7 +72,8 @@ namespace WebContent.Client
                         ClientMachine = Environment.MachineName,
                     },
                     blocks,
-                    proxyProfile.VmsFloorHosts);
+                    proxyProfile.VmsFloorHosts,
+                    caTrust);
                 listener.Start();
                 proxyArguments = ProxyBrowserArguments.For(listener.Port);
                 proxyUserDataFolder = ProxiedUserDataFolder(id);
@@ -98,6 +104,7 @@ namespace WebContent.Client
                 var browser = new BrowserInstance(instance, id);
                 browser.ProxyListener = listener;
                 browser.ProxyBlocks = blocks;
+                browser.ProxyCaTrust = caTrust;
                 browser.ProxyBrowserArguments = proxyArguments;
                 browser.ProxyUserDataFolder = proxyUserDataFolder;
                 return browser;
@@ -146,6 +153,13 @@ namespace WebContent.Client
                 browser.ProxyBlocks = tally;
                 tally.Reset();
 
+                // #72: the trust posture is browser-owned and republished by the new listener's
+                // first mint, so a stale "untrusted" record from before the proxy was off never
+                // outlives the browser; a stale banner is re-checked (and hidden on a flip) the
+                // same way. Create one when the browser was built unproxied.
+                var caTrust = browser.ProxyCaTrust ?? new ProxyCaTrustState();
+                browser.ProxyCaTrust = caTrust;
+
                 var listener = new LoopbackProxyListener(
                     proxyProfile.CanonicalTargets,
                     FetchThroughMessaging,
@@ -156,7 +170,8 @@ namespace WebContent.Client
                         ClientMachine = Environment.MachineName,
                     },
                     tally,
-                    proxyProfile.VmsFloorHosts);
+                    proxyProfile.VmsFloorHosts,
+                    caTrust);
                 listener.Start();
                 browser.ProxyListener = listener;
                 browser.ProxyBrowserArguments = ProxyBrowserArguments.For(listener.Port);
@@ -179,6 +194,9 @@ namespace WebContent.Client
             browser.ProxyUserDataFolder = null;
             stopped?.Stop();
             browser.ProxyBlocks?.Reset();
+            // #72: no loopback listener, no deployment CA behind this view - the banner can
+            // never honestly claim "the proxy certificate is not trusted" for a direct browser.
+            browser.ProxyCaTrust?.Clear();
             EnvironmentManager.Instance.Log(
                 false,
                 nameof(BrowserManager),

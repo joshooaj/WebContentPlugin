@@ -64,6 +64,18 @@
     </PackageReference>
   </ItemGroup>
 
+  <!--
+    #72: the elevated trust helper rides the same build and lands in the same drop (its csproj
+    pins the identical OutputPath). ReferenceOutputAssembly=false: the plugin never links the
+    exe, it only ShellExecute's it from disk at fix time - keeping "the plugin cannot itself
+    write a trust store" true at the assembly level, not just by convention.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\WebContentTrustHelper\WebContentTrustHelper.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="plugin.def">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
