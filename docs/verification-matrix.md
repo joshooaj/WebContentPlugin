@@ -751,6 +751,60 @@ url=http://foo.*.bar.com/ method=any status=any / ... status=600 / url= method=P
 three refusals: audit lines 7 -> 7`; `saved triggers [] (verified from the audit line AND the
 reloaded grid, order-sensitive)`.
 
+### MC-20 Untrusted-CA machine aggregate on the Diagnostics banner (#80)
+
+Needs the drop deployed on BOTH machines: clients file the reports, the Event Server keeps the
+per-MACHINE table in memory, and the MC Diagnostics banner reads it from the same `StatusRequest`
+snapshot the blocked ring rides. Row 1 (`McCaUntrustedAggregateProbeTests.
+ProbeDiagnosticsTabShowsNoCaBannerWhileTheCaIsTrusted`, runs in every `TestUI` pass, mutates
+nothing): open Diagnostics in the healthy lab posture - the `caUntrustedBanner` peer reports
+off-screen, its collapsed `btnCaUntrustedExport` peer is off-screen, no visible pane text carries
+the aggregate wording, and `dgDiagnosticsBlocked`/`txtDiagnosticsSummary` render normally. A
+banner false-positive on a healthy machine is exactly the alarm fatigue the design refuses, so
+this half is unguarded.
+
+Row 2 (`ProbeUntrustedCaReportAggregatesIntoTheDiagnosticsBanner`, guarded
+`WEBCONTENT_CA_UNTRUST_LIVE=1` like the SC-10 row, mutates THIS machine's root stores): pull the
+deployment CA from BOTH root stores, load a Smart Client proxied view (the listener's posture
+flips and the ONE CertUntrusted report files through the block channel - never the #83 tally),
+the ES logs exactly one `Proxy CA trust report recorded: workspace='<item id>' machine='<name>'
+needs the deployment CA imported into its trusted roots.` per NEW machine, then the Management
+Client's Diagnostics banner must be VISIBLE and name the aggregate as machine reports and name
+THIS machine; clicking the inline `btnCaUntrustedExport` opens the #75 Save-As and writes a file
+whose thumbprint equals the deployment CA's. The banner lists this workstation exactly ONCE no
+matter how many sessions flipped (dedup is per MACHINE, not per view). Teardown re-imports the CA
+into both stores (CurrentUser direct, LocalMachine via the elevated localhost WinRM channel); the
+machine TABLE itself survives an Event Server restart-free restore BY DESIGN (in-memory aggregate
+state, no persistence - only `DeployToVms`/a service restart clears it, and re-flips dedup into
+the same single row). The CurrentUser\Root half is store-protected and Access-Denies for an
+unattended shell (the SC-10 lesson, re-verified live): the row then restores what it touched,
+records SKIPPED with the exact reason and passes - the elevated human step is: run
+`Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~McCaUntrustedAggregate' }`
+with `WEBCONTENT_CA_UNTRUST_LIVE=1` from an ELEVATED joshooaj shell (the direct CurrentUser\Root
+remove/add then succeeds; the LocalMachine half already works through the WinRM channel).
+
+Failure signatures: banner visible while the CA is trusted = aggregate text built from the wrong
+snapshot member (unit pins the empty-list path); a proxied view loads untrusted but the ES logs
+no marker = the listener's Changed subscription or the ES attribution gate is dead (both
+guard-pinned by source regex); the banner shows but never names the machine = the report lost
+its `ClientMachine` attribution (the ES attributes ONLY client-decided CertUntrusted reports -
+ES-decided target-chain failures never populate the table, by design and guard-pinned); the
+banner lists one row PER SESSION instead of per machine = the dedup key broke (unit pins
+case-insensitive machine dedup).
+
+Record (MC-20 row 1) - **live PASSED 2026-11-03**, run `20261103-075140`, drop deployed to both
+machines by `Invoke-psake -taskList Build, Deploy` (local install folder and remote ES drop both
+hash-verified on `WebContent.dll`). Results file: `banner not shown while the CA is trusted
+(off-screen banner + no visible aggregate text)` / `the inline export button is parked inside the
+collapsed banner while healthy` / `Diagnostics tab renders normally with the banner collapsed`;
+artifact `mc-ca-healthy.png`.
+Record (MC-20 row 2) - **SKIPPED-unattended 2026-11-03** (`CurrentUser\Root removal refused
+unattended (Access is denied.)`, stores untouched, artifact `mc-ca-aggregate-untrusted-results.txt`);
+the elevated human-step route above is the outstanding operator task for the full cross-machine
+live chain - the shape matches the SC-10 row 4 precedent, and every link of the chain besides
+the store surgery is pinned by unit rows + source guards (report contract skew included: the
+explicit `[DataContract]` payload decodes pre-#80 frames with the machine list null).
+
 ### SC-1 End-to-end proxied page load (#54)
 
 Requires the drop deployed on BOTH machines (Event Server machine + Smart Client machine per
