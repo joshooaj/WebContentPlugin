@@ -1429,8 +1429,10 @@ date ran green), and the probe immediately failed on both:
    disappear), and rows are ENUMERATED (`FindAllDescendants` paired by tree order) instead of
    first-descendant reads, so a browser-noise row can never mask the probe origin.
 
-**Live record (BEAST):** `20261103-104747` — **PASSED** 2026-11-03 (local drop `WebContent.dll`
-SHA-256 `972A01EA…09F78E03` hash-verified in the install folder): runtime renders nothing; setup
+**Live record (BEAST):** `20261103-104747` — **PASSED** 2026-11-03 (run-time drop
+`WebContent.dll` SHA-256 `972A01EA…09F78E03` hash-verified in the install folder; both lab
+machines now carry the identical-source rebuild `BA938406…B9A5A803`, v0.1.284.59742): runtime
+renders nothing; setup
 mode shows `4 resources blocked` beside the warning icon (real rendered UIA text); the list
 carries the canonical `http://172.16.128.210:18131` row with "not allowed by the workspace
 allowlist" and count 3 (two images + script, the fourth tally being the browser's own SmartScreen
