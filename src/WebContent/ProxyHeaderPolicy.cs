@@ -4,6 +4,22 @@ using System.Collections.Generic;
 namespace WebContent
 {
     /// <summary>
+    /// #86: why one configured header rule is refused. <see cref="ProxyHeaderPolicy"/> is the one
+    /// grammar authority; the Event Server audit lines and the Management Client's Problem column
+    /// are two renderings of the same code, so a row the MC would refuse and a row the ES would
+    /// skip are by construction the same rows.
+    /// </summary>
+    internal enum ProxyHeaderRuleError
+    {
+        None = 0,
+        NameEmpty = 1,
+        NameInvalid = 2,
+        Forbidden = 3,
+        ValueEmpty = 4,
+        ValueLineBreak = 5,
+    }
+
+    /// <summary>
     /// The per-workspace proxy header policy (#86): the canonical HTTP hop-by-hop/forbidden header
     /// set plus the add/override/remove rule model applied to BOTH legs of the proxy fetch —
     /// request rules rewrite what the Event Server sends upstream, response rules rewrite what it
@@ -71,41 +87,75 @@ namespace WebContent
         /// <summary>
         /// Validates raw rule text into a <see cref="HeaderRule"/>: RFC 9110 field-name token
         /// grammar for the name, no CR/LF anywhere (response-header injection), and the forbidden
-        /// guardrail. Returns false with the offending <paramref name="error"/> naming the header —
-        /// the same message shape the Management Client shows and the unit tests pin.
+        /// guardrail. <see cref="ValidateRule"/> returns the machine-readable refusal code — the
+        /// Event Server audit lines and the Management Client's Problem column both render it
+        /// through <see cref="DescribeRuleError"/>, so save-time refusal and runtime refusal can
+        /// never disagree about what is wrong with a row.
         /// </summary>
-        internal static bool TryBuildRule(string name, string value, bool remove, out HeaderRule rule, out string error)
+        internal static ProxyHeaderRuleError ValidateRule(string name, string value, bool remove)
         {
-            rule = null;
-            error = null;
             if (string.IsNullOrWhiteSpace(name))
             {
-                error = "header name is empty";
-                return false;
+                return ProxyHeaderRuleError.NameEmpty;
             }
+
             name = name.Trim();
             if (!IsValidHeaderName(name))
             {
-                error = $"header '{name}' is not a valid RFC 9110 field name";
-                return false;
+                return ProxyHeaderRuleError.NameInvalid;
             }
+
             if (IsForbiddenHeader(name))
             {
-                error = $"header '{name}' is reserved for the proxy connection and cannot be configured";
-                return false;
+                return ProxyHeaderRuleError.Forbidden;
             }
+
             if (!remove && string.IsNullOrWhiteSpace(value))
             {
-                error = $"header '{name}' has no value";
-                return false;
+                return ProxyHeaderRuleError.ValueEmpty;
             }
+
             if (!remove && value != null && (value.IndexOf('\r') >= 0 || value.IndexOf('\n') >= 0))
             {
-                error = $"header '{name}' value contains a line break";
+                return ProxyHeaderRuleError.ValueLineBreak;
+            }
+
+            return ProxyHeaderRuleError.None;
+        }
+
+        internal static bool TryBuildRule(string name, string value, bool remove, out HeaderRule rule)
+        {
+            rule = null;
+            if (ValidateRule(name, value, remove) != ProxyHeaderRuleError.None)
+            {
                 return false;
             }
-            rule = new HeaderRule { Name = name, Value = remove ? null : (value ?? string.Empty), Remove = remove };
+
+            rule = new HeaderRule { Name = name.Trim(), Value = remove ? null : value, Remove = remove };
             return true;
+        }
+
+        /// <summary>
+        /// The human sentence for a refusal code, naming the offending header. The invariant-culture
+        /// audit voice (MIP.log); the MC Problem column localizes the same codes from Strings.
+        /// </summary>
+        internal static string DescribeRuleError(ProxyHeaderRuleError error, string name)
+        {
+            switch (error)
+            {
+                case ProxyHeaderRuleError.NameEmpty:
+                    return "header name is empty";
+                case ProxyHeaderRuleError.NameInvalid:
+                    return $"header '{name}' is not a valid RFC 9110 field name";
+                case ProxyHeaderRuleError.Forbidden:
+                    return $"header '{name}' is reserved for the proxy connection and cannot be configured";
+                case ProxyHeaderRuleError.ValueEmpty:
+                    return $"header '{name}' has no value";
+                case ProxyHeaderRuleError.ValueLineBreak:
+                    return $"header '{name}' value contains a line break";
+                default:
+                    return string.Empty;
+            }
         }
 
         /// <summary>

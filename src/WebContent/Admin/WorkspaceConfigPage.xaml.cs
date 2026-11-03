@@ -48,6 +48,13 @@ namespace WebContent.Admin
         private readonly ProxyAllowlistEditor _allowlist = new ProxyAllowlistEditor();
         private bool _loadingProxyTargets;
 
+        // #86: the row collections behind the Proxy tab's two "Advanced: headers" grids (request
+        // leg and response leg). Same _loading discipline: a fill from stored config is not a
+        // user edit and must not dirty the pane.
+        private readonly ProxyHeaderEditor _requestHeaders = new ProxyHeaderEditor();
+        private readonly ProxyHeaderEditor _responseHeaders = new ProxyHeaderEditor();
+        private bool _loadingProxyHeaders;
+
         internal event EventHandler ConfigurationChanged;
 
         public WorkspaceConfigPage()
@@ -91,6 +98,36 @@ namespace WebContent.Admin
             // the same handler via subscription bookkeeping.
             _allowlist.Rows.CollectionChanged += OnProxyRowsCollectionChanged;
             UpdateProxyRowCounter();
+
+            // #86: the "Advanced: headers" grids. Headers from Strings like every other column;
+            // the column ORDER is pinned by WorkspaceTabShellGuardTests.
+            lblProxyHeaders.Text = Strings.ProxyHeadersSectionLabel;
+            lblProxyHeadersHint.Text = Strings.ProxyHeadersHint;
+            lblProxyRequestHeaders.Text = Strings.ProxyRequestHeadersLabel + ":";
+            lblProxyResponseHeaders.Text = Strings.ProxyResponseHeadersLabel + ":";
+            btnProxyHeaderAddRequest.Content = Strings.ProxyHeaderAddRequestButton;
+            btnProxyHeaderAddResponse.Content = Strings.ProxyHeaderAddResponseButton;
+            dgProxyRequestHeaders.ItemsSource = _requestHeaders.Rows;
+            dgProxyResponseHeaders.ItemsSource = _responseHeaders.Rows;
+            if (dgProxyRequestHeaders.Columns.Count >= 4)
+            {
+                dgProxyRequestHeaders.Columns[0].Header = Strings.ProxyColumnHeaderName;
+                dgProxyRequestHeaders.Columns[1].Header = Strings.ProxyColumnHeaderValue;
+                dgProxyRequestHeaders.Columns[2].Header = Strings.ProxyColumnHeaderStrip;
+                dgProxyRequestHeaders.Columns[3].Header = Strings.ProxyColumnProblem;
+            }
+
+            if (dgProxyResponseHeaders.Columns.Count >= 4)
+            {
+                dgProxyResponseHeaders.Columns[0].Header = Strings.ProxyColumnHeaderName;
+                dgProxyResponseHeaders.Columns[1].Header = Strings.ProxyColumnHeaderValue;
+                dgProxyResponseHeaders.Columns[2].Header = Strings.ProxyColumnHeaderStrip;
+                dgProxyResponseHeaders.Columns[3].Header = Strings.ProxyColumnProblem;
+            }
+
+            _requestHeaders.Rows.CollectionChanged += (sender, args) => OnProxyHeaderRowsChanged(_requestHeaders, sender, args);
+            _responseHeaders.Rows.CollectionChanged += (sender, args) => OnProxyHeaderRowsChanged(_responseHeaders, sender, args);
+            UpdateProxyHeaderCounters();
 
             // #76: the pull loop exists only while the Status tab is the one being looked at. No
             // push channel, no persistence, and no timer running for a page nobody is reading.
@@ -245,6 +282,47 @@ namespace WebContent.Admin
             return dropped;
         }
 
+        /// <summary>
+        /// #86: the rows behind the two header-policy grids. The item manager fills them from the
+        /// stored definition and reads them back on Save.
+        /// </summary>
+        internal System.Collections.Generic.IReadOnlyList<ProxyHeaderEditorRow> ProxyRequestHeaderRows => _requestHeaders.Rows;
+
+        internal System.Collections.Generic.IReadOnlyList<ProxyHeaderEditorRow> ProxyResponseHeaderRows => _responseHeaders.Rows;
+
+        /// <summary>
+        /// #86: fills both header grids from stored records. Returns how many stored rows across
+        /// the two legs could not be rendered so the item manager can log them; the fill never
+        /// marks the pane dirty.
+        /// </summary>
+        internal int LoadProxyHeaderPolicies(
+            System.Collections.Generic.IEnumerable<ProxyHeaderRuleConfiguration> requestStored,
+            System.Collections.Generic.IEnumerable<ProxyHeaderRuleConfiguration> responseStored)
+        {
+            _loadingProxyHeaders = true;
+            int dropped;
+            try
+            {
+                dropped = _requestHeaders.Load(requestStored) + _responseHeaders.Load(responseStored);
+                foreach (var row in _requestHeaders.Rows)
+                {
+                    SyncProxyHeaderRowErrorText(row);
+                }
+
+                foreach (var row in _responseHeaders.Rows)
+                {
+                    SyncProxyHeaderRowErrorText(row);
+                }
+            }
+            finally
+            {
+                _loadingProxyHeaders = false;
+            }
+
+            UpdateProxyHeaderCounters();
+            return dropped;
+        }
+
         public void ClearUserControl()
         {
             txtName.Text = "New Workspace";
@@ -270,6 +348,18 @@ namespace WebContent.Admin
             {
                 _loadingProxyTargets = false;
             }
+
+            _loadingProxyHeaders = true;
+            try
+            {
+                _requestHeaders.Clear();
+                _responseHeaders.Clear();
+            }
+            finally
+            {
+                _loadingProxyHeaders = false;
+            }
+            UpdateProxyHeaderCounters();
             proxyWildcardWarning.Visibility = Visibility.Collapsed;
             UpdateProxyRowCounter();
             txtProxyTestUrl.Text = string.Empty;
@@ -856,6 +946,116 @@ namespace WebContent.Admin
                 CultureInfo.InvariantCulture,
                 Strings.ProxyRowCounterFormat,
                 _allowlist.Count);
+        }
+
+        // ---- #86: "Advanced: headers" grids wiring --------------------------------------
+
+        private void OnProxyHeaderAddRequest(object sender, RoutedEventArgs e)
+        {
+            _requestHeaders.AddBlankRow();
+        }
+
+        private void OnProxyHeaderAddResponse(object sender, RoutedEventArgs e)
+        {
+            _responseHeaders.AddBlankRow();
+        }
+
+        private void OnProxyHeaderRowRemoveRequest(object sender, RoutedEventArgs e)
+        {
+            var row = (sender as FrameworkElement)?.DataContext as ProxyHeaderEditorRow;
+            if (row != null)
+            {
+                _requestHeaders.Remove(row);
+            }
+        }
+
+        private void OnProxyHeaderRowRemoveResponse(object sender, RoutedEventArgs e)
+        {
+            var row = (sender as FrameworkElement)?.DataContext as ProxyHeaderEditorRow;
+            if (row != null)
+            {
+                _responseHeaders.Remove(row);
+            }
+        }
+
+        private void OnProxyHeaderRowsChanged(ProxyHeaderEditor editor, object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (e.OldItems != null)
+            {
+                foreach (ProxyHeaderEditorRow row in e.OldItems)
+                {
+                    row.PropertyChanged -= OnProxyHeaderRowPropertyChanged;
+                }
+            }
+
+            if (e.NewItems != null)
+            {
+                foreach (ProxyHeaderEditorRow row in e.NewItems)
+                {
+                    SyncProxyHeaderRowErrorText(row);
+                    row.PropertyChanged += OnProxyHeaderRowPropertyChanged;
+                }
+            }
+
+            UpdateProxyHeaderCounters();
+            if (!_loadingProxyHeaders)
+            {
+                ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private void OnProxyHeaderRowPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(ProxyHeaderEditorRow.ErrorCode))
+            {
+                SyncProxyHeaderRowErrorText((ProxyHeaderEditorRow)sender);
+            }
+
+            if (!_loadingProxyHeaders)
+            {
+                ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        /// <summary>
+        /// The row model carries the machine-readable refusal code (the same code the Event Server
+        /// audits); the Problem cell shows the localized sentence for it. Same code-on-row /
+        /// text-on-view split as the allowlist grid, for the same BAML-triviality reason.
+        /// </summary>
+        private void SyncProxyHeaderRowErrorText(ProxyHeaderEditorRow row)
+        {
+            switch (row.ErrorCode)
+            {
+                case ProxyHeaderRuleError.NameEmpty:
+                    row.ErrorText = Strings.ProxyHeaderRowErrorNameRequired;
+                    break;
+                case ProxyHeaderRuleError.NameInvalid:
+                    row.ErrorText = string.Format(CultureInfo.InvariantCulture, Strings.ProxyHeaderRowErrorNameInvalid, (row.Name ?? string.Empty).Trim());
+                    break;
+                case ProxyHeaderRuleError.Forbidden:
+                    row.ErrorText = string.Format(CultureInfo.InvariantCulture, Strings.ProxyHeaderRowErrorForbidden, (row.Name ?? string.Empty).Trim());
+                    break;
+                case ProxyHeaderRuleError.ValueEmpty:
+                    row.ErrorText = string.Format(CultureInfo.InvariantCulture, Strings.ProxyHeaderRowErrorValueRequired, (row.Name ?? string.Empty).Trim());
+                    break;
+                case ProxyHeaderRuleError.ValueLineBreak:
+                    row.ErrorText = Strings.ProxyHeaderRowErrorValueLineBreak;
+                    break;
+                default:
+                    row.ErrorText = string.Empty;
+                    break;
+            }
+        }
+
+        private void UpdateProxyHeaderCounters()
+        {
+            if (lblProxyHeaderRequestCounter == null || lblProxyHeaderResponseCounter == null)
+            {
+                return;
+            }
+
+            lblProxyHeaderRequestCounter.Text = string.Format(CultureInfo.InvariantCulture, Strings.ProxyHeaderRowCounterFormat, _requestHeaders.Count);
+            lblProxyHeaderResponseCounter.Text = string.Format(CultureInfo.InvariantCulture, Strings.ProxyHeaderRowCounterFormat, _responseHeaders.Count);
         }
 
         /// <summary>

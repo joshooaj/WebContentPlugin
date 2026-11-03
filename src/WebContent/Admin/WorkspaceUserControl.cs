@@ -141,6 +141,19 @@ namespace WebContent.Admin
             return _page.LoadProxyTargets(stored);
         }
 
+        // #86: the "Advanced: headers" grids' row surface, forwarded to the item manager exactly
+        // like the allowlist grid's.
+        internal System.Collections.Generic.IReadOnlyList<ProxyHeaderEditorRow> ProxyRequestHeaderRows => _page.ProxyRequestHeaderRows;
+
+        internal System.Collections.Generic.IReadOnlyList<ProxyHeaderEditorRow> ProxyResponseHeaderRows => _page.ProxyResponseHeaderRows;
+
+        internal int LoadProxyHeaderPolicies(
+            System.Collections.Generic.IEnumerable<ProxyHeaderRuleConfiguration> requestStored,
+            System.Collections.Generic.IEnumerable<ProxyHeaderRuleConfiguration> responseStored)
+        {
+            return _page.LoadProxyHeaderPolicies(requestStored, responseStored);
+        }
+
         internal void ClearUserControl()
         {
             _page.ClearUserControl();

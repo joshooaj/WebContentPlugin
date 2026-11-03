@@ -170,6 +170,16 @@ namespace WebContent.Admin
                     {
                         EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredTargets} stored proxy target record(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
                     }
+
+                    // #86: the two "Advanced: headers" grids render the stored policy rows for
+                    // both legs; rows the shared grammar refuses (forbidden names, junk tokens)
+                    // are not shown, and the next Save rewrites the definition without them —
+                    // the same posture as unrenderable target records.
+                    var droppedStoredHeaderRules = _userControl.LoadProxyHeaderPolicies(settings.ProxyRequestHeaders, settings.ProxyResponseHeaders);
+                    if (droppedStoredHeaderRules > 0)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredHeaderRules} stored proxy header rule(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
+                    }
                     _userControl.FillContent();
                     if (configError != WorkspaceConfigError.None)
                     {
@@ -198,6 +208,7 @@ namespace WebContent.Admin
             _userControl.ProxyEnabled = false;
             _userControl.ProxyResponseCapText = WebContentConfiguration.DefaultProxyResponseCapMegabytes.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
             _userControl.LoadProxyTargets(null);
+            _userControl.LoadProxyHeaderPolicies(null, null);
             _userControl.FillContent();
 
             if (configError != WorkspaceConfigError.None)
@@ -315,6 +326,33 @@ namespace WebContent.Admin
                 return false;
             }
 
+            // #86: the "Advanced: headers" grids for BOTH fetch legs. An invalid row (bad token,
+            // CR/LF value, or a FORBIDDEN hop-by-hop/framing name like Host or Content-Length)
+            // refuses the whole save by name - the same posture as an invalid allowlist row, and
+            // the exact same grammar the Event Server applies to stored rows at snapshot time, so
+            // a row this UI refuses is a row the server would refuse (and audit) anyway. Header
+            // rules are additive: an empty grid stores no section, and a proxy without rules keeps
+            // the pre-#86 wire shape.
+            if (!ProxyHeaderEditor.TryBuildStoredRules(
+                    _userControl?.ProxyRequestHeaderRows ?? new List<ProxyHeaderEditorRow>(),
+                    out var proxyRequestHeaders,
+                    out var rejectedRequestHeaderRows))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy request header row(s): {string.Join(" | ", rejectedRequestHeaderRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyHeaderMessage, string.Join("; ", rejectedRequestHeaderRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (!ProxyHeaderEditor.TryBuildStoredRules(
+                    _userControl?.ProxyResponseHeaderRows ?? new List<ProxyHeaderEditorRow>(),
+                    out var proxyResponseHeaders,
+                    out var rejectedResponseHeaderRows))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy response header row(s): {string.Join(" | ", rejectedResponseHeaderRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyHeaderMessage, string.Join("; ", rejectedResponseHeaderRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
             // What the grid actually stored, in the admin's own entry shape. The MC MIP.log is the
             // storage-side view of the allowlist editor that does not depend on how the WPF grid
             // surfaces through accessibility, so it is what the #81 probe compares against.
@@ -327,6 +365,14 @@ namespace WebContent.Admin
                 false,
                 nameof(WorkspaceItemManager),
                 $"Stored proxy response cap for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): {WebContentConfiguration.ResolveProxyResponseCapMegabytes(capBytes)} MB{(capBytes == 0 ? " (default)" : string.Empty)}.");
+
+            // #86: the stored header policy, in the admin's own row shape - the MC-side storage
+            // statement a probe compares against a reloaded-pane readback without depending on
+            // how the grids surface through accessibility.
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WorkspaceItemManager),
+                $"Stored proxy header policy for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): request {proxyRequestHeaders.Count} rule(s) [{ProxyHeaderEditor.DescribeStoredRules(proxyRequestHeaders)}]; response {proxyResponseHeaders.Count} rule(s) [{ProxyHeaderEditor.DescribeStoredRules(proxyResponseHeaders)}].");
 
             SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
             SetOrRemoveProperty(CurrentItem, "HomeAddress", homeAddress);
@@ -360,6 +406,13 @@ namespace WebContent.Admin
                 // #85: the wire cap in bytes; the default stores 0 so the optional member stays
                 // omitted and pre-#85 stored shapes never grow a redundant member.
                 settings.ProxyMaxResponseBytes = capBytes;
+
+                // #86: empty grids store NO section (the optional members stay omitted, so a
+                // workspace without header rules keeps the pre-#86 wire shape). Configuration
+                // order is stored as-is: for one header name the LAST rule wins, here and on the
+                // Event Server.
+                settings.ProxyRequestHeaders = proxyRequestHeaders.Count == 0 ? null : proxyRequestHeaders;
+                settings.ProxyResponseHeaders = proxyResponseHeaders.Count == 0 ? null : proxyResponseHeaders;
             }
 
             SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, config.Serialize());

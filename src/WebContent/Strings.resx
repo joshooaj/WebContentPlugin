@@ -288,6 +288,54 @@
   <data name="InvalidProxyCapMessage" xml:space="preserve">
     <value>'{0}' is not a valid proxy response size. Enter a whole number of megabytes between 1 and 20, or leave the field empty for the default 5 MB.</value>
   </data>
+  <data name="ProxyHeadersSectionLabel" xml:space="preserve">
+    <value>Advanced: headers</value>
+  </data>
+  <data name="ProxyHeadersHint" xml:space="preserve">
+    <value>Add, override or strip headers on each leg of the proxied traffic: the request list rewrites what the VMS Event Server sends to the target, the response list rewrites what comes back. Connection-level headers (Connection, Keep-Alive, TE, Trailer, Transfer-Encoding, Upgrade, any Proxy- header, Host, Content-Length) are always stripped by the proxy and can never be configured here. Nothing is added by default - the proxy adds no Via or X-Forwarded-For of its own, so the VMS topology stays invisible to the target unless you choose to disclose it.</value>
+  </data>
+  <data name="ProxyRequestHeadersLabel" xml:space="preserve">
+    <value>Request headers</value>
+  </data>
+  <data name="ProxyResponseHeadersLabel" xml:space="preserve">
+    <value>Response headers</value>
+  </data>
+  <data name="ProxyHeaderAddRequestButton" xml:space="preserve">
+    <value>Add request header</value>
+  </data>
+  <data name="ProxyHeaderAddResponseButton" xml:space="preserve">
+    <value>Add response header</value>
+  </data>
+  <data name="ProxyColumnHeaderName" xml:space="preserve">
+    <value>Header</value>
+  </data>
+  <data name="ProxyColumnHeaderValue" xml:space="preserve">
+    <value>Value</value>
+  </data>
+  <data name="ProxyColumnHeaderStrip" xml:space="preserve">
+    <value>Strip</value>
+  </data>
+  <data name="ProxyHeaderRowCounterFormat" xml:space="preserve">
+    <value>{0} rule(s)</value>
+  </data>
+  <data name="ProxyHeaderRowErrorNameRequired" xml:space="preserve">
+    <value>A header name is required.</value>
+  </data>
+  <data name="ProxyHeaderRowErrorNameInvalid" xml:space="preserve">
+    <value>'{0}' is not a valid header name (letters, digits and the characters ! # $ % &amp; ' * + - . ^ _ ` | ~ are allowed).</value>
+  </data>
+  <data name="ProxyHeaderRowErrorForbidden" xml:space="preserve">
+    <value>'{0}' is reserved for the proxy connection and cannot be configured.</value>
+  </data>
+  <data name="ProxyHeaderRowErrorValueRequired" xml:space="preserve">
+    <value>Enter a value for '{0}', or tick Strip to remove the header instead.</value>
+  </data>
+  <data name="ProxyHeaderRowErrorValueLineBreak" xml:space="preserve">
+    <value>The header value must not contain a line break.</value>
+  </data>
+  <data name="InvalidProxyHeaderMessage" xml:space="preserve">
+    <value>The proxy header policy has invalid row(s): {0}. Fix the highlighted rows or remove them before saving.</value>
+  </data>
   <data name="ProxyLabel" xml:space="preserve">
     <value>Proxy:</value>
   </data>

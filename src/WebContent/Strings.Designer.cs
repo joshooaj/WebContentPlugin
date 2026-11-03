@@ -565,6 +565,150 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Advanced: headers.
+        /// </summary>
+        internal static string ProxyHeadersSectionLabel {
+            get {
+                return ResourceManager.GetString("ProxyHeadersSectionLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add, override or strip headers on each leg of the proxied traffic: the request list rewrites what the VMS Event Server sends to the target, the response list rewrites what comes back. Connection-level headers (Connection, Keep-Alive, TE, Trailer, Transfer-Encoding, Upgrade, any Proxy- header, Host, Content-Length) are always stripped by the proxy and can never be configured here. Nothing is added by default - the proxy adds no Via or X-Forwarded-For of its own, so the VMS topology stays invisible to the target unless you choose to disclose it..
+        /// </summary>
+        internal static string ProxyHeadersHint {
+            get {
+                return ResourceManager.GetString("ProxyHeadersHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Request headers.
+        /// </summary>
+        internal static string ProxyRequestHeadersLabel {
+            get {
+                return ResourceManager.GetString("ProxyRequestHeadersLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Response headers.
+        /// </summary>
+        internal static string ProxyResponseHeadersLabel {
+            get {
+                return ResourceManager.GetString("ProxyResponseHeadersLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add request header.
+        /// </summary>
+        internal static string ProxyHeaderAddRequestButton {
+            get {
+                return ResourceManager.GetString("ProxyHeaderAddRequestButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add response header.
+        /// </summary>
+        internal static string ProxyHeaderAddResponseButton {
+            get {
+                return ResourceManager.GetString("ProxyHeaderAddResponseButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Header.
+        /// </summary>
+        internal static string ProxyColumnHeaderName {
+            get {
+                return ResourceManager.GetString("ProxyColumnHeaderName", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Value.
+        /// </summary>
+        internal static string ProxyColumnHeaderValue {
+            get {
+                return ResourceManager.GetString("ProxyColumnHeaderValue", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Strip.
+        /// </summary>
+        internal static string ProxyColumnHeaderStrip {
+            get {
+                return ResourceManager.GetString("ProxyColumnHeaderStrip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} rule(s).
+        /// </summary>
+        internal static string ProxyHeaderRowCounterFormat {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowCounterFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A header name is required..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorNameRequired {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorNameRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid header name (letters, digits and the characters ! # $ % &amp; &apos; * + - . ^ _ ` | ~ are allowed)..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorNameInvalid {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorNameInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is reserved for the proxy connection and cannot be configured..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorForbidden {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorForbidden", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Enter a value for &apos;{0}&apos;, or tick Strip to remove the header instead..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorValueRequired {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorValueRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The header value must not contain a line break..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorValueLineBreak {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorValueLineBreak", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy header policy has invalid row(s): {0}. Fix the highlighted rows or remove them before saving..
+        /// </summary>
+        internal static string InvalidProxyHeaderMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyHeaderMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Proxy:.
         /// </summary>
         internal static string ProxyLabel {

@@ -188,15 +188,20 @@ namespace WebContent
                     continue;
                 }
 
-                ProxyHeaderPolicy.HeaderRule rule;
-                string error;
-                if (!ProxyHeaderPolicy.TryBuildRule(row.Name, row.Value, row.Remove, out rule, out error))
+                var errorCode = ProxyHeaderPolicy.ValidateRule(row.Name, row.Value, row.Remove);
+                if (errorCode != ProxyHeaderRuleError.None)
                 {
                     // One audit line per refused row per refresh - the runtime guardrail is
                     // observable by name, mirroring how over-ceiling caps are audited.
                     var raw = (row.Remove ? "-" : string.Empty) + (row.Name ?? string.Empty) +
                               (row.Remove || string.IsNullOrEmpty(row.Value) ? string.Empty : "=" + row.Value);
-                    _log($"Proxy {leg} header rule for workspace '{workspaceName}' ({itemId}) refused: {error} (stored: '{raw}')");
+                    _log($"Proxy {leg} header rule for workspace '{workspaceName}' ({itemId}) refused: {ProxyHeaderPolicy.DescribeRuleError(errorCode, row.Name)} (stored: '{raw}')");
+                    continue;
+                }
+
+                ProxyHeaderPolicy.HeaderRule rule;
+                if (!ProxyHeaderPolicy.TryBuildRule(row.Name, row.Value, row.Remove, out rule))
+                {
                     continue;
                 }
 

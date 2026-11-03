@@ -260,6 +260,169 @@
           <TextBlock x:Name="lblProxyTargetsHint" Style="{StaticResource SecondaryTextStyle}"
                      TextWrapping="Wrap" Margin="0,4,0,0" />
 
+          <!--
+            Ticket #86: the per-workspace header policy on BOTH fetch legs. Two grids of simple
+            name/value/strip rows: the request grid rewrites what the Event Server replays at the
+            target (after the browser's hop-by-hop headers are already stripped), the response grid
+            rewrites what comes back to the plugin client (before the framer). The forbidden set -
+            Connection, Keep-Alive, TE, Trailer, Transfer-Encoding, Upgrade, Proxy-*, Host,
+            Content-Length - is FIXED: the proxy strips those unconditionally on both legs and no
+            configuration can add, override or remove them. The same guardrail runs at save (row
+            highlighted, whole save refused by name) and at the Event Server's snapshot build
+            (row refused with a MIP.log audit line), so even a hand-edited stored definition never
+            puts one on the wire. Via:/X-Forwarded-For are NOT added by default: the proxy's
+            topology stays invisible to the target unless the admin configures it deliberately.
+          -->
+          <TextBlock x:Name="lblProxyHeaders" Style="{StaticResource SectionHeaderStyle}" Margin="0,14,0,2" Text="Advanced: headers" />
+          <TextBlock x:Name="lblProxyHeadersHint" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,0,0,2" />
+
+          <TextBlock x:Name="lblProxyRequestHeaders" Style="{StaticResource FieldLabelStyle}" Text="Request headers:" Margin="0,6,0,2" />
+          <DataGrid x:Name="dgProxyRequestHeaders" AutomationProperties.AutomationId="proxyRequestHeadersGrid"
+                    AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="60" MaxHeight="180" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="Header" Width="180">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!-- PropertyChanged like every other live-editor cell (#81 lesson). -->
+                    <TextBox x:Name="txtProxyHeaderRowName" AutomationProperties.AutomationId="proxyHeaderRowName"
+                             Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="128" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Value" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyHeaderRowValue" AutomationProperties.AutomationId="proxyHeaderRowValue"
+                             Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="1024" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Strip" Width="70">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox x:Name="chkProxyHeaderRowStrip" AutomationProperties.AutomationId="proxyHeaderRowStrip"
+                              IsChecked="{Binding Remove, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="190">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyHeaderRowProblem" AutomationProperties.AutomationId="proxyHeaderRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyHeaderRowRemove" AutomationProperties.AutomationId="proxyHeaderRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyHeaderRowRemoveRequest" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+          <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="btnProxyHeaderAddRequest" Content="Add request header" Padding="10,4" Click="OnProxyHeaderAddRequest" />
+            <TextBlock x:Name="lblProxyHeaderRequestCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <TextBlock x:Name="lblProxyResponseHeaders" Style="{StaticResource FieldLabelStyle}" Text="Response headers:" Margin="0,10,0,2" />
+          <DataGrid x:Name="dgProxyResponseHeaders" AutomationProperties.AutomationId="proxyResponseHeadersGrid"
+                    AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="60" MaxHeight="180" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="Header" Width="180">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyHeaderRowName" AutomationProperties.AutomationId="proxyHeaderRowName"
+                             Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="128" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Value" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyHeaderRowValue" AutomationProperties.AutomationId="proxyHeaderRowValue"
+                             Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="1024" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Strip" Width="70">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox x:Name="chkProxyHeaderRowStrip" AutomationProperties.AutomationId="proxyHeaderRowStrip"
+                              IsChecked="{Binding Remove, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="190">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyHeaderRowProblem" AutomationProperties.AutomationId="proxyHeaderRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyHeaderRowRemove" AutomationProperties.AutomationId="proxyHeaderRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyHeaderRowRemoveResponse" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+          <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="btnProxyHeaderAddResponse" Content="Add response header" Padding="10,4" Click="OnProxyHeaderAddResponse" />
+            <TextBlock x:Name="lblProxyHeaderResponseCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
+
           <!-- Ticket #53 demo harness: Management Client-driven proxy fetch across MIP messaging. -->
           <TextBlock x:Name="lblProxyTestUrl" Style="{StaticResource FieldLabelStyle}" Text="Test proxy fetch:" Margin="0,14,0,2" />
           <StackPanel Orientation="Horizontal">
