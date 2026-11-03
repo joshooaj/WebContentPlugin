@@ -1,11 +1,39 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-    xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+    xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+    xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
     <Package Name="Cascadia Web Content Plugin" Manufacturer="Cascadia Technology"
         Version="$(Version)"
         UpgradeCode="3AE48765-7EE5-454C-A804-3106ACE585B7">
-        <MajorUpgrade AllowDowngrades="yes" />
+        <!-- #70: the old product's files are torn out only after the new ones land, so the
+             WixCloseApplications kill below (seq 1501, right after InstallInitialize) always
+             precedes any file removal - Smart Client/Management Client hold the drop DLLs.
+             Shared component ids survive the late removal via MSI reference counting. -->
+        <MajorUpgrade AllowDowngrades="yes" Schedule="afterInstallExecute" />
         <MediaTemplate EmbedCab="yes" />
+
+        <!-- #70: Smart Client and Management Client are not RestartManager-cooperative, and
+             WiX v7 removed the CloseApplications element anyway, so force-close the plugin
+             hosts with util:CloseApplication: the immediate CA scans at InstallInitialize+1
+             and its deferred (SYSTEM) leg TerminateProcess-es any still-running target before
+             RemoveFiles/InstallFiles run. Full-UI installs (MUILevel=5) get a plain
+             Abort/Retry/Ignore warning naming the app first (default button: keep going);
+             scripted installs kill silently. Never enable PromptToContinue without the
+             MUILevel guard - with no UI to answer it the CA errors out and fails the install.
+             VideoOS.OAuth2TokenGenerator.exe is closed too: Smart Client is observed hosting
+             plugin views in that process, which locks the drop DLLs. -->
+        <util:CloseApplication Id="CloseSmartClient" Target="Client.exe"
+            Description="XProtect Smart Client is running and must be closed to update the Web Content Plugin. Any unsaved Smart Client configuration will be lost."
+            TerminateProcess="0" RebootPrompt="no" PromptToContinue="yes" Condition="MUILevel=5" Sequence="1" />
+        <util:CloseApplication Id="CloseSmartClientQuiet" Target="Client.exe"
+            TerminateProcess="0" RebootPrompt="no" Condition="MUILevel&lt;&gt;5" Sequence="2" />
+        <util:CloseApplication Id="CloseManagementClient" Target="VideoOS.Administration.exe"
+            Description="XProtect Management Client is running and must be closed to update the Web Content Plugin. Any unsaved Management Client configuration will be lost."
+            TerminateProcess="0" RebootPrompt="no" PromptToContinue="yes" Condition="MUILevel=5" Sequence="3" />
+        <util:CloseApplication Id="CloseManagementClientQuiet" Target="VideoOS.Administration.exe"
+            TerminateProcess="0" RebootPrompt="no" Condition="MUILevel&lt;&gt;5" Sequence="4" />
+        <util:CloseApplication Id="CloseTokenGenerator" Target="VideoOS.OAuth2TokenGenerator.exe"
+            TerminateProcess="0" RebootPrompt="no" Sequence="5" />
 
         <Icon Id="CascadiaIcon" SourceFile="..\WebContent\Resources\icon.ico" />
         <Property Id="ARPPRODUCTICON" Value="CascadiaIcon" />
@@ -35,6 +63,10 @@
             Execute="deferred" ExeCommand=" /silent /install" Return="check" />
 
         <InstallExecuteSequence>
+            <!-- #70: pin the Util CloseApplications scan right after InstallInitialize (its
+                 deferred kill leg must be scheduled inside the script); upstream Util tests
+                 pin it the same way. -->
+            <Custom Action="override Wix4CloseApplications_$(sys.BUILDARCHSHORT)" After="InstallInitialize" />
             <Custom Action="InvokeStandalone" Before="InstallFinalize"
                 Condition="NOT(REMOVE OR WVRTINSTALLED)" />
         </InstallExecuteSequence>
