@@ -188,13 +188,32 @@ public class McDiagnosticsTabProbeTests
             Artifacts.Window(mcMain, "mc-diagnostics-row");
 
             // 3. One click: the exact origin lands in the Proxy grid UNSAVED and the pane arms Save.
-            var beforePromotion = McLog.CountMatches(PromotionMarker);
-            var promoteButton = DiagnosticsVisiblePromoteButton(mcMain, blockedOrigin, NotAllowedReason);
-            Assert.NotNull(promoteButton);
-            try { promoteButton.Patterns.Invoke.Pattern.Invoke(); }
-            catch { promoteButton.Click(); }
+            // The baseline MUST carry the same fragments as the wait: an older promotion line for
+            // a DIFFERENT origin otherwise outranks the origin-filtered count forever (live lesson:
+            // one stale vms.joshooaj.com promotion line made a landed click look dead). The row
+            // re-renders on every poll and a promote peer grabbed just before a re-render can be
+            // stale by click time (the MC-15 lesson - re-find the target immediately before each
+            // row-local command), so retry the whole find-and-invoke cycle; a button that has
+            // already flipped to 'covered' means SOME earlier click landed, and every attempt
+            // re-checks the marker anyway.
+            var beforePromotion = McLog.CountMatches(PromotionMarker, blockedOrigin);
+            string promotionLine = null;
+            for (var attempt = 1; attempt <= 6 && promotionLine == null; attempt++)
+            {
+                var promoteButton = DiagnosticsVisiblePromoteButton(mcMain, blockedOrigin, NotAllowedReason);
+                if (promoteButton != null)
+                {
+                    try { promoteButton.Patterns.Invoke.Pattern.Invoke(); }
+                    catch { promoteButton.Click(); }
+                }
+                else
+                {
+                    log.AppendLine($"promote attempt {attempt}: no visible promote button (re-checking the marker anyway)");
+                }
 
-            var promotionLine = McLog.WaitForNewLine(beforePromotion, 30, PromotionMarker, blockedOrigin);
+                promotionLine = McLog.WaitForNewLine(beforePromotion, 5, PromotionMarker, blockedOrigin);
+            }
+
             Assert.NotNull(promotionLine);
             log.AppendLine($"promotion marker: {promotionLine}");
             Assert.Contains("added to the allowlist grid", promotionLine, StringComparison.Ordinal);

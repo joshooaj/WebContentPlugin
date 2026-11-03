@@ -144,7 +144,9 @@ namespace WebContent
             }
 
             _log("WebContent proxy: Event Server minted loopback TLS leaf for " + cacheKey);
-            PublishAuthorityTrustState(response.AuthorityThumbprint, response.AuthorityDerBase64);
+            // #80: the cacheKey (host:port) rides into the posture so a flip to untrusted can
+            // file its block report under the https origin the browser actually dialled.
+            PublishAuthorityTrustState(response.AuthorityThumbprint, response.AuthorityDerBase64, cacheKey);
             return leaf;
         }
 
@@ -249,8 +251,10 @@ namespace WebContent
         /// pair so a CA that becomes trusted mid-session gets its confirmation line too. Reading
         /// the root stores never needs elevation; only the import does, and that path lives in
         /// the setup-mode banner fix (the bundled elevated helper), never here.
+        /// #80: the mint's host:port rides along (quietly - never part of the flip detection) so
+        /// the listener's untrusted-posture report can name the origin the browser dialled.
         /// </summary>
-        private void PublishAuthorityTrustState(string authorityThumbprint, string authorityDerBase64)
+        private void PublishAuthorityTrustState(string authorityThumbprint, string authorityDerBase64, string mintOrigin)
         {
             if (string.IsNullOrEmpty(authorityThumbprint))
             {
@@ -260,7 +264,7 @@ namespace WebContent
             var trusted = _rootTrustProbe(authorityThumbprint);
             if (_trustState != null)
             {
-                _trustState.Publish(authorityThumbprint, authorityDerBase64, trusted);
+                _trustState.Publish(authorityThumbprint, authorityDerBase64, trusted, mintOrigin);
             }
 
             bool logLine;

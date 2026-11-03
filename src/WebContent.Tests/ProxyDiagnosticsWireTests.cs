@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 
 using Xunit;
 
@@ -106,6 +107,53 @@ namespace WebContent.Tests
             Assert.Single(back.Blocked);
             Assert.Equal(ProxyBlockReasons.TunnelRefused, back.Blocked[0].Reason);
             Assert.Equal(opened.AddMinutes(1), back.Blocked[0].LastSeenUtc);
+        }
+
+        [Fact]
+        public void UntrustedMachinesRoundTripAndAMissingMemberDecodesAsNull()
+        {
+            // #80 member: entries round trip, and the SKEW direction is pinned the same way #65
+            // pinned the request wire - a frame that predates the member (no UntrustedMachines
+            // key at all) still decodes, with the list null, so a mismatched pair degrades to
+            // "no untrusted machines reported" instead of dropping the whole status response.
+            var seen = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            var wire = ProxyFetchWireCodec.ToWire(new ProxyStatusResponsePayload
+            {
+                CorrelationId = "c-1",
+                Success = true,
+                WorkspaceItemId = "aaaaaaaa-0000-0000-0000-000000000001",
+                Sessions = new List<ProxySessionStatusEntry>(),
+                Blocked = new List<ProxyBlockEntry>(),
+                UntrustedMachines = new List<ProxyCaUntrustedMachineEntry>
+                {
+                    new ProxyCaUntrustedMachineEntry
+                    {
+                        Machine = "BEAST",
+                        Count = 4,
+                        LastSeenUtc = seen,
+                    },
+                },
+            });
+
+            var back = ProxyFetchWireCodec.StatusResponseFromWire(wire);
+            Assert.NotNull(back);
+            Assert.Single(back.UntrustedMachines);
+            Assert.Equal("BEAST", back.UntrustedMachines[0].Machine);
+            Assert.Equal(4, back.UntrustedMachines[0].Count);
+            Assert.Equal(seen, back.UntrustedMachines[0].LastSeenUtc);
+
+            // The serializer orders members alphabetically; the skew frame is what an older
+            // Event Server would actually send: the member absent, the JSON around it intact.
+            var withoutMember = Regex.Replace(
+                wire,
+                @",""UntrustedMachines"":\[.*?\]",
+                string.Empty,
+                RegexOptions.Singleline);
+            Assert.DoesNotContain("UntrustedMachines", withoutMember);
+
+            var old = ProxyFetchWireCodec.StatusResponseFromWire(withoutMember);
+            Assert.True(old != null, "withoutMember=" + withoutMember);
+            Assert.Null(old.UntrustedMachines);
         }
 
         [Fact]

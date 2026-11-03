@@ -102,6 +102,48 @@ namespace WebContent.Client
             _tally = tally ?? new ProxyBlockTally(message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message));
             _tally.SetForwarder(_blocks);
             _tls = new ProxyLoopbackTls(RequestLeafAsync, message => EnvironmentManager.Instance.Log(true, nameof(LoopbackProxyListener), message), _caTrust);
+
+            // #80: a browser view whose mint just found the deployment CA untrusted on this
+            // machine files exactly one CertUntrusted block report per posture flip. The Event
+            // Server dedups it per machine (ten untrusted views on one workstation count once),
+            // and the Management Client aggregates those machines for the exporting admin.
+            // The report bypasses the #83 tally on purpose: the tally counts URL refusals for
+            // the user-facing indicator, and the CA banner already owns this condition's local
+            // surfacing - double counting would mislabel a trust problem as a blocked resource.
+            if (_caTrust != null)
+            {
+                _caTrust.Changed += OnProxyCaTrustChanged;
+            }
+        }
+
+        /// <summary>
+        /// #80: the flip-to-untrusted report. Fires on the mint's socket thread; every fault is
+        /// already swallowed inside <see cref="ProxyBlockReporter"/> and the state holder, and a
+        /// posture that is not the confirmed-untrusted condition (fixed, cleared, unknown
+        /// authority) sends nothing. The origin is the mint target that produced the verdict -
+        /// the https origin behind the browser's certificate error.
+        /// </summary>
+        private void OnProxyCaTrustChanged()
+        {
+            if (_caTrust == null || !_caTrust.IsUntrustedConfirmed)
+            {
+                return;
+            }
+
+            var mintOrigin = _caTrust.LastMintOrigin;
+            if (string.IsNullOrEmpty(mintOrigin))
+            {
+                // No flip-to-untrusted path exists without a mint naming an origin; belt-and-
+                // braces keeps a synthetic entry out of the admin's blocked ring anyway.
+                return;
+            }
+
+            if (!Uri.TryCreate("https://" + mintOrigin, UriKind.Absolute, out var origin))
+            {
+                return;
+            }
+
+            _blocks.Report(origin, ProxyBlockReasons.CertUntrusted);
         }
 
         /// <summary>#72: drop the cached leaves so the next proxied https tunnel re-mints and
@@ -174,6 +216,14 @@ namespace WebContent.Client
             // #83: the tally outlives this listener when the browser is rewired to a new one;
             // detach so a stopped listener's ES reporter is never a forward target.
             _tally.SetForwarder(null);
+
+            // #80: same ownership split as the tally - the trust state outlives the listener, so
+            // unhook the flip report here or a rewired browser would report through every dead
+            // listener that ever fronted it.
+            if (_caTrust != null)
+            {
+                _caTrust.Changed -= OnProxyCaTrustChanged;
+            }
 
             // Leaf certificates and their local key containers die with the listener; the
             // deployment CA is shared machine state and deliberately untouched here.

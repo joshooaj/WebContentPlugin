@@ -122,6 +122,14 @@ authority per deployment (see `docs/adr/0003-event-server-mints-loopback-leaf-ce
    button answers that the proxy authority certificate does not exist yet, no CA has been created on the
    Event Server machine — complete step 1 first.
 
+    You do not have to wait for users to report those banners: each client machine that hits the
+    condition reports it to the Event Server once (per machine, not per view), and the Management
+    Client's **Diagnostics** tab for the workspace then shows an aggregate warning — "N client
+    machines report the proxy CA is not trusted. Export it from here and distribute it." — listing
+    each affected machine, with the same **Export proxy certificate** button inline. The list lives
+    only in the Event Server's memory (it resets when the service restarts), so it is a live signal,
+    not an audit trail.
+
 To remove the plugin completely, also delete the CA: from `LocalMachine\My` on the Event Server machine
 (`Remove-Item Cert:\LocalMachine\My\<thumbprint>`) and from `LocalMachine\Root` on each Smart Client machine.
 

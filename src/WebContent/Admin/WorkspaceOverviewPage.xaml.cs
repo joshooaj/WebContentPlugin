@@ -65,7 +65,7 @@ namespace WebContent.Admin
                         true,
                         nameof(WorkspaceOverviewPage),
                         $"Proxy authority certificate export failed (code={view.FailureCode}).");
-                    RenderCaExportFailure(CaExportFailureText(view.FailureCode, response));
+                    RenderCaExportFailure(ProxyCaExportFailureSentence.For(view.FailureCode, response));
                     txtProxyCaExportResult.Visibility = Visibility.Collapsed;
                     return;
                 }
@@ -126,26 +126,10 @@ namespace WebContent.Admin
         }
 
         /// <summary>
-        /// The Event Server's failure codes the admin can act on get their own sentence: a
-        /// machine without a CA yet reads differently from an Event Server that never answered.
+        /// #75/#80: the failure-code sentences moved to <see cref="ProxyCaExportFailureSentence"/>
+        /// so the overview button and the Diagnostics-tab banner refuse the same failure in the
+        /// same words.
         /// </summary>
-        private static string CaExportFailureText(string code, ProxyCaExportResponsePayload response)
-        {
-            switch (code)
-            {
-                case ProxyFetchErrorCodes.NoAuthority:
-                    return Strings.ProxyCaExportMissing;
-                case ProxyFetchErrorCodes.ServerUnavailable:
-                    return Strings.ProxyCaExportNotConnected;
-                default:
-                    return string.Format(
-                        CultureInfo.InvariantCulture,
-                        Strings.ProxyCaExportFailedFormat,
-                        code,
-                        response == null ? "no response" : response.ErrorMessage);
-            }
-        }
-
         private void RenderCaExportFailure(string text)
         {
             txtProxyCaExportError.Text = text;

@@ -139,6 +139,30 @@ namespace WebContent.Tests
             // The mint thread calls Publish; a throwing UI subscriber must not fault the tunnel.
             state.Publish("AAAABBBBCCCCDDDDEEEEFFFF0000111122223333", "ZGVy", false);
         }
+
+        [Fact]
+        public void LastMintOriginRefreshesQuietlyAndNeverEntersChangeDetection()
+        {
+            // #80: the flip-to-untrusted report names the mint that produced the verdict, so
+            // Publish carries an origin - but the origin is bookkeeping, NOT posture. Every page
+            // load mints a different origin against the same known posture and must stay silent.
+            var state = new ProxyCaTrustState();
+            var changes = 0;
+            state.Changed += () => changes++;
+
+            Assert.True(state.Publish("AAAABBBBCCCCDDDDEEEEFFFF0000111122223333", "ZGVy", false, "crm.example:443"));
+            Assert.Equal(1, changes);
+            Assert.Equal("crm.example:443", state.LastMintOrigin);
+
+            Assert.False(state.Publish("AAAABBBBCCCCDDDDEEEEFFFF0000111122223333", "ZGVy", false, "api.example:443"));
+            Assert.Equal(1, changes);
+            Assert.Equal("api.example:443", state.LastMintOrigin);
+
+            // Origin is optional on Publish (the #72 callers predate it); a blank origin keeps
+            // the last known one rather than wiping the detail the report needs.
+            Assert.False(state.Publish("AAAABBBBCCCCDDDDEEEEFFFF0000111122223333", "ZGVy", false));
+            Assert.Equal("api.example:443", state.LastMintOrigin);
+        }
     }
 
     /// <summary>
@@ -216,6 +240,17 @@ namespace WebContent.Tests
             Assert.True(_state.IsTrusted);
             Assert.False(_state.IsUntrustedConfirmed);
             Assert.Equal(2, _probes.Count);
+        }
+
+        [Fact]
+        public async Task MintPublishesCarryTheMintOriginTheUntrustedReportNeeds()
+        {
+            // #80: the flip-to-untrusted report names the https origin behind the browser's
+            // certificate error, sourced from the mint's own cache key - so the posture holder
+            // must know it even on the FIRST mint (the flip fires there, not later).
+            await _tls.GetOrCreateLeafCertificateAsync("cam1.test", 8443);
+
+            Assert.Equal("cam1.test:8443", _state.LastMintOrigin);
         }
 
         public void Dispose()

@@ -26,6 +26,14 @@ namespace WebContent
         private bool _hasAuthority;
 
         /// <summary>
+        /// #80: the "host:port" of the most recent mint that published this posture. The
+        /// untrusted-posture block report names it, so the Event Server's ring shows the https
+        /// origin the user actually tried, not a synthetic marker. It is NOT part of the change
+        /// detection: a same-posture mint for another host refreshes this field quietly.
+        /// </summary>
+        private string _lastMintOrigin;
+
+        /// <summary>
         /// Raised after the posture changes - from whatever socket thread ran the mint (the
         /// listener's) or from the caller of <see cref="Clear"/>/<see cref="Publish"/>. Subscriber
         /// faults never propagate back into the proxy flow.
@@ -64,10 +72,23 @@ namespace WebContent
         }
 
         /// <summary>
+        /// #80: the "host:port" of the most recent mint that published this posture, or null until
+        /// the first mint names one. The untrusted-posture block report files itself under this
+        /// origin so the Event Server's ring shows the https origin a user actually reached for.
+        /// </summary>
+        internal string LastMintOrigin
+        {
+            get { lock (_sync) return _lastMintOrigin; }
+        }
+
+        /// <summary>
         /// Record one mint's verdict. Returns true when anything changed (first report, a trust
         /// flip, or a different CA thumbprint); a same-value report fires nothing.
+        /// #80: <paramref name="mintOrigin"/> ("host:port" of the mint that produced this verdict)
+        /// refreshes <see cref="LastMintOrigin"/> quietly - it is never part of change detection,
+        /// so per-page-load mint traffic stays silent.
         /// </summary>
-        internal bool Publish(string authorityThumbprint, string authorityDerBase64, bool isTrusted)
+        internal bool Publish(string authorityThumbprint, string authorityDerBase64, bool isTrusted, string mintOrigin = null)
         {
             if (string.IsNullOrEmpty(authorityThumbprint))
             {
@@ -85,6 +106,10 @@ namespace WebContent
                 if (!string.IsNullOrEmpty(authorityDerBase64))
                 {
                     _authorityDerBase64 = authorityDerBase64;
+                }
+                if (!string.IsNullOrEmpty(mintOrigin))
+                {
+                    _lastMintOrigin = mintOrigin;
                 }
                 _isTrusted = isTrusted;
             }

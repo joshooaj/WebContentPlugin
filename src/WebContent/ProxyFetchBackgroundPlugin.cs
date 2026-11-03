@@ -898,6 +898,23 @@ namespace WebContent
                         nameof(ProxyFetchBackgroundPlugin),
                         $"Proxy block recorded: workspace='{report.WorkspaceItemId}' origin='{report.Origin}' reason={report.Reason} client='{report.ClientMachine}'");
                 }
+
+                // #80: a client-decided CertUntrusted report names a machine whose proxied views
+                // cannot trust the deployment CA (the #72 posture flip reports exactly this, and
+                // the forwarder's TLS-termination-failure sites do when the mint itself dies).
+                // Attribute it to that machine - deduped per machine, once each no matter how
+                // many views report - and log the NEW-machine transition once. ES-decided TLS
+                // failures never land here: they say the target's chain failed at the server,
+                // not that a workstation distrusts the proxy CA.
+                if (string.Equals(report.Reason, ProxyBlockReasons.CertUntrusted, StringComparison.Ordinal)
+                    && !string.IsNullOrEmpty(report.ClientMachine)
+                    && diagnostics.RecordUntrustedAuthorityReport(report.WorkspaceItemId, report.ClientMachine, DateTime.UtcNow))
+                {
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(ProxyFetchBackgroundPlugin),
+                        $"Proxy CA trust report recorded: workspace='{report.WorkspaceItemId}' machine='{report.ClientMachine}' needs the deployment CA imported into its trusted roots.");
+                }
             }
             catch (Exception exception)
             {

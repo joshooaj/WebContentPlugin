@@ -58,6 +58,23 @@ namespace WebContent.Admin
     }
 
     /// <summary>
+    /// Ticket #80: one client machine that reported the deployment CA as untrusted on itself.
+    /// Dedup is per MACHINE (the Event Server folds every view instance on one workstation into
+    /// one row), and the values arrive pre-formatted like the blocked rows so the banner text
+    /// stays pure and unit-tested rather than hiding in a XAML StringFormat.
+    /// </summary>
+    internal sealed class ProxyCaUntrustedMachineRowView
+    {
+        public string Machine { get; set; }
+
+        /// <summary>How many untrusted-CA reports this machine's views have sent (context, not a
+        /// per-view count — the dedup happened at the Event Server).</summary>
+        public string Reports { get; set; }
+
+        public string LastSeen { get; set; }
+    }
+
+    /// <summary>
     /// Ticket #84: the whole Diagnostics tab's content in one pure value: whether the Event
     /// Server answered, and the blocked-origin rows. The page turns this into text and grid rows
     /// and nothing else, so the entire tab's logic is testable without WPF or MIP.
@@ -74,6 +91,15 @@ namespace WebContent.Admin
         public int BlockedCount { get; set; }
 
         public List<ProxyBlockedRowView> Rows { get; } = new List<ProxyBlockedRowView>();
+
+        /// <summary>
+        /// #80: distinct client machines reporting the proxy CA untrusted - the aggregate that
+        /// drives the Diagnostics tab's warning banner. Zero for a pre-#80 snapshot (member
+        /// absent) exactly as for a quiet workspace.
+        /// </summary>
+        public int UntrustedMachineCount { get; set; }
+
+        public List<ProxyCaUntrustedMachineRowView> UntrustedMachineRows { get; } = new List<ProxyCaUntrustedMachineRowView>();
     }
 
     /// <summary>
@@ -108,6 +134,43 @@ namespace WebContent.Admin
             }
 
             view.QuerySucceeded = true;
+
+            // #80: the untrusted-machine aggregate renders even when nothing else was blocked -
+            // the CA posture flip is its own condition, and the warning banner must not depend
+            // on the blocked ring having content. A null member (pre-#80 Event Server) reads as
+            // zero machines.
+            if (payload.UntrustedMachines != null)
+            {
+                var machines = new List<ProxyCaUntrustedMachineRowView>();
+                var lastSeen = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in payload.UntrustedMachines)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.Machine))
+                    {
+                        continue;
+                    }
+
+                    machines.Add(new ProxyCaUntrustedMachineRowView
+                    {
+                        Machine = entry.Machine,
+                        Reports = (entry.Count < 1 ? 1 : entry.Count).ToString(CultureInfo.InvariantCulture),
+                        LastSeen = ProxyDiagnosticsFormat.Ago(utcNow - entry.LastSeenUtc),
+                    });
+                    lastSeen[entry.Machine] = entry.LastSeenUtc;
+                }
+
+                // Newest report first, machine name as the stable tie-break - same reading order
+                // as the blocked list, so a refresh never reshuffles equal timestamps.
+                machines.Sort((a, b) =>
+                {
+                    var bySeen = lastSeen[b.Machine].CompareTo(lastSeen[a.Machine]);
+                    return bySeen != 0 ? bySeen : string.Compare(a.Machine, b.Machine, StringComparison.Ordinal);
+                });
+
+                view.UntrustedMachineRows.AddRange(machines);
+                view.UntrustedMachineCount = machines.Count;
+            }
+
             if (payload.Blocked == null || payload.Blocked.Count == 0)
             {
                 return view;
