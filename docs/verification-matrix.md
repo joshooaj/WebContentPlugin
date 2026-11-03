@@ -57,6 +57,7 @@ is not evidence the plugin never ran.
 
 | Per-workspace proxy response cap (5 MB default, hard 20 MB ceiling, clamp-on-read, MC Proxy-tab field) | #85 | `ProxyResponseCapStoreTests` (never-resolved store / unknown workspace / absent member / malformed 0-negative all answer the 5 MB default, never a refusal; a stored cap answers verbatim; a past-ceiling stored value clamps to 20 MB and gets exactly one audit line naming the workspace per refresh; a resolver failure after a good resolve keeps last-known-good caps; flap resilience across alternating refreshes; the 60 s window means one resolve per burst; `ForResponseCapBytes` factories clamp identically), `ProxyConfigurationTests` cap section (pre-#85 definitions read `ProxyMaxResponseBytes=0`; a stored value round-trips VERBATIM even past the ceiling - the clamp is on every read, never a silent rewrite at save time; the default stores 0 and the blob never grows the member - `EmitDefaultValue=false`), `ConfigResilienceTests` cap section (blank/whole-MB-inside-1..20 accepted, everything else refused BY NAME with the rejected text - no silent zoom-style clamp in the UI; MB→bytes mapping stores 0 for the default; bytes→display clamps honestly both ways; the admin ceiling and the contract's `MaxAllowedResponseBytes` are pinned in lockstep), `ProxyFetchCorrelationTests` (the client receive guard bounds allocation against the 20 MB PROTOCOL ceiling, not the old 5 MB default - a hostile `ceiling+1` declaration still errors, while a 6 MB framed answer reassembles), `WorkspaceTabShellGuardTests` (the Proxy tab carries `lblProxyResponseCap`/`txtProxyResponseCapMB`/`lblProxyResponseCapHint`, the field's explicit AutomationId and `OnProxyResponseCapTextChanged` handler pinned) | See MC-17 below - **live rows PASSED 2026-11-02** (run `20261102-210935`): the default posture refuses a REAL 10 MB download with `TooLarge ... exceeded the 5242880 byte response cap`; saving 12 MB flips the SAME download to `HTTP 200 - 10485760 bytes fetched` inside the 60 s ES refresh window (which also proves the raised client receive guard); `99999` refuses the whole save by name with zero new cap-audit lines while the ES keeps serving the stored cap; restoring 5 re-arms the refusal |
 | Per-workspace proxy header policy: add/override/strip rows on BOTH fetch legs, forbidden-header guardrail enforced at save AND at runtime | #86 | `ProxyHeaderPolicyTests` (the canonical forbidden set: exact hop-by-hop/Host/Content-Length/Transfer-Encoding/TE/Upgrade names + every `Proxy-*` prefix, case-insensitive; RFC 9110 token-name grammar, CR/LF in a value refused; the apply model: add/override replaces all same-name entries case-insensitively, rules apply in configuration order with LAST rule winning, forbidden rules never applied even when hand-fed past the store), `ProxyHeaderPolicyStoreTests` (60 s refresh / last-known-good / Prime-at-Init; forbidden and malformed stored rows refused with one audit line per refresh naming workspace + raw text; corrupt blobs = empty policy, never a refusal), `ProxyHeaderEditorTests` (the MC build refuses the WHOLE policy by name with nothing partial returned; strip-without-value is valid; strip does NOT unlock a forbidden name; Load drops unrenderable stored rows counted for the log), `ProxyConfigurationTests` header section (round-trips keep forbidden names VERBATIM on the wire - readers refuse, nobody censors; empty grids store no section, pre-#86 wire shape preserved), `EventServerHeaderPolicyWiringGuardTests` (request rules applied before the fetch, response rules before the frame and only for a real upstream status, store Prime at Init, all three block sets derived from the one canonical set), `WorkspaceTabShellGuardTests` (both grids on the Proxy tab: name-keyed lookups, per-AutomationId column pinning for both legs, the PropertyChanged binding guard across every Proxy-tab grid) | See MC-18 below - **live rows PASSED 2026-11-02** (run `20261102-224611`): a two-rule policy per leg stores through the audit line AND order-sensitive reloaded-pane readback; four forbidden-row cycles (request+response, add+strip) each pin the live Problem text, the notice naming the row verbatim, the refusal marker, and zero new audit lines; empty grids store the empty policy |
+| Per-workspace proxy rule triggers: MC Proxy-tab "Rule triggers" grid (URL/method/status), whole-save grammar guardrail sharing the Event Server's `ProxyTriggerPolicy` matcher grammar | #78 | `ProxyTriggerEditorTests` (blank rows skipped not refused; url-required / mid-host-wildcard url / out-of-grammar status each refused by code; the WHOLE build refused by name with nothing partial returned; configuration order preserved and null members kept compact (any-method `*` and blank status store as null); stored rows with unrenderable method verbs dropped at Load and counted for the log; the fixed event type and the method dropdown set pinned to the matcher's constants; the grid's validation and the Event Server's matcher ACCEPT AND REFUSE THE SAME ROWS - `ProxyTriggerPolicy`'s normalizers are the single grammar both call), `WorkspaceTabShellGuardTests` (the trigger grid + Add button + hint carry their AutomationIds on the Proxy tab, not the Settings tab; every row's Event cell is a non-editable TextBlock; the XAML method array never drifts from `ProxyTriggerEditor.ProxyTriggerMethods`) | See MC-19 below - **live rows PASSED 2026-11-03** (run `20261103-031310`): a two-row trigger list (an exact-status row + an any-method wildcard-host row) stores through the audit line AND order-sensitive reloaded-grid readback with the fixed event type shown in the read-only Event column on every row, typed AND reloaded; three invalid-row cycles (mid-host-wildcard url / status `600` / a method with no url) each pin the live Problem text, the notice naming the row verbatim, the `invalid proxy trigger row(s)` MIP.log marker, and zero new audit lines; an emptied grid stores no trigger section (`0 row(s) []`) |
 | Installer upgrade with Milestone clients running (MSI force-closes Smart Client / Management Client instead of failing 1603 on locked plugin dlls) | #70 | `build.ps1` structural guard (parses `wix-wid.xml` out of the versioned `.wixpdb`: the `Wix4CloseApplications_*` action is scheduled after InstallInitialize and before RemoveFiles/InstallFiles, RemoveExistingProducts is after InstallFiles, and the three kill targets — `Client.exe`, `VideoOS.Administration.exe`, `VideoOS.OAuth2TokenGenerator.exe` — are in the `Wix4CloseApplication` table) | See IN-1 below - **all live rows PASSED 2026-11-03** on the VMS machine with the clients launched in a real interactive session and `WebContent.dll` proven LOCKED first: uninstall, fresh install, and an upgrade — each with `Client.exe` + `VideoOS.Administration.exe` running — answered exit code 0, killed the clients, and left a hash-verified drop |
 
 ## Manual host checks
@@ -684,6 +685,68 @@ row(s): Host=evil.example.com / -Host / Proxy-Connection=close / -Proxy-Connecti
 `nothing stored by the refusal: ... lines 1 -> 1`; `storage untouched through all four refusals:
 audit lines 1 -> 1`; `saved header policy request=[] response=[] (verified from the audit line
 AND reloaded panes, order-sensitive)`.
+
+### MC-19 Per-workspace rule triggers: store, grammar guardrail, restore (#78)
+
+`McProxyTriggersProbeTests.ProbeProxyRuleTriggersStoreRefusalAndRestore` — drives the Proxy tab's
+"Rule triggers" grid (`proxyTriggersGrid`, between the permission headers and the test fetch)
+through a live Management Client against the live VMS:
+
+1. Baseline: the grid reads the stored rows; leftover rows from an interrupted run normalize to
+   no triggers first (the MC-17 self-heal lesson) so the run is idempotent.
+2. Store: two differently-shaped rows — `http://probe.triggers.example.com/videos/*` + GET + 404
+   and `https://*.probe.triggers.example.com/*` + any-method + any-status — save; verification is
+   two-channel like the other grids — the plugin's `Stored proxy triggers for workspace '<name>'
+   ...: 2 row(s) [url=... method=GET status=404; url=... method=any status=any].` audit line in
+   the MC MIP.log AND the grid re-read from a RELOADED pane, ORDER-SENSITIVELY (the Event
+   Server's matcher evaluates top-down and raises at most the FIRST matching row's event). Every
+   row — typed AND reloaded — shows the read-only Event raised column with the fixed event type
+   `WebContent proxy request`, the one event type the plugin raises (pinned to
+   `ProxyTriggerPolicy.EventType`).
+3. Grammar guardrail, three cycles — one per failing member: a mid-host wildcard url
+   (`http://foo.*.bar.com/`; the host grammar is exact / `*.tail` / lone `*`), status `600` (no
+   6xx class, outside 100-599), and a POST verb chosen with NO url (a verb without a url is a
+   refusal, not a blank row). Each: the Problem cell explains the failing member while the row is
+   typed, Save raises the plugin's refusal notice NAMING the row verbatim
+   (`url=... method=... status=...`), the MC MIP.log gains the `invalid proxy trigger row(s)`
+   marker, and the `Stored proxy triggers` audit-line count never moves — the WHOLE save is
+   refused, nothing partial is stored. This grammar IS the Event Server's grammar (the same
+   `ProxyTriggerPolicy` normalizers the matcher runs over stored rows on every refresh — the
+   grid-vs-matcher agreement is unit-pinned), so a row the MC refuses is exactly a row the server
+   would refuse and audit anyway.
+4. Storage untouched: after all three refusals the grid still displays exactly the stored policy
+   and the audit count is unmoved.
+5. Restore: an emptied grid stores NO trigger section (`0 row(s) []`) — the pre-#78 posture;
+   teardown answers `Save changes?` with NO.
+
+Harness shape: `TriggerGridUi` scopes every lookup to the grid element (every per-row id is shared
+by all rows, and the trigger grid shares its tab with the allowlist and the two header grids).
+The Method cell is a plain WPF ComboBox in the CellTemplate — three live UIA lessons: the closed
+combo's selection must be read from the ComboBoxItem peers' `IsSelected` flags, and those peers
+exist only once the dropdown has been opened at least once (a freshly loaded closed combo exposes
+ZERO item peers — the harness expands once, reads, collapses); the collapsed popup stays inside
+the combo's UIA subtree, so Name/Text scans read the popup's rows, not the selection; and the
+write route is ExpandCollapse + SelectionItem.Select, escalating to focus-gated Up/Down steps over
+the pinned verb order.
+
+The live EVENT effect (a matching fetch raising the XProtect event and rules reacting) is
+unit-pinned (`ProxyTriggerMatcherTests` etc.) and was ES-verified at the #65 deploy with the
+`trigger-selftest.flag` probe (ES-3); the Proxy-tab fetch label cannot show events, so this probe
+pins the MC UI, the guardrail, and the stored shape.
+
+Record (MC-19) - **live rows PASSED 2026-11-03**, green run `20261103-031310` (3 m 20 s), drop
+`WebContent.dll` SHA-256 `35D35764.` (1 448 448 bytes) hash-verified in the local install folder
+(the ES drop already carries the #65 matcher; MC-only change, no `DeployToVms` needed). Chain
+from the results file: baseline carried the two rows a debug cycle had left behind and normalized
+them to `0 row(s) []` (self-heal earning its keep); `stored triggers audit line: ... 2 row(s)
+[url=http://probe.triggers.example.com/videos/* method=GET status=404; url=https://*.probe.
+triggers.example.com/* method=any status=any].`; `every typed row shows the read-only Event
+column: 'WebContent proxy request'` and the reloaded rows read the same; three `refusal notice
+(names the row verbatim): Invalid address OK The proxy trigger list has invalid row(s):
+url=http://foo.*.bar.com/ method=any status=any / ... status=600 / url= method=POST status=any.
+...`; three `nothing stored by the refusal: ... lines 7 -> 7`; `storage untouched through all
+three refusals: audit lines 7 -> 7`; `saved triggers [] (verified from the audit line AND the
+reloaded grid, order-sensitive)`.
 
 ### SC-1 End-to-end proxied page load (#54)
 
@@ -1391,4 +1454,4 @@ scheduled tasks removed afterwards.
   ever refactored, extract the policy into a pure class first and move MC-4's backoff
   assertions into the suite.
 - WebView2/Smart Client UI behavior (actual page render, WPF address-bar visuals) cannot be
-  unit-tested at the pure seams; MC-1-MC-18 (plus ES-1 and SC-1) are the release gate for those.
+  unit-tested at the pure seams; MC-1-MC-19 (plus ES-1 and SC-1) are the release gate for those.
