@@ -1259,6 +1259,54 @@ public static class ManagementClientUi
         return false;
     }
 
+    /// <summary>
+    /// Answer any pending MC modal NEGATIVELY: the "Save changes?" shell confirmation gets No/Cancel
+    /// (a probe that died mid-edit must never persist its unsaved pane state on teardown - live on
+    /// #84, where AcceptPendingModal at close accepted exactly such a leftover promotion), while a
+    /// plain #32770 notice still gets its dismiss button (OK/Close) so the process can exit.
+    /// Returns true when a modal was answered.
+    /// </summary>
+    public static bool RejectPendingModal(ClientSession session, int timeoutSeconds = 5)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (var window in session.Windows())
+            {
+                try
+                {
+                    if (string.Equals(window.AutomationId ?? string.Empty, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var cls = window.ClassName ?? string.Empty;
+                    var buttons = window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).ToList();
+                    if (buttons.Count == 0) continue;
+
+                    var hasNegative = buttons.Any(b =>
+                        string.Equals((b.Name ?? string.Empty).Trim(), "No", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals((b.Name ?? string.Empty).Trim(), "Cancel", StringComparison.OrdinalIgnoreCase));
+                    if (!cls.Contains("#32770") && !hasNegative) continue;
+
+                    foreach (var wanted in new[] { "No", "Cancel", "OK", "Close" })
+                    {
+                        var hit = buttons.FirstOrDefault(b =>
+                            string.Equals((b.Name ?? string.Empty).Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+                        if (hit != null)
+                        {
+                            hit.Patterns.Invoke.Pattern.Invoke();
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+            }
+            Thread.Sleep(400);
+        }
+        return false;
+    }
+
     /// <summary>Handles the yes/no confirmation MessageBox WinForms pops for deletes.</summary>
     public static void AcceptConfirmation(ClientSession session, string buttonName = "Yes", int timeoutSeconds = 10)
     {

@@ -488,10 +488,11 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
 4. One click on the button: MC marker `Proxy allowlist promotion for workspace '<item id>': origin
    '<origin>' added to the allowlist grid (grid edit, not yet saved - Save writes it).`; the row
    re-annotates `on allowlist` and its button is GONE (hidden, not disabled - a double click cannot
-   stack duplicates); the Proxy tab's grid now carries the exact scheme+host+port row **unsaved**,
-   and Save is armed. Rows the promotion cannot help - `certificate not trusted`, already covered
-   (exact or wildcard, through the same shared matcher incl. the SSRF/VMS floor), unparsable - never
-   get the button in the first place.
+   stack duplicates; the probe's rule for "gone" is no VISIBLE promote peer, since a collapsed WPF
+   button leaves an off-screen UIA peer with a zero rect); the Proxy tab's grid now carries the
+   exact scheme+host+port row **unsaved**, and Save is armed. Rows the promotion cannot help -
+   `certificate not trusted`, already covered (exact or wildcard, through the same shared matcher
+   incl. the SSRF/VMS floor), unparsable - never get the button in the first place.
 5. Saving goes through the ordinary allowlist save discipline (MC-9/MC-14): audit line
    `Stored proxy targets for workspace '<name>' (FQID: ...)` names the promoted entry, and the grid
    re-renders it from a RELOADED pane. Re-opening Diagnostics after the reload re-annotates the row
@@ -499,8 +500,12 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
 6. Automatable: `McDiagnosticsTabProbeTests.ProbeDiagnosticsTabPromotesLiveBlockedOriginIntoTheSavedAllowlist`
    (probe category; it MUTATES the workspace allowlist briefly and restores it verbatim with the
    audit+reloaded-pane verification, run alone; drives Smart Client + Management Client on one
-   machine); artifacts `mc-diagnostics-{row,annotated}.png` + `mc-diagnostics-probe-results.txt`
-   under `%TEMP%\webcontent-mc-diagnostics-probe\<run>`.
+   machine); artifacts `mc-diagnostics-{row,after-promote,annotated}.png` + `mc-diagnostics-probe-results.txt`
+   (which ends with a cell-by-cell `grid dump` of the Diagnostics grid: every promote peer UIA can
+   see, with its row, rect and on/off-screen state) under `%TEMP%\webcontent-mc-diagnostics-probe\<run>`.
+   The probe's own order is part of the record: it clears any earlier run's probe line from the
+   allowlist BEFORE the Smart Client page load, and its teardown answers the shell's "Save changes?"
+   prompt with NO (`ManagementClientUi.RejectPendingModal`), never Yes.
 
    Record (MC-16) - **live row PASSED 2026-11-02**, green run `20261102-182628` (3 m 20 s), drop
    `WebContent.dll` SHA-256 `A718A87B.` hash-verified in the local install folder: the ES ring
@@ -520,10 +525,54 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    annotation matcher thinks an entry already covers the origin - check the grid and the floor hosts
    (unit matrix pins the matcher, the live row names the entry); Save still disabled after the
    click = the promotion bypassed the grid's row-collection chain; the promoted origin absent from
-   the audit line = the promotion wrote somewhere other than the editor's grid. Harness truth
-   learned in the run: flattening a DataGrid row via `FindAllDescendants` can also surface
-   SIBLING rows' buttons (UIA containment), so row-scoped automation-id lookups
-   (`diagnosticsRowPromote`) and screenshots are the authority - not Name-search joins.
+   the audit line = the promotion wrote somewhere other than the editor's grid.
+
+   Harness truths the live rows taught (each one burned a run, MC-16):
+     * **UIA containment lies.** Flattening a DataGrid row with `FindAllDescendants` surfaces
+       SIBLING rows' buttons, so row-scoped Name joins are not evidence. The Grid pattern is the
+       addressing authority: `dgDiagnosticsBlocked` answers `GridPattern` (6 columns for its 6
+       columns) and `GetItem(row, column)` isolates one cell; the geometry check (the button's
+       centre inside the row's own rect) is only the fallback when the pattern is missing.
+     * **A hidden WPF button still has a UIA peer.** `Visibility=Collapsed` leaves the peer with a
+       zero rect and `IsOffscreen=true` - live, the promoted row's `diagnosticsRowPromote` peer is
+       still enumerable right after its annotation flips to `on allowlist`. "Peer exists" is not
+       "button offered": the probe's rule is a VISIBLE button (non-zero rect, not off-screen), and
+       the results file prints a cell-by-cell `grid dump` naming every promote peer with its rect
+       and on/off-screen state - in the green run the four uncovered origins are
+       `on-screen rect={X=2305,...}` and the two covered ones `offscreen
+       rect={X=0,Y=0,Width=0,Height=0}`.
+     * **Empty WPF `DataGridCell`s answer a SYNTHESIZED Name** (`Item:
+       WebContent.Admin.ProxyBlockedRowView, Column Display Index: 4`), which leaks into any
+       Name-join of a row - the blank Status cell showed exactly that. Cell text comes from the
+       `Text` peers first, with a synthesized fallback name read as empty.
+     * **Probe order is load-bearing, and teardown must not save.** Clear any earlier run's probe
+       line from the allowlist BEFORE the Smart Client page load: with the line still stored the
+       listener FORWARDS the subresources and the ring row arrives as `target timed out`, not
+       `not allowed by administrator`. And a teardown that answers "Save changes?" with YES
+       persists a mid-run promotion - the ring keeps same-origin entries until the Event Server
+       restarts, so the stale row then satisfies a reason-blind row lookup. Teardown uses
+       `ManagementClientUi.RejectPendingModal` (No/Cancel), and the row lookup filters on the
+       reason fragment.
+     * Known residue for a future sweep: `McAllowlistGridProbeTests`, `McProxyStatusProbeTests` and
+       `McWildcardAllowlistProbeTests` still close with `AcceptPendingModal`, i.e. they would
+       persist an interrupted edit the way MC-16's first run did.
+
+   Record (MC-16, hardened probe) - **live row PASSED again 2026-11-02**, green run
+   `20261102-193021` (3 m 07 s, the run of exactly this probe source; the identical chain went
+   green one run earlier as `20261102-192322`), drop `WebContent.dll` SHA-256 `6271ED81.`
+   (1 381 376 bytes) hash-verified in the local install folder - the plugin source is unchanged
+   since the first green run, only the probe was hardened. The ring held 6 rows (three unrelated
+   live browser refusals included); the probe's fresh refusal was row 0 - `http://172.16.128.210:18131
+   | not allowed by administrator | 15 | just now` with an on-screen button - while the stale
+   same-origin `target timed out` entry from the mis-ordered run sat at row 4 already annotated
+   `on allowlist` (the shared matcher annotates every covering entry; the reason fragment is what
+   keeps the probe on its OWN row). One Invoke logged the promotion marker, the row re-annotated
+   `on allowlist`, and the cell dump (`rows=6 cols=6`) shows both covered rows' promote peers
+   `offscreen rect={X=0,Y=0,Width=0,Height=0}` while the four uncovered origins kept
+   `on-screen rect={X=2305,...}` buttons; the unsaved Proxy grid carried the exact origin, the save
+   audit enumerated all seven entries, the reloaded pane read it back, re-opening Diagnostics
+   re-annotated `on allowlist` from stored config (`41s ago`), and the six-line allowlist was
+   restored with audit+readback verified.
 
 ### SC-1 End-to-end proxied page load (#54)
 
