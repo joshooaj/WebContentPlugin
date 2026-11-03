@@ -60,6 +60,7 @@ is not evidence the plugin never ran.
 | Per-workspace proxy rule triggers: MC Proxy-tab "Rule triggers" grid (URL/method/status), whole-save grammar guardrail sharing the Event Server's `ProxyTriggerPolicy` matcher grammar | #78 | `ProxyTriggerEditorTests` (blank rows skipped not refused; url-required / mid-host-wildcard url / out-of-grammar status each refused by code; the WHOLE build refused by name with nothing partial returned; configuration order preserved and null members kept compact (any-method `*` and blank status store as null); stored rows with unrenderable method verbs dropped at Load and counted for the log; the fixed event type and the method dropdown set pinned to the matcher's constants; the grid's validation and the Event Server's matcher ACCEPT AND REFUSE THE SAME ROWS - `ProxyTriggerPolicy`'s normalizers are the single grammar both call), `WorkspaceTabShellGuardTests` (the trigger grid + Add button + hint carry their AutomationIds on the Proxy tab, not the Settings tab; every row's Event cell is a non-editable TextBlock; the XAML method array never drifts from `ProxyTriggerEditor.ProxyTriggerMethods`) | See MC-19 below - **live rows PASSED 2026-11-03** (run `20261103-031310`): a two-row trigger list (an exact-status row + an any-method wildcard-host row) stores through the audit line AND order-sensitive reloaded-grid readback with the fixed event type shown in the read-only Event column on every row, typed AND reloaded; three invalid-row cycles (mid-host-wildcard url / status `600` / a method with no url) each pin the live Problem text, the notice naming the row verbatim, the `invalid proxy trigger row(s)` MIP.log marker, and zero new audit lines; an emptied grid stores no trigger section (`0 row(s) []`) |
 | Installer upgrade with Milestone clients running (MSI force-closes Smart Client / Management Client instead of failing 1603 on locked plugin dlls) | #70 | `build.ps1` structural guard (parses `wix-wid.xml` out of the versioned `.wixpdb`: the `Wix4CloseApplications_*` action is scheduled after InstallInitialize and before RemoveFiles/InstallFiles, RemoveExistingProducts is after InstallFiles, and the three kill targets — `Client.exe`, `VideoOS.Administration.exe`, `VideoOS.OAuth2TokenGenerator.exe` — are in the `Wix4CloseApplication` table) | See IN-1 below - **all live rows PASSED 2026-11-03** on the VMS machine with the clients launched in a real interactive session and `WebContent.dll` proven LOCKED first: uninstall, fresh install, and an upgrade — each with `Client.exe` + `VideoOS.Administration.exe` running — answered exit code 0, killed the clients, and left a hash-verified drop |
 | OS-configured (WinINET) proxy inheritance for non-proxied views, and the deliberate contrast for proxied views (loopback pin wins; no admin-facing proxy-URL setting exists because the OS owns that layer) (#67) | #67 | `ProxyBrowserArgumentsTests` (the pin itself: every scheme routed to the loopback listener, `<-loopback` bypass off - nothing falls back to the system path); the inheritance claim is a live-host fact, pinned by the SC-8 probe rows below (`ScOsProxyInheritanceProbeTests`: WinINET snapshot/apply/restore, a logging forward-proxy harness on loopback, live `Win32_Process` command-line reads of the plugin's browser processes) | See SC-8 below: routing OFF + the per-user WinINET proxy pointed at the harness - the non-proxied view renders the harness marker page for an RFC 2606 `.invalid` host (which can never resolve, so a served page can only have ridden the OS proxy) with the browser's absolute-form GET in the journal and NO proxy switch on any browser command line; routing ON + the SAME OS proxy + the SAME url - the plugin's 403 page renders, the harness journals nothing for the origin, and the live browser command lines carry `--proxy-server=http=http://127.0.0.1:<listener>;...` plus `--proxy-bypass-list=<-loopback>`. **BEAST 2026-11-03: both rows PASSED** (`20261103-035256`, `20261103-040006`) |
+| Managed workspaces: security-relevant Smart Client view settings locked with "Managed by Administrator", cosmetic settings stay per-instance editable (locked-key overrides can never reach runtime) | #71 | `WorkspaceSettingLocksTests` (managed decision from the persisted WorkspaceId/DefinitionFingerprint; the locked set is exactly HomeAddress + legacy Address + ProxyEnabled + ProxyTargets, cosmetic/navigation keys never locked, identity keys never settings; seed decision table - locked/identity keys always enforced, cosmetic keys take the definition as initial value or re-initialise on definition change but a per-instance override survives inside an unchanged definition), `WorkspaceInstancePropertiesTests` #71 rows (hand-edited HomeAddress overwritten; definition proxy posture + allowlist enforced over stored values; cosmetic override kept, absent cosmetic seeded, changed definition re-initialises it; identity/fingerprint always enforced), `ManagedViewPropertiesPaneGuardTests` (home TextBox pins IsEnabled/ToolTip bindings + probe AutomationIds; both admin notices render only for managed items via one converter; NO cosmetic control declares an IsEnabled binding) | See SC-9 below - **live row PASSED 2026-11-03** (run `20261103-043150`, drop `3C777113…F63475`): Home renders disabled with the pinned URL visible + the admin note under Home AND Proxy, the checkbox stays enabled and its per-instance ON-state survives a full exit/re-enter-setup re-seed, locks still locked afterwards, `WebContent workspace seed:` marker in MIPLog; the standalone zero-change branch is pinned by the unit table + pane guard (no standalone view item in the lab) |
 
 ## Manual host checks
 
@@ -1434,6 +1435,41 @@ probe's finally restores whatever pre-call state it read (baseline fallback
   BEFORE the WinINET proxy is applied — MC's own login channel follows the system proxy, and
   pointing WinINET at the harness (which 403s CONNECT and never dials upstream) breaks the MC
   login. The probe now orders MC first.
+
+### SC-9 Managed workspaces lock security-relevant view settings (#71)
+
+A view item provisioned inside an admin-defined workspace must not let the Smart Client user
+change what the workspace governs: the properties pane renders the pinned Home/target URL
+disabled (value still displayed) with a "Managed by Administrator" note under it and under the
+read-only Proxy posture, while every cosmetic checkbox and the zoom slider stay enabled and
+save per instance. Server-side enforcement is the seed itself (`WorkspaceSettingLocks`):
+identity + locked keys (HomeAddress/legacy Address, ProxyEnabled, ProxyTargets) are re-applied
+on every seeding pass, so a stored override — older build or hand-edited — can never reach
+runtime; cosmetic keys receive only their initial value from the definition (or a
+re-initialisation when the admin definition changed).
+
+Automated: `WorkspaceSettingLocksTests`, the #71 rows in `WorkspaceInstancePropertiesTests`,
+and `ManagedViewPropertiesPaneGuardTests` (XAML pins: home TextBox `IsEnabled`/ToolTip
+bindings, both notices' Visibility bound to the managed flag, and NO `IsEnabled` binding on any
+cosmetic control). The standalone branch (nothing locked) is pinned by the unit decision table
+and the pane guard — the lab has no standalone (manually placed) Web Content view item, so no
+live row covers it.
+
+Live probe: `ScManagedWorkspaceProbeTests.ProbeManagedWorkspaceLocksPropertiesAndKeepsPerInstanceChoices`
+— setup mode on the managed workspace tab: Home field asserted `IsEnabled=false` with a
+non-blank pinned URL, both notices carry the exact label, `chkClearBrowsingDataOnExit` is
+enabled; the toggle is flipped ON, then setup is EXITED AND RE-ENTERED (which re-runs
+`GeneratePropertiesWpfUserControl` → the workspace seed) and the override is asserted still ON
+while the locks are asserted still locked; the Smart Client MIPLog must carry the
+`WebContent workspace seed:` decision line when logs are readable; the probe restores the
+override to OFF afterwards.
+
+**Live record (BEAST):** `20261103-043150` — **PASSED** 2026-11-03 (local drop
+`WebContent.dll` SHA-256 `3C777113…F63475`, 0.1.271.61120, hash-verified in the local MIP root;
+ES synced to the same drop afterwards). Artifacts `sc-managed-locked-home.png` (Home greyed
+with `http://httpforever.com/` visible, note under Home and Proxy) and
+`sc-managed-after-reseed.png` (same locks intact, "Clear history on exit" still checked after
+the re-seed cycle) show both halves. The seed marker line was found in `MIPLog.txt`.
 
 ## Installer checks
 
