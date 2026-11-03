@@ -10,6 +10,13 @@ namespace WebContent
         internal const double MinZoomLevel = 25.0;
         internal const double MaxZoomLevel = 500.0;
 
+        /// <summary>#85: the Proxy tab's response-cap field works in whole megabytes; the byte
+        /// bounds these correspond to are pinned to <see cref="ProxyFetchLimits"/> by a unit
+        /// test, so the admin-facing range and the server-side clamp cannot drift apart.</summary>
+        internal const int DefaultProxyResponseCapMegabytes = 5;
+        internal const int MinProxyResponseCapMegabytes = 1;
+        internal const int MaxProxyResponseCapMegabytes = 20;
+
         internal static string GetString(Func<string, string> valueProvider, string defaultValue, params string[] keys)
         {
             if (valueProvider == null || keys == null)
@@ -296,6 +303,73 @@ namespace WebContent
             }
 
             return ClampZoomLevel(parsedValue);
+        }
+
+        /// <summary>
+        /// #85: validates the Proxy tab's whole-megabytes response-cap field. Blank means "the
+        /// default" and is accepted as 0 (the stored member stays omitted); anything else must be
+        /// a plain integer inside the admin range - unlike zoom, an out-of-range value is NOT
+        /// silently clamped here, it refuses the save by name. The Event Server clamps stored
+        /// values server-side regardless (see <see cref="ProxyResponseCapStore"/>), so a refused
+        /// or bypassed UI can never smuggle a cap past the ceiling.
+        /// </summary>
+        internal static bool TryParseProxyResponseCapMegabytes(string value, out int megabytes, out string rejectedText)
+        {
+            rejectedText = null;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                megabytes = 0;
+                return true;
+            }
+
+            var text = value.Trim();
+            if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out megabytes) ||
+                megabytes < MinProxyResponseCapMegabytes ||
+                megabytes > MaxProxyResponseCapMegabytes)
+            {
+                megabytes = 0;
+                rejectedText = text;
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// #85: the stored wire value for an admin-entered megabyte count. 0 (the default) stores
+        /// 0 so the optional member is omitted from the blob - pre-#85 stored shapes never grow
+        /// a redundant section just because a newer plugin saved them.
+        /// </summary>
+        internal static int ProxyResponseCapBytes(int megabytes)
+        {
+            if (megabytes <= 0 || megabytes == DefaultProxyResponseCapMegabytes)
+            {
+                return 0;
+            }
+
+            return megabytes * 1024 * 1024;
+        }
+
+        /// <summary>
+        /// #85: the megabyte number the Proxy tab displays for a stored wire value. Absent/0 is
+        /// the default; a hand-edited value past the ceiling displays the ceiling; a hand-edited
+        /// sub-megabyte value displays the minimum (saving the page normalizes it to whole MB -
+        /// the display is honest about the range, the ES clamp is what governs until then).
+        /// </summary>
+        internal static int ResolveProxyResponseCapMegabytes(int storedBytes)
+        {
+            if (storedBytes <= 0)
+            {
+                return DefaultProxyResponseCapMegabytes;
+            }
+
+            if (storedBytes >= ProxyFetchLimits.MaxAllowedResponseBytes)
+            {
+                return MaxProxyResponseCapMegabytes;
+            }
+
+            var megabytes = storedBytes / (1024 * 1024);
+            return megabytes < MinProxyResponseCapMegabytes ? MinProxyResponseCapMegabytes : megabytes;
         }
 
         private static string TryGetPropertyValue(IDictionary<string, string> properties, string key)

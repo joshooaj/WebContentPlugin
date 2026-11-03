@@ -205,5 +205,50 @@ namespace WebContent.Tests
 
             Assert.DoesNotContain("proxyTriggers", json);
         }
+
+        // #85: the per-workspace response cap rides the same settings object as an optional
+        // int member. Absent means "the 5 MB default"; a stored value round-trips verbatim
+        // (the clamp happens on every READ, at serve time, not at save time); and a default-cap
+        // save never grows the blob.
+
+        [Fact]
+        public void DefinitionSavedBeforeTheCapExistedMeansNoStoredCap()
+        {
+            var settings = WorkspaceConfiguration.Deserialize(LegacyShapeBlob).GetFirstWebContentSettings();
+
+            Assert.Equal(0, settings.ProxyMaxResponseBytes);
+        }
+
+        [Fact]
+        public void StoredResponseCapSurvivesTheSerializedRoundtripVerbatim()
+        {
+            // Even a past-ceiling value round-trips verbatim on purpose: the reader contract is
+            // "store what you were given, clamp forever at serve time" (ProxyFetchLimits /
+            // ProxyResponseCapStore), so a hand-edited blob is never silently rewritten by MC.
+            var config = WorkspaceConfiguration.CreateDefault("https://camera-ui.example/");
+            var settings = config.GetFirstWebContentSettings();
+            settings.ProxyEnabled = true;
+            settings.ProxyMaxResponseBytes = 8 * 1024 * 1024;
+
+            var json = config.Serialize();
+            Assert.Contains("\"proxyMaxResponseBytes\":8388608", json);
+
+            var reparsed = WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings();
+            Assert.Equal(8 * 1024 * 1024, reparsed.ProxyMaxResponseBytes);
+        }
+
+        [Fact]
+        public void DefaultCapStoresZeroAndWritesNoCapMember()
+        {
+            var config = WorkspaceConfiguration.CreateDefault("https://camera-ui.example/");
+            var settings = config.GetFirstWebContentSettings();
+            settings.ProxyEnabled = true;   // proxy on, cap left at the default
+
+            var json = config.Serialize();
+
+            Assert.DoesNotContain("proxyMaxResponseBytes", json);
+            var reparsed = WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings();
+            Assert.Equal(0, reparsed.ProxyMaxResponseBytes);
+        }
     }
 }

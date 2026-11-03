@@ -141,6 +141,22 @@
           <CheckBox x:Name="chkProxyEnabled" Content="Route web traffic through the VMS server proxy"
                     Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
 
+          <!--
+            Ticket #85: the workspace's max proxied response size, in whole MB. The Event Server
+            clamps the stored value server-side (5 MB default, 20 MB ceiling); the page validates
+            the same range at save time and refuses an out-of-range entry by name rather than
+            silently rewriting what the admin typed. The cap governs fetch-mode responses only -
+            the hint says so, tunnels/websockets stay uncapped.
+          -->
+          <TextBlock x:Name="lblProxyResponseCap" Style="{StaticResource FieldLabelStyle}" Text="Max proxied response size (MB):" Margin="0,10,0,2" />
+          <StackPanel Orientation="Horizontal">
+            <TextBox x:Name="txtProxyResponseCapMB" AutomationProperties.AutomationId="proxyResponseCapMB"
+                     Style="{StaticResource FormTextBoxStyle}" Width="80" MaxLength="8"
+                     TextAlignment="Right" VerticalAlignment="Center" TextChanged="OnProxyResponseCapTextChanged" />
+            <TextBlock x:Name="lblProxyResponseCapHint" Style="{StaticResource SecondaryTextStyle}"
+                       TextWrapping="Wrap" Margin="12,0,0,0" MaxWidth="560" VerticalAlignment="Center" />
+          </StackPanel>
+
           <TextBlock x:Name="lblProxyTargets" Style="{StaticResource FieldLabelStyle}" Text="Proxy targets:" Margin="0,10,0,2" />
 
           <Border x:Name="proxyWildcardWarning" Style="{StaticResource WarningBannerStyle}" Visibility="Collapsed">

@@ -279,6 +279,15 @@
   <data name="MissingProxyTargetsMessage" xml:space="preserve">
     <value>The proxy is enabled but no target is allowlisted. Add at least one proxy target or disable the proxy.</value>
   </data>
+  <data name="ProxyCapLabel" xml:space="preserve">
+    <value>Max proxied response size (MB)</value>
+  </data>
+  <data name="ProxyCapHint" xml:space="preserve">
+    <value>Bigger responses are refused with a "response too large" page. Default 5 MB, maximum 20 MB; leave empty for the default. Applies to proxied fetch traffic only - streamed traffic like websockets is not size-capped.</value>
+  </data>
+  <data name="InvalidProxyCapMessage" xml:space="preserve">
+    <value>'{0}' is not a valid proxy response size. Enter a whole number of megabytes between 1 and 20, or leave the field empty for the default 5 MB.</value>
+  </data>
   <data name="ProxyLabel" xml:space="preserve">
     <value>Proxy:</value>
   </data>

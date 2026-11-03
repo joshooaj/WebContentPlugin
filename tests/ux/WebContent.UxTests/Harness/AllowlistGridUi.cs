@@ -47,6 +47,12 @@ public static class AllowlistGridUi
     public const string NameFieldId = "txtName";
     public const string ProxyEnabledId = "chkProxyEnabled";
 
+    /// <summary>#85: the Proxy tab's whole-megabytes response-cap field (plain TextBox, not a
+    /// grid cell - one instance on the page, so AutomationId addressing is unambiguous). The
+    /// field sets an EXPLICIT AutomationProperties.AutomationId, so UIA must address it by
+    /// that id, not by its x:Name.</summary>
+    public const string ResponseCapFieldId = "proxyResponseCapMB";
+
     /// <summary>One row as UIA reads it. Entry renders in the pre-#81 probe-record shape
     /// ("scheme://host[:port] accept-untrusted") so existing assertions transfer.</summary>
     public sealed class RowReading
@@ -146,6 +152,112 @@ public static class AllowlistGridUi
         log.AppendLine($"grid now shows: {string.Join(" | ", ReadEntries(mcMain))}");
 
         SaveAndVerify(mc, mcMain, workspacesNodeName, workspaceName, wanted, log);
+    }
+
+    /// <summary>The cap field as the pane currently displays it (whole-MB text).</summary>
+    public static string ReadResponseCapText(Window mcMain)
+    {
+        OpenProxyTab(mcMain);
+        return ReadValue(ManagementClientUi.ExpectControl(mcMain, ResponseCapFieldId, 10)).Trim();
+    }
+
+    /// <summary>Types the response-cap field and verifies it by readback (Value pattern first,
+    /// then the focus-gated clipboard route - same escalation ladder as the grid cells).</summary>
+    public static void SetResponseCapText(Window mcMain, string text)
+    {
+        OpenProxyTab(mcMain);
+        var wanted = (text ?? string.Empty).Trim();
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            var box = ManagementClientUi.ExpectControl(mcMain, ResponseCapFieldId, 10);
+            try
+            {
+                if (box.Patterns.Value.IsSupported)
+                    box.Patterns.Value.Pattern.SetValue(wanted);
+            }
+            catch { }
+
+            Thread.Sleep(300);
+            if (string.Equals(ReadValue(ManagementClientUi.ExpectControl(mcMain, ResponseCapFieldId, 10)).Trim(), wanted, StringComparison.Ordinal))
+                return;
+
+            box = ManagementClientUi.ExpectControl(mcMain, ResponseCapFieldId, 10);
+            if (ManagementClientUi.FocusVerified(mcMain, box, ResponseCapFieldId) && LoginFlow.TryClipboardSetText(wanted))
+            {
+                FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                             FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
+                Thread.Sleep(150);
+                FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                             FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_V);
+                Thread.Sleep(400);
+                if (string.Equals(ReadValue(ManagementClientUi.ExpectControl(mcMain, ResponseCapFieldId, 10)).Trim(), wanted, StringComparison.Ordinal))
+                    return;
+            }
+
+            Thread.Sleep(300);
+        }
+
+        throw new InvalidOperationException(
+            $"'{ResponseCapFieldId}' never read back as '{wanted}' (reads '{ReadValue(ManagementClientUi.ExpectControl(mcMain, ResponseCapFieldId, 10))}').");
+    }
+
+    /// <summary>
+    /// #85: set the response-cap field and store it, verified through the same two independent
+    /// channels as the allowlist save: the plugin's "Stored proxy response cap ..." audit line
+    /// in the MC MIP.log (naming the effective MB value, "(default)" for the 5 MB default) and
+    /// a readback from a RELOADED pane.
+    /// </summary>
+    public static void SetCapAndSave(ClientSession mc, Window mcMain, string workspacesNodeName, string workspaceName, string capText, StringBuilder log)
+    {
+        Trace = message => log.AppendLine(message);
+        var wanted = (capText ?? string.Empty).Trim();
+        var display = string.IsNullOrEmpty(wanted) ? "5" : wanted;
+        // Keyed on the audit line's own ': N MB' segment so a stored '18 MB' could never satisfy
+        // a wait for '8 MB'.
+        var auditToken = string.IsNullOrEmpty(wanted) || wanted == "5" ? ": 5 MB (default)" : $": {wanted} MB";
+
+        OpenProxyTab(mcMain);
+        SetResponseCapText(mcMain, capText);
+
+        if (!ManagementClientUi.WaitForSaveEnabled(mcMain, 6))
+        {
+            log.AppendLine("Save still disabled after the cap edit; flipping the routing checkbox twice to dirty the pane");
+            ManagementClientUi.DirtyPaneViaCheckbox(mcMain, ProxyEnabledId);
+            if (!ManagementClientUi.WaitForSaveEnabled(mcMain, 6))
+            {
+                log.AppendLine("Save still disabled after the checkbox flip; keyboard-nudging the cap field");
+                ManagementClientUi.NudgeControlWithKeystroke(mcMain, ResponseCapFieldId);
+                log.AppendLine($"Save enabled after nudge: {ManagementClientUi.WaitForSaveEnabled(mcMain, 6)}");
+            }
+        }
+
+        var paneName = ReadPaneName(mcMain);
+        if (!string.Equals(paneName, workspaceName, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Refusing to Save: the Name field reads '{paneName}', expected '{workspaceName}'.");
+
+        OpenProxyTab(mcMain);
+
+        var auditMarker = $"Stored proxy response cap for workspace '{workspaceName}'";
+        var auditBefore = McLog.CountMatches(auditMarker, auditToken);
+
+        if (!ManagementClientUi.Save(mc, mcMain, 20))
+            throw new InvalidOperationException($"Save never became enabled for cap '{wanted}'.");
+
+        var auditLine = McLog.WaitForNewLine(auditBefore, 20, auditMarker, auditToken);
+        if (auditLine == null)
+            throw new InvalidOperationException(
+                $"the save wrote no 'Stored proxy response cap' audit line carrying '{auditToken}' " +
+                $"({auditBefore} -> {McLog.CountMatches(auditMarker, auditToken)}).");
+        log.AppendLine($"stored cap audit line: {auditLine}");
+
+        Thread.Sleep(1500);
+        ReloadPane(mcMain, workspacesNodeName, workspaceName);
+        var stored = ReadResponseCapText(mcMain);
+        if (!string.Equals(stored, display, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"After Save + reload the cap field reads '{stored}' - expected '{display}'.");
+        log.AppendLine($"stored cap '{display}' MB verified from the audit line AND a reloaded pane");
     }
 
     /// <summary>Save discipline for a grid the caller has already edited: dirty-chain guards,

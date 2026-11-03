@@ -64,6 +64,8 @@ namespace WebContent.Admin
             chkIsolateBrowserInstances.Content = Strings.IsolateBrowserInstancesLabel;
             chkEnableDevTools.Content = Strings.EnableDevToolsLabel;
             chkProxyEnabled.Content = Strings.ProxyEnabledLabel;
+            lblProxyResponseCap.Text = Strings.ProxyCapLabel + ":";
+            lblProxyResponseCapHint.Text = Strings.ProxyCapHint;
             lblProxyTargets.Text = Strings.ProxyTargetsLabel + ":";
             lblProxyTargetsHint.Text = Strings.ProxyTargetsHint;
             lblProxyTestUrl.Text = Strings.ProxyTestFetchLabel + ":";
@@ -194,6 +196,20 @@ namespace WebContent.Admin
         }
 
         /// <summary>
+        /// #85: the Proxy tab's max-response-size field, raw text. The item manager fills it from
+        /// the stored wire value (already clamped for display) and reads it back as text on Save -
+        /// validity is refused by name at save time, so nothing here silently clamps what the
+        /// admin typed. Blank renders the default.
+        /// </summary>
+        // internal, not public: like the row surface, this crosses only to WorkspaceUserControl
+        // and WorkspaceItemManager.
+        internal string ProxyResponseCapText
+        {
+            get => txtProxyResponseCapMB.Text;
+            set => txtProxyResponseCapMB.Text = value;
+        }
+
+        /// <summary>
         /// #81: the rows behind the structured allowlist grid. The item manager fills them from
         /// the stored definition (either #73 shape) and reads them back on Save; the free-text
         /// one-line-per-entry property is gone with the text box it served.
@@ -244,6 +260,7 @@ namespace WebContent.Admin
             chkIsolateBrowserInstances.IsChecked = false;
             chkEnableDevTools.IsChecked = false;
             chkProxyEnabled.IsChecked = false;
+            txtProxyResponseCapMB.Text = WebContentConfiguration.DefaultProxyResponseCapMegabytes.ToString(CultureInfo.InvariantCulture);
             _loadingProxyTargets = true;
             try
             {
@@ -718,6 +735,18 @@ namespace WebContent.Admin
                 txtZoomLevel.Text = e.NewValue.ToString("F0", CultureInfo.InvariantCulture);
                 _syncingZoom = false;
             }
+            ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void OnProxyResponseCapTextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Guards against null fields: BAML load fires this handler while the
+            // object graph is still being built (same lesson as the zoom handlers).
+            if (lblProxyResponseCapHint == null)
+            {
+                return;
+            }
+
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
         }
 

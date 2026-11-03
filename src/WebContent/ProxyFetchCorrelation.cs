@@ -163,10 +163,13 @@ namespace WebContent
 
             // A meta frame with a negative or oversize declaration is hostile/garbled input;
             // allocating from it could throw on the message-receiver thread. The server-side
-            // fetcher never declares more than its own response cap.
+            // fetcher never declares more than its own response cap - and since #85 that cap is
+            // per workspace, up to the fixed 20 MB protocol ceiling. The per-workspace cap is
+            // enforced where the bytes are actually read (the Event Server fetcher); this guard
+            // only bounds the client's allocation against the wire.
             if (pending.Meta.ChunkCount < 0 ||
                 pending.Meta.BodyLength < 0 ||
-                pending.Meta.BodyLength > ProxyFetchLimits.Default().MaxResponseBytes)
+                pending.Meta.BodyLength > ProxyFetchLimits.MaxAllowedResponseBytes)
             {
                 Complete(pending, new ProxyFetchResult
                 {

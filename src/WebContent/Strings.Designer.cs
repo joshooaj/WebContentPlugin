@@ -538,6 +538,33 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Max proxied response size (MB).
+        /// </summary>
+        internal static string ProxyCapLabel {
+            get {
+                return ResourceManager.GetString("ProxyCapLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Bigger responses are refused with a &quot;response too large&quot; page. Default 5 MB, maximum 20 MB; leave empty for the default. Applies to proxied fetch traffic only - streamed traffic like websockets is not size-capped..
+        /// </summary>
+        internal static string ProxyCapHint {
+            get {
+                return ResourceManager.GetString("ProxyCapHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid proxy response size. Enter a whole number of megabytes between 1 and 20, or leave the field empty for the default 5 MB..
+        /// </summary>
+        internal static string InvalidProxyCapMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyCapMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Proxy:.
         /// </summary>
         internal static string ProxyLabel {

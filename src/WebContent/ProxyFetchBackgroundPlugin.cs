@@ -56,6 +56,13 @@ namespace WebContent
         /// event so administrators can build Event Server rules on it.
         /// </summary>
         private ProxyTriggerMatcher _triggerMatcher;
+
+        /// <summary>
+        /// #85: per-workspace fetch-response size caps (the "proxyMaxResponseBytes" setting the
+        /// Management Client's Proxy tab stores). Resolved per served fetch off the request's
+        /// workspace attribution, clamped server-side to the fixed 20 MB ceiling.
+        /// </summary>
+        private ProxyResponseCapStore _responseCaps;
         private int _selfTestProbeDone;
 
         /// <summary>
@@ -125,6 +132,15 @@ namespace WebContent
                     ResolveWorkspacePropertySnapshots,
                     message => EnvironmentManager.Instance.Log(true, nameof(ProxyFetchBackgroundPlugin), message),
                     ResolveVmsFloorHosts);
+
+                // #85: the per-workspace response-size cap rides the same workspace snapshot the
+                // allowlist and trigger rows use (same 60 s refresh semantics), and the same
+                // resolution clamps it server-side: no workspace can obtain a cap past the
+                // fixed 20 MB ceiling regardless of what its stored config claims.
+                _responseCaps = new ProxyResponseCapStore(
+                    ResolveWorkspaceCapSnapshots,
+                    message => EnvironmentManager.Instance.Log(false, nameof(ProxyFetchBackgroundPlugin), message));
+                _responseCaps.Prime();
 
                 // ADR-0003: the same plugin answers leaf-mint requests for the loopback TLS
                 // termination; the same allowlist union gates minting exactly like fetching.
@@ -483,7 +499,11 @@ namespace WebContent
             var target = query.Uri;
             try
             {
-                var limits = ProxyFetchLimits.Default();
+                // #85: the fetch runs under this workspace's stored response cap (5 MB default,
+                // server-side 20 MB clamp); ProxyFetchTransport refuses a body past the cap with
+                // TooLarge exactly as before. Tunnels never reach this path - CONNECT/websocket
+                // streams stay uncapped by design.
+                var limits = ProxyFetchLimits.ForResponseCapBytes(ResolveWorkspaceResponseCapBytes(payload));
                 var result = await new ProxyHttpFetcher().FetchAsync(query, limits, tlsMode);
 
                 if (!result.Success)
@@ -1125,6 +1145,44 @@ namespace WebContent
         }
 
         /// <summary>
+        /// #85: the response cap that governs one served fetch, resolved from the stored config
+        /// of the workspace the request is attributed to. A pre-#65 Smart Client that stamps no
+        /// workspace id falls back to the session's workspace in the diagnostics session map (the
+        /// same attribution rule #65 uses); still unattributable means the 5 MB default. A lookup
+        /// fault is not a reason to change a fetch's posture - it answers the default too.
+        /// </summary>
+        private int ResolveWorkspaceResponseCapBytes(ProxyFetchRequestPayload payload)
+        {
+            try
+            {
+                var store = _responseCaps;
+                if (store == null)
+                {
+                    return ProxyFetchLimits.DefaultMaxResponseBytes;
+                }
+
+                var workspaceItemId = payload.WorkspaceItemId;
+                if (string.IsNullOrEmpty(workspaceItemId))
+                {
+                    string mapped;
+                    workspaceItemId = _diagnostics != null && _diagnostics.TryGetSessionWorkspace(payload.SessionId, out mapped)
+                        ? mapped
+                        : null;
+                }
+
+                return store.ResolveEffectiveBytes(workspaceItemId);
+            }
+            catch (Exception exception)
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(ProxyFetchBackgroundPlugin),
+                    $"Proxy response cap lookup failed (fetching at the default cap): {exception.Message}");
+                return ProxyFetchLimits.DefaultMaxResponseBytes;
+            }
+        }
+
+        /// <summary>
         /// #65: raise the platform event for one rule-trigger match on the event bus
         /// (Server.NewEventCommand, the system-defined raise the Event Server processes through its
         /// matcher chain). Fire-and-swallow: a trigger event must never alter or break the fetch
@@ -1640,6 +1698,36 @@ namespace WebContent
             }
 
             return snapshots;
+        }
+
+        /// <summary>
+        /// #85: the workspace items the response-cap store reads, item id and all - the same
+        /// Configuration lookup every other per-workspace resolver uses.
+        /// </summary>
+        private static System.Collections.Generic.IEnumerable<ProxyWorkspaceCapSource> ResolveWorkspaceCapSnapshots()
+        {
+            List<Item> workspaces;
+            Exception error;
+            if (!Admin.WorkspaceItemManager.TryGetWorkspaces(out workspaces, out error))
+            {
+                throw error ?? new InvalidOperationException("Workspace configuration lookup failed.");
+            }
+
+            var sources = new List<ProxyWorkspaceCapSource>();
+            foreach (var workspace in workspaces)
+            {
+                if (workspace != null && workspace.FQID != null && workspace.Properties != null)
+                {
+                    sources.Add(new ProxyWorkspaceCapSource
+                    {
+                        ItemId = workspace.FQID.ObjectId.ToString(),
+                        Name = workspace.Name,
+                        Properties = workspace.Properties,
+                    });
+                }
+            }
+
+            return sources;
         }
 
         /// <summary>

@@ -268,6 +268,17 @@ namespace WebContent
         /// </summary>
         [DataMember(Name = "proxyTriggers", EmitDefaultValue = false)]
         public List<ProxyTriggerConfiguration> ProxyTriggers { get; set; }
+
+        /// <summary>
+        /// Ticket #85: the workspace's maximum proxied fetch-mode response size in bytes. Absent
+        /// from every definition saved before #85 and from saves that kept the default, which
+        /// deserialize to 0 — the Event Server then applies
+        /// <see cref="ProxyFetchLimits.DefaultMaxResponseBytes"/>. Whatever the stored value
+        /// claims, readers clamp it to <see cref="ProxyFetchLimits.MaxAllowedResponseBytes"/>;
+        /// this raw member must never decide a cap on its own.
+        /// </summary>
+        [DataMember(Name = "proxyMaxResponseBytes", EmitDefaultValue = false)]
+        public int ProxyMaxResponseBytes { get; set; }
     }
 
     [DataContract]

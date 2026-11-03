@@ -119,11 +119,18 @@ namespace WebContent.Tests
             {
                 "chkProxyEnabled", "lblProxyTargets", "proxyWildcardWarning", "txtProxyWildcardWarning",
                 "dgProxyTargets", "btnProxyTargetAdd", "lblProxyTargetsHint",
+                "lblProxyResponseCap", "txtProxyResponseCapMB", "lblProxyResponseCapHint",
                 "lblProxyTestUrl", "txtProxyTestUrl", "btnProxyTestFetch", "lblProxyTestHint", "lblProxyTestResult",
             })
             {
                 Assert.True(controlNames.Contains(required), $"Proxy tab lost probe-surface control '{required}'.");
             }
+
+            // #85: the response-cap field is a plain whole-MB TextBox (no grid, no picker); the
+            // probe drives it through this AutomationId and its TextChanged handler marks dirty.
+            var capBox = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == "txtProxyResponseCapMB");
+            Assert.Equal("proxyResponseCapMB", capBox.Attribute("AutomationProperties.AutomationId")?.Value);
+            Assert.Equal("OnProxyResponseCapTextChanged", capBox.Attribute("TextChanged")?.Value);
 
             var grid = proxy.Descendants().Single(e => e.Name.LocalName == "DataGrid");
             Assert.Equal("dgProxyTargets", grid.Attribute(Xaml + "Name")?.Value);

@@ -364,13 +364,24 @@ namespace WebContent
 
     /// <summary>
     /// Bounds the fetcher enforces per request (ticket #53 acceptance: connect timeout, read
-    /// timeout, maximum response size).
+    /// timeout, maximum response size). Since #85 the response-size bound is per workspace:
+    /// <see cref="DefaultMaxResponseBytes"/> governs workspaces that store no cap, and every
+    /// stored cap clamps server-side to the fixed <see cref="MaxAllowedResponseBytes"/> ceiling.
+    /// The cap governs fetch-mode (buffered) responses only - CONNECT-tunnelled and websocket
+    /// byte streams are never size-capped (they are already allowlist-gated).
     /// </summary>
     internal class ProxyFetchLimits
     {
         internal const int DefaultConnectTimeoutMs = 5000;
         internal const int DefaultReadTimeoutMs = 15000;
         internal const int DefaultMaxResponseBytes = 5 * 1024 * 1024;
+
+        /// <summary>
+        /// #85: the hard server-side ceiling for per-workspace response caps. No stored config
+        /// can obtain a cap above it - malformed or huge values clamp on every read.
+        /// </summary>
+        internal const int MaxAllowedResponseBytes = 20 * 1024 * 1024;
+
         internal const int DefaultChunkSizeBytes = 64 * 1024;
 
         internal int ConnectTimeoutMs = DefaultConnectTimeoutMs;
@@ -381,6 +392,32 @@ namespace WebContent
         internal static ProxyFetchLimits Default()
         {
             return new ProxyFetchLimits();
+        }
+
+        /// <summary>
+        /// #85: limits for one fetch under the workspace's effective response cap. The stored
+        /// value always passes through <see cref="NormalizeResponseCapBytes"/> first.
+        /// </summary>
+        internal static ProxyFetchLimits ForResponseCapBytes(int storedMaxResponseBytes)
+        {
+            return new ProxyFetchLimits
+            {
+                MaxResponseBytes = NormalizeResponseCapBytes(storedMaxResponseBytes),
+            };
+        }
+
+        /// <summary>
+        /// #85: the one clamp every reader of a stored cap goes through: absent/0/negative is
+        /// the 5 MB default, anything past the 20 MB ceiling is the ceiling.
+        /// </summary>
+        internal static int NormalizeResponseCapBytes(int storedMaxResponseBytes)
+        {
+            if (storedMaxResponseBytes <= 0)
+            {
+                return DefaultMaxResponseBytes;
+            }
+
+            return storedMaxResponseBytes > MaxAllowedResponseBytes ? MaxAllowedResponseBytes : storedMaxResponseBytes;
         }
     }
 
