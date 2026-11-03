@@ -690,17 +690,30 @@ namespace WebContent
     /// Ticket #69: one workspace's live-proxy snapshot — open sessions with the traffic the
     /// Event Server already sees on the correlation channel, plus the recently-blocked list.
     /// In-memory only: everything resets on an Event Server restart.
+    ///
+    /// The explicit [DataContract]/[DataMember] shape is the #65 skew rule, applied when #80
+    /// added UntrustedMachines: an inferred contract makes EVERY member required on read (the
+    /// serializer refuses a frame that predates a later member), an explicit one makes every
+    /// member optional. Frames from a pre-#80 Event Server therefore decode with a null list.
     /// </summary>
     [Serializable]
+    [DataContract]
     public class ProxyStatusResponsePayload
     {
+        [DataMember]
         public string CorrelationId;
+
+        [DataMember]
         public bool Success;
 
         /// <summary>Workspace item id the snapshot describes (echoed from the request).</summary>
+        [DataMember]
         public string WorkspaceItemId;
 
+        [DataMember]
         public List<ProxySessionStatusEntry> Sessions;
+
+        [DataMember]
         public List<ProxyBlockEntry> Blocked;
 
         /// <summary>
@@ -709,10 +722,14 @@ namespace WebContent
         /// view instance; in-memory like the rest of the snapshot. Absent (null) on failure
         /// frames and on frames from a pre-#80 Event Server.
         /// </summary>
+        [DataMember]
         public List<ProxyCaUntrustedMachineEntry> UntrustedMachines;
 
         // Failure fields.
+        [DataMember]
         public string ErrorCode;
+
+        [DataMember]
         public string ErrorMessage;
     }
 

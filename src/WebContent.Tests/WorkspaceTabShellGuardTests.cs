@@ -366,10 +366,18 @@ namespace WebContent.Tests
             Assert.Equal("False", grid.Attribute("CanUserDeleteRows")?.Value);
             Assert.Equal("False", grid.Attribute("CanUserResizeRows")?.Value);
 
-            // Every button on the tab is one of the two pinned handlers; nothing else can fire.
+            // Every button on the tab is one of the pinned handlers; nothing else can fire.
+            // #80 added exactly one: the untrusted-CA banner's inline export, which READS the
+            // deployment CA (a cert export to a operator-chosen file) and arms no Save mutation -
+            // allowed ONLY under that name, so a future state-writing button still trips here.
             foreach (var button in diagnostics.Descendants().Where(e => e.Name.LocalName == "Button"))
             {
                 var handler = button.Attribute("Click")?.Value;
+                if (Name(button) == "btnCaUntrustedExport")
+                {
+                    Assert.Equal("OnCaUntrustedExport", handler);
+                    continue;
+                }
                 Assert.True(handler == "OnDiagnosticsRefresh" || handler == "OnDiagnosticsPromote",
                     $"{Name(button)} carries unexpected handler '{handler}'.");
             }

@@ -283,5 +283,89 @@ namespace WebContent.Tests
             var view = Build(Answer(Blocked("https://cdn.example.com")), null);
             Assert.True(view.Rows[0].CanPromote);
         }
+
+        // ---- #80: the untrusted-machine aggregate ------------------------------------------------
+
+        [Fact]
+        public void UntrustedMachineRowsRenderWithReportCountsAndRecency()
+        {
+            // One row per MACHINE (the Event Server already deduped), pre-formatted like the
+            // blocked rows, newest report first.
+            var payload = Answer();
+            payload.UntrustedMachines = new List<ProxyCaUntrustedMachineEntry>
+            {
+                new ProxyCaUntrustedMachineEntry
+                {
+                    Machine = "WORKSTATION7",
+                    Count = 2,
+                    LastSeenUtc = T0.AddMinutes(-3),
+                },
+                new ProxyCaUntrustedMachineEntry
+                {
+                    Machine = "BEAST",
+                    Count = 41,
+                    LastSeenUtc = T0.AddSeconds(-30),
+                },
+            };
+
+            var view = Build(payload);
+            Assert.Equal(2, view.UntrustedMachineCount);
+            Assert.Equal(new[] { "BEAST", "WORKSTATION7" }, view.UntrustedMachineRows.Select(r => r.Machine).ToArray());
+            Assert.Equal("41", view.UntrustedMachineRows[0].Reports);
+            Assert.Equal("30s ago", view.UntrustedMachineRows[0].LastSeen);
+            Assert.Equal("3m 00s ago", view.UntrustedMachineRows[1].LastSeen);
+        }
+
+        [Fact]
+        public void MissingOrNullUntrustedListReadsAsZeroMachines()
+        {
+            // A pre-#80 status frame (member absent → null) and an explicit empty list both read
+            // as "nothing to warn about", never a failure and never a crash.
+            var noMember = Build(new ProxyStatusResponsePayload
+            {
+                Success = true,
+                Blocked = new List<ProxyBlockEntry>(),
+                UntrustedMachines = null,
+            });
+            Assert.True(noMember.QuerySucceeded);
+            Assert.Equal(0, noMember.UntrustedMachineCount);
+            Assert.Empty(noMember.UntrustedMachineRows);
+
+            var emptyList = Build(Answer());
+            Assert.Equal(0, emptyList.UntrustedMachineCount);
+        }
+
+        [Fact]
+        public void BlankMachineEntriesNeverRender()
+        {
+            var payload = Answer();
+            payload.UntrustedMachines = new List<ProxyCaUntrustedMachineEntry>
+            {
+                null,
+                new ProxyCaUntrustedMachineEntry { Machine = "   ", Count = 1, LastSeenUtc = T0 },
+                new ProxyCaUntrustedMachineEntry { Machine = "BEAST", Count = 1, LastSeenUtc = T0 },
+            };
+
+            var view = Build(payload);
+            Assert.Single(view.UntrustedMachineRows);
+            Assert.Equal("BEAST", view.UntrustedMachineRows[0].Machine);
+        }
+
+        [Fact]
+        public void UntrustedRowsRenderEvenWhenNothingWasBlocked()
+        {
+            // The banner's whole point: an https workspace whose views all die on the SAME CA
+            // verdict can produce few blocked-origin rows (client-decided refusals arrive under
+            // CertUntrusted) yet the machine aggregate must still surface.
+            var payload = Answer();
+            payload.UntrustedMachines = new List<ProxyCaUntrustedMachineEntry>
+            {
+                new ProxyCaUntrustedMachineEntry { Machine = "PC1", Count = 1, LastSeenUtc = T0 },
+            };
+
+            var view = Build(payload);
+            Assert.Equal(0, view.BlockedCount);
+            Assert.Equal(1, view.UntrustedMachineCount);
+        }
     }
 }

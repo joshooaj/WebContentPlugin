@@ -170,7 +170,7 @@ namespace WebContent
         /// </summary>
         internal bool RecordUntrustedAuthorityReport(string workspaceItemId, string clientMachine, DateTime utcNow)
         {
-            if (string.IsNullOrEmpty(workspaceItemId) || string.IsNullOrEmpty(clientMachine))
+            if (string.IsNullOrWhiteSpace(workspaceItemId) || string.IsNullOrWhiteSpace(clientMachine))
             {
                 return false;
             }

@@ -37,6 +37,7 @@ namespace WebContent.Tests
         [InlineData(typeof(ProxyStatusResponsePayload))]
         [InlineData(typeof(ProxySessionStatusEntry))]
         [InlineData(typeof(ProxyBlockEntry))]
+        [InlineData(typeof(ProxyCaUntrustedMachineEntry))]
         [InlineData(typeof(ProxyCaExportRequestPayload))]
         [InlineData(typeof(ProxyCaExportResponsePayload))]
         public void EveryPayloadFieldStaysInsideTheMessageWhitelist(Type payloadType)

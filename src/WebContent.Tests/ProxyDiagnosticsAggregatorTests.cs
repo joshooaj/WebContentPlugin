@@ -240,6 +240,86 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void UntrustedMachineReportsDedupPerMachineAccumulatingAndRefreshing()
+        {
+            // #80: the aggregate is per client MACHINE, not per view or per report - a fleet of
+            // proxied views on one PC is ONE line for the operator, and every later report from
+            // that PC refreshes its recency and bumps its count.
+            var aggregator = new ProxyDiagnosticsAggregator();
+            Assert.True(aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), "BEAST", T0));
+            Assert.False(aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), "BEAST", T0.AddMinutes(1)));
+            Assert.False(aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), "beast", T0.AddMinutes(2)));
+
+            var snapshot = aggregator.Snapshot(WorkspaceA.ToString(), T0.AddMinutes(3));
+            Assert.Single(snapshot.UntrustedMachines);
+            Assert.Equal("BEAST", snapshot.UntrustedMachines[0].Machine);
+            Assert.Equal(3, snapshot.UntrustedMachines[0].Count);
+            Assert.Equal(T0.AddMinutes(2), snapshot.UntrustedMachines[0].LastSeenUtc);
+        }
+
+        [Fact]
+        public void UntrustedMachinesArePerWorkspaceAndBlankFieldsAreDropped()
+        {
+            var aggregator = new ProxyDiagnosticsAggregator();
+            aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), "BEAST", T0);
+            aggregator.RecordUntrustedAuthorityReport(WorkspaceB.ToString(), "WORKSTATION", T0);
+            aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), "  ", T0);
+            aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), null, T0);
+            aggregator.RecordUntrustedAuthorityReport(null, "BEAST", T0);
+
+            var a = aggregator.Snapshot(WorkspaceA.ToString(), T0);
+            var b = aggregator.Snapshot(WorkspaceB.ToString(), T0);
+            Assert.Single(a.UntrustedMachines); // the blank/null-machine reports never landed
+            Assert.Equal("BEAST", a.UntrustedMachines[0].Machine);
+            Assert.Equal("WORKSTATION", b.UntrustedMachines[0].Machine);
+        }
+
+        [Fact]
+        public void UntrustedMachineTableEvictsLeastRecentlySeenPastTheCap()
+        {
+            var aggregator = new ProxyDiagnosticsAggregator();
+            var cap = ProxyDiagnosticsAggregator.MaxUntrustedMachinesPerWorkspace;
+            for (var i = 0; i < cap + 3; i++)
+            {
+                aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), $"PC{i}", T0.AddSeconds(i));
+            }
+
+            var snapshot = aggregator.Snapshot(WorkspaceA.ToString(), T0);
+            Assert.Equal(cap, snapshot.UntrustedMachines.Count);
+            Assert.DoesNotContain(snapshot.UntrustedMachines, entry => entry.Machine == "PC0");
+            Assert.Equal($"PC{cap + 2}", snapshot.UntrustedMachines[cap - 1].Machine);
+        }
+
+        [Fact]
+        public void SessionFiledBlocksNeverTouchTheUntrustedMachineTable()
+        {
+            // A session-attributed block's machine is the session's PC, and only client-decided
+            // CertUntrusted reports belong in the machine table. RecordBlockForSession (the
+            // Event Server's own fetch/gate decisions) must not populate it.
+            var aggregator = new ProxyDiagnosticsAggregator();
+            aggregator.OpenSession("s1", WorkspaceA.ToString(), "alice", "BEAST", T0);
+            aggregator.RecordBlockForSession("s1", "https://gate.test:443", ProxyBlockReasons.CertUntrusted, T0.AddMinutes(1));
+
+            Assert.Empty(aggregator.Snapshot(WorkspaceA.ToString(), T0.AddMinutes(2)).UntrustedMachines);
+        }
+
+        [Fact]
+        public void UntrustedMachineTableSurvivesTheIdleSweepLikeTheBlockedRings()
+        {
+            // Nothing re-registers a machine's posture until the client's next genuine flip, so
+            // sweeping sessions must not silently drop the operator's deployment checklist.
+            var aggregator = new ProxyDiagnosticsAggregator();
+            aggregator.OpenSession("s1", WorkspaceA.ToString(), "alice", "BEAST", T0);
+            aggregator.RecordUntrustedAuthorityReport(WorkspaceA.ToString(), "BEAST", T0);
+
+            aggregator.SweepIdleSessions(TimeSpan.FromMinutes(3), T0.AddMinutes(4));
+
+            var snapshot = aggregator.Snapshot(WorkspaceA.ToString(), T0.AddMinutes(5));
+            Assert.Empty(snapshot.Sessions);
+            Assert.Single(snapshot.UntrustedMachines);
+        }
+
+        [Fact]
         public void TryMapErrorCodeFunnelsWireCodesIntoBlockCategories()
         {
             string reason;
