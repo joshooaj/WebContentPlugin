@@ -6,13 +6,15 @@ using Xunit;
 namespace WebContent.Tests
 {
     /// <summary>
-    /// Ticket #73 AC2: the three gates that must never disagree - the Event Server fetch gate
-    /// (<see cref="ProxyServerAllowlist"/>, which is also what the leaf-mint gate
-    /// <see cref="ProxyLeafIssuer"/> consults, i.e. the allowlist IS the minting policy) and the
-    /// client forward policy (<see cref="ProxyForwardPolicy"/>) - consume ONE canonical matcher
-    /// over ONE canonical entry shape. This matrix feeds the identical (entries, request-origin)
-    /// pairs through all three and pins identical verdicts, legacy host records and new pattern
-    /// records alike.
+    /// Ticket #73 AC2, extended by #88: the gates that must never disagree - the Event Server
+    /// fetch gate (<see cref="ProxyServerAllowlist"/>, which is also what the leaf-mint gate
+    /// <see cref="ProxyLeafIssuer"/> consults, i.e. the allowlist IS the minting policy), the
+    /// client forward policy (<see cref="ProxyForwardPolicy"/>), and the view-layer https refusal
+    /// (<see cref="ProxyViewRefusal"/>, #88) - consume ONE canonical matcher over ONE canonical
+    /// entry shape. This matrix feeds the identical (entries, request-origin) pairs through all
+    /// of them and pins identical verdicts, legacy host records and new pattern records alike.
+    /// The view gate adds its own scheme rule on top: it answers https only (http rides the
+    /// proxy's absolute-form 403), never wider than the forward gate would.
     /// </summary>
     public class ProxyAllowlistGateAgreementTests
     {
@@ -110,6 +112,28 @@ namespace WebContent.Tests
                 var clientVerdict = ProxyForwardPolicy.Decide(SeededEntries, head, null, VmsFloorHosts, out _, out _);
                 Assert.Equal(expected ? ProxyForwardDisposition.Forward : ProxyForwardDisposition.OriginNotAllowed, clientVerdict);
 
+                // #88: the view-layer https gate joins the matrix. It answers https only (plain
+                // http stays on the absolute-form forward path), and on its scheme its verdict
+                // matches every other gate: allowed origins reach the network, refused origins
+                // get the view's own 403 page.
+                var viewRefused = ProxyViewRefusal.TryRefuseHttpsRequest(SeededEntries, VmsFloorHosts, probe, "GET", out _, out var viewHtml);
+                if (probe.Scheme == Uri.UriSchemeHttps)
+                {
+                    Assert.Equal(!expected, viewRefused);
+                    if (viewRefused)
+                    {
+                        Assert.Contains("not in the workspace proxy allowlist", viewHtml);
+                    }
+                    else
+                    {
+                        Assert.Null(viewHtml);
+                    }
+                }
+                else
+                {
+                    Assert.False(viewRefused);
+                }
+
                 // The mint gate is https-only; on its scheme it must follow the identical policy:
                 // allowed mints proceed past the gate and fail only at the authority seam,
                 // refused mints stop at NotAllowed before the authority is ever consulted.
@@ -151,6 +175,10 @@ namespace WebContent.Tests
                 Assert.Equal(
                     expected ? ProxyForwardDisposition.Forward : ProxyForwardDisposition.OriginNotAllowed,
                     ProxyForwardPolicy.Decide(entries, head, null, VmsFloorHosts, out _, out _));
+
+                // #88: the view gate honours the same floor - the full-host hatch admits hosts
+                // at the view exactly as at the other gates, floored hosts stay refused.
+                Assert.Equal(!expected, ProxyViewRefusal.TryRefuseHttpsRequest(entries, VmsFloorHosts, probe, "GET", out _, out _));
             }
         }
     }

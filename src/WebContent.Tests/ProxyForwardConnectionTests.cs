@@ -175,6 +175,46 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public async Task WritesTheFullForbiddenPageAsTheConnectAnswerBody()
+        {
+            // #88 root-cause pin (the unit half of the live repro pair): a refused CONNECT gets
+            // the complete 403 + friendly page written as the CONNECT response body on the fake
+            // socket. Chromium treats any non-2xx CONNECT answer as a tunnel refusal and DROPS
+            // that body - the live half (ScProxyErrorProbeTests' https start-URL row pre-fix run)
+            // shows the native ERR_TUNNEL_CONNECTION_FAILED page. The user-facing fix is the
+            // view-layer gate (ProxyViewRefusal); this posture here stays untouched so the
+            // fail-closed CONNECT refusal - and the #69 block report - keep happening.
+            var fetchCalled = false;
+            var blocks = new RecordingBlockReporter();
+            string response;
+            using (var input = new MemoryStream(Encoding.UTF8.GetBytes("CONNECT elsewhere.test:443 HTTP/1.1\r\n\r\n")))
+            using (var output = new MemoryStream())
+            {
+                await ProxyForwardConnection.HandleAsync(
+                    input,
+                    output,
+                    Allowlist,
+                    query =>
+                    {
+                        fetchCalled = true;
+                        return Task.FromResult(new ProxyFetchResult { Success = false });
+                    },
+                    message => { },
+                    null,
+                    null,
+                    blocks);
+                response = Encoding.UTF8.GetString(output.ToArray());
+            }
+
+            Assert.False(fetchCalled);
+            Assert.StartsWith("HTTP/1.1 403 Forbidden\r\n", response);
+            Assert.Contains("<title>Web Content proxy: 403</title>", response);
+            Assert.Contains("is not an allowlisted https proxy origin", response);
+            Assert.Contains("Allowlist entry that would admit this origin: https://elsewhere.test", response);
+            Assert.Equal(new[] { "NotAllowed https://elsewhere.test" }, blocks.Reports);
+        }
+
+        [Fact]
         public async Task ReportsLocal403RefusalsToTheBlockReporter()
         {
             // #69: the client-side gate refusal is exactly the block the Event Server never sees
