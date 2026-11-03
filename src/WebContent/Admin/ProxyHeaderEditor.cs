@@ -255,7 +255,15 @@ namespace WebContent.Admin
                 rules.Add(record);
             }
 
-            return rejectedDescriptions.Count == 0;
+            if (rejectedDescriptions.Count > 0)
+            {
+                // Nothing partial is ever handed back: a refused build yields an empty list, so a
+                // caller that ignores the return value still cannot store half a policy.
+                rules = new List<ProxyHeaderRuleConfiguration>();
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>

@@ -132,8 +132,9 @@ namespace WebContent.Tests
             Assert.Equal("proxyResponseCapMB", capBox.Attribute("AutomationProperties.AutomationId")?.Value);
             Assert.Equal("OnProxyResponseCapTextChanged", capBox.Attribute("TextChanged")?.Value);
 
-            var grid = proxy.Descendants().Single(e => e.Name.LocalName == "DataGrid");
-            Assert.Equal("dgProxyTargets", grid.Attribute(Xaml + "Name")?.Value);
+            // #86: the Proxy tab now carries THREE grids (allowlist + the two header-policy
+            // grids); probes resolve each by its AutomationId, so every grid must carry one.
+            var grid = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == "dgProxyTargets");
 
             // The grid edits rows through live template-column editors (no grid edit mode), and
             // every editing control carries its scoped AutomationId.
@@ -172,6 +173,56 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void ProxyTabCarriesTheHeaderPolicyGridsForBothLegs()
+        {
+            // #86: two name/value/strip grids (request leg + response leg), each addressed by a
+            // stable AutomationId so a live probe can scope its cell reads to one leg, each with
+            // the same live-editor column shape the allowlist grid established.
+            var proxy = ConfigPageTabs().Single(t => Name(t) == "tabProxy");
+            var expectedColumns = new[]
+            {
+                ("Header", "proxyHeaderRowName"),
+                ("Value", "proxyHeaderRowValue"),
+                ("Strip", "proxyHeaderRowStrip"),
+                ("Problem", "proxyHeaderRowProblem"),
+                ("Remove", "proxyHeaderRowRemove"),
+            };
+
+            foreach (var (gridName, automationId, addButtonName, addHandler) in new[]
+            {
+                ("dgProxyRequestHeaders", "proxyRequestHeadersGrid", "btnProxyHeaderAddRequest", "OnProxyHeaderAddRequest"),
+                ("dgProxyResponseHeaders", "proxyResponseHeadersGrid", "btnProxyHeaderAddResponse", "OnProxyHeaderAddResponse"),
+            })
+            {
+                var grid = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == gridName);
+                Assert.Equal(automationId, grid.Attribute("AutomationProperties.AutomationId")?.Value);
+                Assert.Equal("False", grid.Attribute("CanUserAddRows")?.Value);
+                Assert.Equal("False", grid.Attribute("CanUserDeleteRows")?.Value);
+
+                var columns = grid.Descendants()
+                    .Where(e => e.Name.LocalName.EndsWith("Column", System.StringComparison.Ordinal))
+                    .ToList();
+                Assert.Equal(expectedColumns.Length, columns.Count);
+                for (var i = 0; i < expectedColumns.Length; i++)
+                {
+                    Assert.Equal(expectedColumns[i].Item1, columns[i].Attribute("Header")?.Value);
+                    Assert.NotNull(columns[i].Descendants()
+                        .Single(e => e.Attribute("AutomationProperties.AutomationId")?.Value == expectedColumns[i].Item2));
+                }
+
+                var addButton = proxy.Descendants().Single(e => (e.Attribute(Xaml + "Name")?.Value) == addButtonName);
+                Assert.Equal(addHandler, addButton.Attribute("Click")?.Value);
+            }
+
+            // Section scaffolding the admin (and a screenshot) needs: the labels and the hint that
+            // documents the FIXED hop-by-hop set and the no-Via/no-X-Forwarded-For posture.
+            foreach (var required in new[] { "lblProxyHeaders", "lblProxyHeadersHint", "lblProxyRequestHeaders", "lblProxyResponseHeaders" })
+            {
+                Assert.NotNull(proxy.Descendants().SingleOrDefault(e => (e.Attribute(Xaml + "Name")?.Value) == required));
+            }
+        }
+
+        [Fact]
         public void ProxyGridCellBindingsPushToTheRowImmediately()
         {
             // #81, learned the hard way live: a DataGrid defers the source update of a cell-content
@@ -181,21 +232,25 @@ namespace WebContent.Tests
             // already looked successful. Every writeable binding inside the grid's templates must
             // say PropertyChanged; the read-only Problem cell (no Mode=TwoWay) is exempt.
             var proxy = ConfigPageTabs().Single(t => Name(t) == "tabProxy");
-            var grid = proxy.Descendants().Single(e => e.Name.LocalName == "DataGrid");
 
+            // #86: every Proxy-tab grid (allowlist + both header grids) carries the same live-
+            // editor obligation - guard them all, not just the first.
             static string Tighten(string value) => new(value.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
 
-            var offenders = grid.Descendants()
-                .SelectMany(e => e.Attributes())
-                .Where(a => a.Value.Contains("{Binding", System.StringComparison.Ordinal))
-                .Where(a => Tighten(a.Value).Contains("mode=twoway", System.StringComparison.OrdinalIgnoreCase))
-                .Where(a => !Tighten(a.Value).Contains("updatesourcetrigger=propertychanged", System.StringComparison.OrdinalIgnoreCase))
-                .Select(a => $"{a.Name.LocalName}=\"{a.Value}\"")
-                .ToList();
+            foreach (var grid in proxy.Descendants().Where(e => e.Name.LocalName == "DataGrid"))
+            {
+                var offenders = grid.Descendants()
+                    .SelectMany(e => e.Attributes())
+                    .Where(a => a.Value.Contains("{Binding", System.StringComparison.Ordinal))
+                    .Where(a => Tighten(a.Value).Contains("mode=twoway", System.StringComparison.OrdinalIgnoreCase))
+                    .Where(a => !Tighten(a.Value).Contains("updatesourcetrigger=propertychanged", System.StringComparison.OrdinalIgnoreCase))
+                    .Select(a => $"{a.Name.LocalName}=\"{a.Value}\"")
+                    .ToList();
 
-            Assert.True(offenders.Count == 0,
-                "grid cell bindings that defer their source update (add UpdateSourceTrigger=PropertyChanged): " +
-                string.Join("; ", offenders));
+                Assert.True(offenders.Count == 0,
+                    "grid cell bindings that defer their source update (add UpdateSourceTrigger=PropertyChanged): " +
+                    string.Join("; ", offenders));
+            }
         }
 
         [Fact]

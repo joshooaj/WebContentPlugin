@@ -250,5 +250,64 @@ namespace WebContent.Tests
             var reparsed = WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings();
             Assert.Equal(0, reparsed.ProxyMaxResponseBytes);
         }
+
+        // #86: the per-workspace header policy rides the same settings object as two optional
+        // list sections. Absent means "no rules" (every pre-#86 definition); rows round-trip
+        // verbatim INCLUDING forbidden names - the wire never censors, the readers refuse
+        // (ProxyHeaderPolicyStore at snapshot, the MC grid at fill/save), so a hand-edited blob
+        // stays visible-and-refused rather than silently rewritten.
+
+        [Fact]
+        public void DefinitionSavedBeforeTheHeaderPolicyExistedMeansNoSections()
+        {
+            var settings = WorkspaceConfiguration.Deserialize(LegacyShapeBlob).GetFirstWebContentSettings();
+
+            Assert.Null(settings.ProxyRequestHeaders);
+            Assert.Null(settings.ProxyResponseHeaders);
+        }
+
+        [Fact]
+        public void WorkspaceWithoutHeaderRulesWritesNoSectionAtAll()
+        {
+            var config = WorkspaceConfiguration.CreateDefault("https://camera-ui.example/");
+            var settings = config.GetFirstWebContentSettings();
+            settings.ProxyEnabled = true;   // proxy on, no header rules
+
+            var json = config.Serialize();
+
+            Assert.DoesNotContain("proxyRequestHeaders", json);
+            Assert.DoesNotContain("proxyResponseHeaders", json);
+        }
+
+        [Fact]
+        public void HeaderRuleSectionsRoundTripVerbatimIncludingForbiddenNames()
+        {
+            var config = WorkspaceConfiguration.CreateDefault("https://camera-ui.example/");
+            var settings = config.GetFirstWebContentSettings();
+            settings.ProxyEnabled = true;
+            settings.ProxyRequestHeaders = new List<ProxyHeaderRuleConfiguration>
+            {
+                new ProxyHeaderRuleConfiguration { Name = "X-Edge", Value = "vms" },
+                new ProxyHeaderRuleConfiguration { Name = "X-Internal", Remove = true },
+                new ProxyHeaderRuleConfiguration { Name = "Host", Value = "hand-edited.example" },
+            };
+            settings.ProxyResponseHeaders = new List<ProxyHeaderRuleConfiguration>
+            {
+                new ProxyHeaderRuleConfiguration { Name = "Server", Remove = true },
+            };
+
+            var json = config.Serialize();
+            var reparsed = WorkspaceConfiguration.Deserialize(json).GetFirstWebContentSettings();
+
+            Assert.Equal(3, reparsed.ProxyRequestHeaders.Count);
+            Assert.Equal("X-Edge", reparsed.ProxyRequestHeaders[0].Name);
+            Assert.Equal("vms", reparsed.ProxyRequestHeaders[0].Value);
+            Assert.False(reparsed.ProxyRequestHeaders[0].Remove);
+            Assert.True(reparsed.ProxyRequestHeaders[1].Remove);
+            Assert.Null(reparsed.ProxyRequestHeaders[1].Value);
+            Assert.Equal("Host", reparsed.ProxyRequestHeaders[2].Name); // stored verbatim; refused on read
+            Assert.Single(reparsed.ProxyResponseHeaders);
+            Assert.True(reparsed.ProxyResponseHeaders[0].Remove);
+        }
     }
 }

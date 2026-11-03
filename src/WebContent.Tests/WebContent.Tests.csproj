@@ -39,6 +39,9 @@
     <Compile Include="..\WebContent\ProxyTriggerPolicy.cs" Link="ProxyTriggerPolicy.cs" />
     <Compile Include="..\WebContent\ProxyTriggerMatcher.cs" Link="ProxyTriggerMatcher.cs" />
     <Compile Include="..\WebContent\ProxyResponseCapStore.cs" Link="ProxyResponseCapStore.cs" />
+    <Compile Include="..\WebContent\ProxyHeaderPolicy.cs" Link="ProxyHeaderPolicy.cs" />
+    <Compile Include="..\WebContent\ProxyHeaderPolicyStore.cs" Link="ProxyHeaderPolicyStore.cs" />
+    <Compile Include="..\WebContent\Admin\ProxyHeaderEditor.cs" Link="ProxyHeaderEditor.cs" />
     <Compile Include="..\WebContent\ProxyFetchContract.cs" Link="ProxyFetchContract.cs" />
     <Compile Include="..\WebContent\ProxyFetchFramer.cs" Link="ProxyFetchFramer.cs" />
     <Compile Include="..\WebContent\ProxyFetchWireCodec.cs" Link="ProxyFetchWireCodec.cs" />
