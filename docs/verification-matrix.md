@@ -54,6 +54,7 @@ is not evidence the plugin never ran.
 | MC Diagnostics tab: recently-blocked origins from the ES ring, one-click allowlist promotion into the Proxy grid (tab-gated polling on the Status query pair, same Manage gate, fail-closed) | #84 | `ProxyDiagnosticsViewTests` (failure postures mirror the Status tab - a lost query is never an empty table, the ES code survives, unknown workspace and no-channel read their own sentences; zero blocked origins is the honest empty message naming the in-memory/reset semantics; rows arrive pre-formatted newest-first with an origin-ordinal tiebreak, hits floored at 1, future timestamps clamp to "just now", never negative; the allowlist annotation runs the SAME shared `ProxyPolicy.IsRequestAllowed` matcher as the three gates - a wildcard entry or the VMS floor hosts marks a row already covered and drops its button; `CertUntrusted` rows never get the button, every other certified posture does; an unparsable origin names itself and refuses promotion), `ProxyAllowlistEditorTests` promotion section (the promotion IS a grid row: exact scheme+host+port, accept-untrusted never set, default ports canonicalise, dedupe is by canonical entry not typing, junk outside the exact-entry grammar refuses without touching the grid, the promoted row saves through the ordinary build as a structured record, `ValidCanonicalEntries` covers unsaved edits and skips broken rows), `WorkspaceTabShellGuardTests` (Diagnostics starts `Collapsed` + the identical Granted-only gate theory; the live tab carries exactly one read-only grid, its buttons carry only the two pinned handlers, the promote button hides via its `CanPromote` converter rather than disabling, no configuration input control anywhere on the tab, and the in-memory/resets copy is pinned as prose) | See MC-16 below - **live row PASSED 2026-11-02** (run `20261102-182628`): a live Smart Client refusal renders `http://172.16.128.210:18131 | not allowed by administrator` within the cadence while only the Diagnostics tab arms the marker loop; one click lands the exact origin in the Proxy grid UNSAVED, annotates the row `on allowlist`, hides its own button, arms Save, and the ordinary save discipline (audit line + reloaded-pane readback) stores it; after a pane reload the row re-annotates from stored config; allowlist restored with verified readback |
 
 | Per-workspace proxy response cap (5 MB default, hard 20 MB ceiling, clamp-on-read, MC Proxy-tab field) | #85 | `ProxyResponseCapStoreTests` (never-resolved store / unknown workspace / absent member / malformed 0-negative all answer the 5 MB default, never a refusal; a stored cap answers verbatim; a past-ceiling stored value clamps to 20 MB and gets exactly one audit line naming the workspace per refresh; a resolver failure after a good resolve keeps last-known-good caps; flap resilience across alternating refreshes; the 60 s window means one resolve per burst; `ForResponseCapBytes` factories clamp identically), `ProxyConfigurationTests` cap section (pre-#85 definitions read `ProxyMaxResponseBytes=0`; a stored value round-trips VERBATIM even past the ceiling - the clamp is on every read, never a silent rewrite at save time; the default stores 0 and the blob never grows the member - `EmitDefaultValue=false`), `ConfigResilienceTests` cap section (blank/whole-MB-inside-1..20 accepted, everything else refused BY NAME with the rejected text - no silent zoom-style clamp in the UI; MB→bytes mapping stores 0 for the default; bytes→display clamps honestly both ways; the admin ceiling and the contract's `MaxAllowedResponseBytes` are pinned in lockstep), `ProxyFetchCorrelationTests` (the client receive guard bounds allocation against the 20 MB PROTOCOL ceiling, not the old 5 MB default - a hostile `ceiling+1` declaration still errors, while a 6 MB framed answer reassembles), `WorkspaceTabShellGuardTests` (the Proxy tab carries `lblProxyResponseCap`/`txtProxyResponseCapMB`/`lblProxyResponseCapHint`, the field's explicit AutomationId and `OnProxyResponseCapTextChanged` handler pinned) | See MC-17 below - **live rows PASSED 2026-11-02** (run `20261102-210935`): the default posture refuses a REAL 10 MB download with `TooLarge ... exceeded the 5242880 byte response cap`; saving 12 MB flips the SAME download to `HTTP 200 - 10485760 bytes fetched` inside the 60 s ES refresh window (which also proves the raised client receive guard); `99999` refuses the whole save by name with zero new cap-audit lines while the ES keeps serving the stored cap; restoring 5 re-arms the refusal |
+| Per-workspace proxy header policy: add/override/strip rows on BOTH fetch legs, forbidden-header guardrail enforced at save AND at runtime | #86 | `ProxyHeaderPolicyTests` (the canonical forbidden set: exact hop-by-hop/Host/Content-Length/Transfer-Encoding/TE/Upgrade names + every `Proxy-*` prefix, case-insensitive; RFC 9110 token-name grammar, CR/LF in a value refused; the apply model: add/override replaces all same-name entries case-insensitively, rules apply in configuration order with LAST rule winning, forbidden rules never applied even when hand-fed past the store), `ProxyHeaderPolicyStoreTests` (60 s refresh / last-known-good / Prime-at-Init; forbidden and malformed stored rows refused with one audit line per refresh naming workspace + raw text; corrupt blobs = empty policy, never a refusal), `ProxyHeaderEditorTests` (the MC build refuses the WHOLE policy by name with nothing partial returned; strip-without-value is valid; strip does NOT unlock a forbidden name; Load drops unrenderable stored rows counted for the log), `ProxyConfigurationTests` header section (round-trips keep forbidden names VERBATIM on the wire - readers refuse, nobody censors; empty grids store no section, pre-#86 wire shape preserved), `EventServerHeaderPolicyWiringGuardTests` (request rules applied before the fetch, response rules before the frame and only for a real upstream status, store Prime at Init, all three block sets derived from the one canonical set), `WorkspaceTabShellGuardTests` (both grids on the Proxy tab: name-keyed lookups, per-AutomationId column pinning for both legs, the PropertyChanged binding guard across every Proxy-tab grid) | See MC-18 below - **live rows PASSED 2026-11-02** (run `20261102-224611`): a two-rule policy per leg stores through the audit line AND order-sensitive reloaded-pane readback; four forbidden-row cycles (request+response, add+strip) each pin the live Problem text, the notice naming the row verbatim, the refusal marker, and zero new audit lines; empty grids store the empty policy |
 
 ## Manual host checks
 
@@ -631,6 +632,55 @@ refused save: 12 -> 12` with `post-refusal fetch -> HTTP 200 - 10485760 bytes fe
 cap ('5') restored (verified from reloaded panes)`. Four earlier red runs contributed the harness
 truths above (301 on http, 404 on 6Mb.dat, the fill-interrupt readback lie, and the missing
 restore-phase grid edit).
+
+### MC-18 Per-workspace header policy: store, guardrail, restore (#86)
+
+`McProxyHeaderPolicyProbeTests.ProbePerWorkspaceHeaderPolicyStoreRefusalAndRestore` — drives the
+Proxy tab's two "Advanced: headers" grids (`proxyRequestHeadersGrid`,
+`proxyResponseHeadersGrid`) through a live Management Client against the live VMS:
+
+1. Baseline: both grids read; leftover rows from an interrupted run normalize to the empty
+   policy first (the MC-17 self-heal lesson) so the run is idempotent.
+2. Store: an add/override row plus a strip row in EACH grid saves; verification is two-channel
+   like the allowlist — the plugin's `Stored proxy header policy ... request 2 rule(s) [X-...;
+   -X-...]; response 2 rule(s) [...].` audit line in the MC MIP.log AND both grids re-read from
+   a RELOADED pane, ORDER-SENSITIVELY (configuration order is part of the policy: last rule for
+   one name wins, here and on the Event Server).
+3. Guardrail, four cycles — `Host` (request leg) and `Proxy-Connection` (response leg), each in
+   the add form and the strip form: the Problem cell explains while the row is typed (`'Host' is
+   reserved for the proxy connection and cannot be configured.`), Save raises the plugin's
+   refusal notice NAMING the row verbatim (`Host=evil.example.com` / `-Host`), the MC MIP.log
+   gains the matching `invalid proxy (request|response) header row(s)` marker, and the
+   `Stored proxy header policy` audit-line count never moves — the WHOLE save is refused,
+   nothing partial is stored. Strip never unlocks a forbidden name: the guardrail is on the
+   name, not on the direction.
+4. Storage untouched: after all four refusals the grids still display exactly the stored
+   policy and the audit count is unmoved.
+5. Restore: emptied grids store the EMPTY policy (`request 0 rule(s) []; response 0 rule(s) []`)
+   the same verified way — the pre-#86 posture; teardown answers `Save changes?` with NO.
+
+Harness shape (no new live truths — MC-17's rules carried over first try): `HeaderGridUi` scopes
+every cell lookup to the grid element first, because BOTH grids' rows share the same per-row
+AutomationIds (`proxyHeaderRowName`/`Value`/`Strip`/`Problem`/`Remove`) — a window-wide find
+would interleave the two policies; within a grid, rows are addressed by document order like the
+allowlist grid, and virtualization is off in both grids' XAML (pinned by the shell guard).
+
+The live FETCH effect of the policy (headers actually added/stripped against a real target) is
+unit-pinned (`ProxyHeaderPolicyTests` + `EventServerHeaderPolicyWiringGuardTests`), not
+probe-pinned: the Proxy-tab fetch result label reports status/bytes/elapsed only, so no UIA read
+could show headers; the ES-side application sits in the fetch leg the SC probes exercise without
+header visibility either.
+
+Record (MC-18) - **live rows PASSED 2026-11-02**, green run `20261102-224611` (3 m 26 s), drop
+`WebContent.dll` SHA-256 `3889A67F.` (1 413 632 bytes) hash-verified in the local install folder.
+Chain from the results file: baseline `request=[] response=[]`; `stored header policy audit
+line: ... request 2 rule(s) [X-Probe-Request=probe-request-value; -X-Probe-Strip-Request];
+response 2 rule(s) [X-Probe-Response=probe-response-value; -X-Probe-Strip-Response].`; four
+`refusal notice (names the row verbatim): Invalid address OK The proxy header policy has invalid
+row(s): Host=evil.example.com / -Host / Proxy-Connection=close / -Proxy-Connection. ...`; four
+`nothing stored by the refusal: ... lines 1 -> 1`; `storage untouched through all four refusals:
+audit lines 1 -> 1`; `saved header policy request=[] response=[] (verified from the audit line
+AND reloaded panes, order-sensitive)`.
 
 ### SC-1 End-to-end proxied page load (#54)
 
@@ -1237,4 +1287,4 @@ ERROR_ACCESS_DENIED on a disconnected session; UIA patterns/SetValue/Invoke all 
   ever refactored, extract the policy into a pure class first and move MC-4's backoff
   assertions into the suite.
 - WebView2/Smart Client UI behavior (actual page render, WPF address-bar visuals) cannot be
-  unit-tested at the pure seams; MC-1-MC-17 (plus ES-1 and SC-1) are the release gate for those.
+  unit-tested at the pure seams; MC-1-MC-18 (plus ES-1 and SC-1) are the release gate for those.
