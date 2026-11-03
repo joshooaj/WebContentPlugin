@@ -115,5 +115,88 @@ namespace WebContent.Tests
 
             Assert.Empty(seed);
         }
+
+        // ---- ticket #71: locked (security-relevant) keys are enforced, cosmetic keys are not ----
+
+        [Fact]
+        public void ComputeSeed_Overwrites_A_Hand_Edited_Home_Address_Override()
+        {
+            // A per-instance HomeAddress override (left from an older build or hand-edited in the
+            // store) never survives into runtime: the definition wins on every seed.
+            var definition = new Dictionary<string, string> { ["HomeAddress"] = "admin.local" };
+
+            var seed = WorkspaceInstanceProperties.ComputeSeed(key => "user.local", definition);
+
+            Assert.Single(seed);
+            Assert.Equal("HomeAddress", seed[0].Key);
+            Assert.Equal("admin.local", seed[0].Value);
+        }
+
+        [Fact]
+        public void ComputeSeed_Enforces_The_Definition_Proxy_Posture_And_Allowlist()
+        {
+            var current = new Dictionary<string, string>
+            {
+                ["ProxyEnabled"] = "false",
+                ["ProxyTargets"] = "http://user.example",
+            };
+            var definition = new Dictionary<string, string>
+            {
+                ["ProxyEnabled"] = "true",
+                ["ProxyTargets"] = "http://admin.example",
+            };
+
+            var seed = WorkspaceInstanceProperties.ComputeSeed(key => current.TryGetValue(key, out var value) ? value : null, definition);
+
+            Assert.Equal(2, seed.Count);
+            Assert.Contains(seed, pair => pair.Key == "ProxyEnabled" && pair.Value == "true");
+            Assert.Contains(seed, pair => pair.Key == "ProxyTargets" && pair.Value == "http://admin.example");
+        }
+
+        [Fact]
+        public void ComputeSeed_Keeps_A_Per_Instance_Cosmetic_Override_Inside_An_Unchanged_Definition()
+        {
+            // Unlocked controls save per instance: a stored cosmetic value differing from the
+            // definition is NOT reverted while the definition itself is unchanged.
+            var current = new Dictionary<string, string> { ["ZoomLevel"] = "200" };
+            var definition = new Dictionary<string, string>
+            {
+                ["ZoomLevel"] = "150",
+                ["HideToolbar"] = "true",
+            };
+
+            var seed = WorkspaceInstanceProperties.ComputeSeed(key => current.TryGetValue(key, out var value) ? value : null, definition);
+
+            // ZoomLevel stays the user's; HideToolbar had no stored value so the definition seeds it.
+            Assert.Single(seed);
+            Assert.Equal("HideToolbar", seed[0].Key);
+        }
+
+        [Fact]
+        public void ComputeSeed_Reinitialises_Cosmetic_Keys_When_The_Definition_Changed()
+        {
+            var definition = new Dictionary<string, string> { ["ZoomLevel"] = "150" };
+
+            var seed = WorkspaceInstanceProperties.ComputeSeed(key => "200", definition, definitionChanged: true);
+
+            Assert.Single(seed);
+            Assert.Equal("150", seed[0].Value);
+        }
+
+        [Fact]
+        public void ComputeSeed_Always_Enforces_Identity_And_Fingerprint_Keys()
+        {
+            var definition = new Dictionary<string, string>
+            {
+                ["WorkspaceId"] = "ws-new",
+                ["DefinitionFingerprint"] = "fp-new",
+            };
+
+            var seed = WorkspaceInstanceProperties.ComputeSeed(key => "stale", definition);
+
+            Assert.Equal(2, seed.Count);
+            Assert.Contains(seed, pair => pair.Key == "WorkspaceId" && pair.Value == "ws-new");
+            Assert.Contains(seed, pair => pair.Key == "DefinitionFingerprint" && pair.Value == "fp-new");
+        }
     }
 }
