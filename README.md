@@ -248,13 +248,20 @@ Event Server MIP log shows the probe event raised and seen on the bus with the s
   them); Management Client diagnostics (including the Test proxy fetch
   harness) go to `Logs\MIP.log` under its ProgramData folder.
 - When a proxied page fails, the **browser itself shows an explicit proxy error page** naming the
-  failing side — never a silent direct load and never an endless spinner:
-  - **403** — the target origin is not in the workspace allowlist (names the origin).
-  - **503** — the VMS server proxy component is absent, unreachable, or not answering (deploy
-    check above; Smart Client restart needed after an Event Server restart).
-  - **502** — the VMS server reached the messaging layer but could not reach the target, or the
-    response exceeded the proxy response size cap.
-  - **504** — the VMS server fetched the target but the target timed out.
+  failing side — never a silent direct load and never an endless spinner. Each page carries a
+  friendly headline, exactly one **cause category** chip, and a collapsed "Technical details"
+  section (exact origin, the canonical allowlist entry that would admit it, the byte cap, the
+  verbatim refusal text, a "Copy diagnostics" button):
+  - **Not allowed by the administrator** (403) — the target origin is not in the workspace
+    allowlist (the details name the origin and the exact entry to add). The same 403 also appears
+    when the VMS server and the Smart Client disagree because their allowlists drifted.
+  - **VMS proxy component unavailable** (503) — the proxy component on the Event Server is absent,
+    unreachable, or not answering (deploy check above; Smart Client restart needed after an Event
+    Server restart).
+  - **Target unreachable / Response too large (proxy size cap) / Certificate not trusted /
+    Proxy tunnel failure** (502) — the VMS server reached the messaging layer but the target
+    connection, the response size cap, the target's TLS certificate, or the proxy tunnel refused.
+  - **Timeout** (504) — the VMS server fetched the target but the target timed out.
 
 ## License
 
