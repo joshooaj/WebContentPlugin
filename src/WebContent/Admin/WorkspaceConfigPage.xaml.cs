@@ -55,6 +55,11 @@ namespace WebContent.Admin
         private readonly ProxyHeaderEditor _responseHeaders = new ProxyHeaderEditor();
         private bool _loadingProxyHeaders;
 
+        // #78: the row collection behind the Proxy tab's "Rule triggers" grid. Same _loading
+        // discipline as the other grids.
+        private readonly ProxyTriggerEditor _triggers = new ProxyTriggerEditor();
+        private bool _loadingProxyTriggers;
+
         internal event EventHandler ConfigurationChanged;
 
         public WorkspaceConfigPage()
@@ -128,6 +133,24 @@ namespace WebContent.Admin
             _requestHeaders.Rows.CollectionChanged += (sender, args) => OnProxyHeaderRowsChanged(_requestHeaders, sender, args);
             _responseHeaders.Rows.CollectionChanged += (sender, args) => OnProxyHeaderRowsChanged(_responseHeaders, sender, args);
             UpdateProxyHeaderCounters();
+
+            // #78: the "Rule triggers" grid. Headers from Strings like every other column; the
+            // column ORDER is pinned by WorkspaceTabShellGuardTests.
+            lblProxyTriggers.Text = Strings.ProxyTriggersSectionLabel;
+            lblProxyTriggersHint.Text = Strings.ProxyTriggersHint;
+            btnProxyTriggerAdd.Content = Strings.ProxyTriggerAddButton;
+            dgProxyTriggers.ItemsSource = _triggers.Rows;
+            if (dgProxyTriggers.Columns.Count >= 5)
+            {
+                dgProxyTriggers.Columns[0].Header = Strings.ProxyColumnTriggerUrl;
+                dgProxyTriggers.Columns[1].Header = Strings.ProxyColumnTriggerMethod;
+                dgProxyTriggers.Columns[2].Header = Strings.ProxyColumnTriggerStatus;
+                dgProxyTriggers.Columns[3].Header = Strings.ProxyColumnTriggerEvent;
+                dgProxyTriggers.Columns[4].Header = Strings.ProxyColumnProblem;
+            }
+
+            _triggers.Rows.CollectionChanged += OnProxyTriggerRowsChanged;
+            UpdateProxyTriggerCounter();
 
             // #76: the pull loop exists only while the Status tab is the one being looked at. No
             // push channel, no persistence, and no timer running for a page nobody is reading.
@@ -323,6 +346,38 @@ namespace WebContent.Admin
             return dropped;
         }
 
+        /// <summary>
+        /// #78: the rows behind the "Rule triggers" grid. The item manager fills them from the
+        /// stored definition and reads them back on Save.
+        /// </summary>
+        internal System.Collections.Generic.IReadOnlyList<ProxyTriggerEditorRow> ProxyTriggerRows => _triggers.Rows;
+
+        /// <summary>
+        /// #78: fills the trigger grid from stored records (an absent stored section is the zero-
+        /// triggers reading). Returns how many stored rows could not be rendered so the item
+        /// manager can log them; the fill never marks the pane dirty.
+        /// </summary>
+        internal int LoadProxyTriggers(System.Collections.Generic.IEnumerable<ProxyTriggerConfiguration> stored)
+        {
+            _loadingProxyTriggers = true;
+            int dropped;
+            try
+            {
+                dropped = _triggers.Load(stored);
+                foreach (var row in _triggers.Rows)
+                {
+                    SyncProxyTriggerRowErrorText(row);
+                }
+            }
+            finally
+            {
+                _loadingProxyTriggers = false;
+            }
+
+            UpdateProxyTriggerCounter();
+            return dropped;
+        }
+
         public void ClearUserControl()
         {
             txtName.Text = "New Workspace";
@@ -360,6 +415,16 @@ namespace WebContent.Admin
                 _loadingProxyHeaders = false;
             }
             UpdateProxyHeaderCounters();
+            _loadingProxyTriggers = true;
+            try
+            {
+                _triggers.Clear();
+            }
+            finally
+            {
+                _loadingProxyTriggers = false;
+            }
+            UpdateProxyTriggerCounter();
             proxyWildcardWarning.Visibility = Visibility.Collapsed;
             UpdateProxyRowCounter();
             txtProxyTestUrl.Text = string.Empty;
@@ -1056,6 +1121,98 @@ namespace WebContent.Admin
 
             lblProxyHeaderRequestCounter.Text = string.Format(CultureInfo.InvariantCulture, Strings.ProxyHeaderRowCounterFormat, _requestHeaders.Count);
             lblProxyHeaderResponseCounter.Text = string.Format(CultureInfo.InvariantCulture, Strings.ProxyHeaderRowCounterFormat, _responseHeaders.Count);
+        }
+
+        // ---- #78: "Rule triggers" grid wiring ---------------------------------------------
+
+        private void OnProxyTriggerAdd(object sender, RoutedEventArgs e)
+        {
+            _triggers.AddBlankRow();
+        }
+
+        private void OnProxyTriggerRowRemove(object sender, RoutedEventArgs e)
+        {
+            var row = (sender as FrameworkElement)?.DataContext as ProxyTriggerEditorRow;
+            if (row != null)
+            {
+                _triggers.Remove(row);
+            }
+        }
+
+        private void OnProxyTriggerRowsChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (e.OldItems != null)
+            {
+                foreach (ProxyTriggerEditorRow row in e.OldItems)
+                {
+                    row.PropertyChanged -= OnProxyTriggerRowPropertyChanged;
+                }
+            }
+
+            if (e.NewItems != null)
+            {
+                foreach (ProxyTriggerEditorRow row in e.NewItems)
+                {
+                    SyncProxyTriggerRowErrorText(row);
+                    row.PropertyChanged += OnProxyTriggerRowPropertyChanged;
+                }
+            }
+
+            UpdateProxyTriggerCounter();
+            if (!_loadingProxyTriggers)
+            {
+                ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private void OnProxyTriggerRowPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(ProxyTriggerEditorRow.ErrorCode))
+            {
+                SyncProxyTriggerRowErrorText((ProxyTriggerEditorRow)sender);
+            }
+
+            if (!_loadingProxyTriggers)
+            {
+                ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Same code-on-row / text-on-view split as the other Proxy-tab grids: the row carries the
+        /// machine-readable refusal code, the Problem cell shows the localized sentence for it, and
+        /// the grid XAML stays BAML-trivial.
+        /// </summary>
+        private void SyncProxyTriggerRowErrorText(ProxyTriggerEditorRow row)
+        {
+            switch (row.ErrorCode)
+            {
+                case ProxyTriggerRowError.UrlRequired:
+                    row.ErrorText = Strings.ProxyTriggerRowErrorUrlRequired;
+                    break;
+                case ProxyTriggerRowError.UrlInvalid:
+                    row.ErrorText = string.Format(CultureInfo.InvariantCulture, Strings.ProxyTriggerRowErrorUrlInvalid, (row.Url ?? string.Empty).Trim());
+                    break;
+                case ProxyTriggerRowError.MethodInvalid:
+                    row.ErrorText = string.Format(CultureInfo.InvariantCulture, Strings.ProxyTriggerRowErrorMethodInvalid, (row.Method ?? string.Empty).Trim());
+                    break;
+                case ProxyTriggerRowError.StatusInvalid:
+                    row.ErrorText = string.Format(CultureInfo.InvariantCulture, Strings.ProxyTriggerRowErrorStatusInvalid, (row.Status ?? string.Empty).Trim());
+                    break;
+                default:
+                    row.ErrorText = string.Empty;
+                    break;
+            }
+        }
+
+        private void UpdateProxyTriggerCounter()
+        {
+            if (lblProxyTriggerCounter == null)
+            {
+                return;
+            }
+
+            lblProxyTriggerCounter.Text = string.Format(CultureInfo.InvariantCulture, Strings.ProxyTriggerRowCounterFormat, _triggers.Count);
         }
 
         /// <summary>

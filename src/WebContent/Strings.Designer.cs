@@ -709,6 +709,123 @@ namespace WebContent {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Rule triggers.
+        /// </summary>
+        internal static string ProxyTriggersSectionLabel {
+            get {
+                return ResourceManager.GetString("ProxyTriggersSectionLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to One row per trigger: when proxied traffic matches the URL pattern, the method, and the response status, the VMS Event Server raises the XProtect event type shown in the Event raised column (&quot;WebContent proxy request&quot;)..
+        /// </summary>
+        internal static string ProxyTriggersHint {
+            get {
+                return ResourceManager.GetString("ProxyTriggersHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to URL pattern.
+        /// </summary>
+        internal static string ProxyColumnTriggerUrl {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerUrl", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Method.
+        /// </summary>
+        internal static string ProxyColumnTriggerMethod {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerMethod", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Status.
+        /// </summary>
+        internal static string ProxyColumnTriggerStatus {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerStatus", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Event raised.
+        /// </summary>
+        internal static string ProxyColumnTriggerEvent {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerEvent", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add trigger.
+        /// </summary>
+        internal static string ProxyTriggerAddButton {
+            get {
+                return ResourceManager.GetString("ProxyTriggerAddButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} trigger(s).
+        /// </summary>
+        internal static string ProxyTriggerRowCounterFormat {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowCounterFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A trigger URL pattern is required..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorUrlRequired {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorUrlRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid trigger URL pattern (scheme://host[:port][/path-glob], or the lone *)..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorUrlInvalid {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorUrlInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a method filter (one verb, or * for any method)..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorMethodInvalid {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorMethodInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a status filter (blank for any, a class like 4xx, or an exact code 100-599)..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorStatusInvalid {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorStatusInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy trigger list has invalid row(s): {0}. Fix the highlighted rows or remove them before saving..
+        /// </summary>
+        internal static string InvalidProxyTriggerMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyTriggerMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Proxy:.
         /// </summary>
         internal static string ProxyLabel {
