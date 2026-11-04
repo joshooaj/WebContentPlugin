@@ -23,6 +23,8 @@
     <Compile Include="..\WebContent\Client\BrowserCommandAdmission.cs" Link="BrowserCommandAdmission.cs" />
     <Compile Include="..\WebContent\Enums.cs" Link="Enums.cs" />
     <Compile Include="..\WebContent\Client\BrowserProfileKey.cs" Link="BrowserProfileKey.cs" />
+    <Compile Include="..\WebContent\Client\ListenerClaim.cs" Link="ListenerClaim.cs" />
+    <Compile Include="..\WebContent\Client\ListenerClaimStore.cs" Link="ListenerClaimStore.cs" />
     <Compile Include="..\WebContent\Client\BrowserRegistry.cs" Link="BrowserRegistry.cs" />
     <Compile Include="..\WebContent\Client\CallbackOwnership.cs" Link="CallbackOwnership.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceDefinition.cs" Link="WorkspaceDefinition.cs" />

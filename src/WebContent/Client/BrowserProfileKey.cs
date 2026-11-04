@@ -103,6 +103,26 @@ namespace WebContent.Client
         }
 
         /// <summary>
+        /// ADR-0004 (#93): the claim-file extension, appended to the proxied profile folder NAME
+        /// to get the claim slot beside it (never inside the profile, never inside the runtime's
+        /// <c>EBWebView</c> subfolder - the recorded #92 pitfall). Same stem as the profile keeps
+        /// the pair recognizable to #94's sweep.
+        /// </summary>
+        internal const string ListenerClaimExtension = ".claim";
+
+        /// <summary>
+        /// ADR-0004 (#93): composes the listener-claim file path for the SAME boundary legs as
+        /// <see cref="ComposeProxiedProfilePath"/>: the claim lives as
+        /// <c>&lt;profile folder name&gt;.claim</c> directly beside the profile folder, inside the
+        /// boundary-scoped <c>server-&lt;key&gt;</c> dir. Deriving both from the identical leg
+        /// tuple is what fences listener ownership to the boundary by construction.
+        /// </summary>
+        internal static string ComposeListenerClaimPath(string dataRoot, string userKey, string serverKey, Guid browserId)
+        {
+            return ComposeProxiedProfilePath(dataRoot, userKey, serverKey, browserId) + ListenerClaimExtension;
+        }
+
+        /// <summary>
         /// Returns the first non-whitespace candidate, or <c>null</c> if they are all
         /// blank.
         /// </summary>
