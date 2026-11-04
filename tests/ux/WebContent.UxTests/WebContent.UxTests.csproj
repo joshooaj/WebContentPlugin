@@ -9,6 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- #90 spike host: built with the test project, launched as a separate process, never referenced. -->
+    <ProjectReference Include="..\..\..\spike\WebView2LifetimeProbe\WebView2LifetimeProbe.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FlaUI.UIA3" Version="4.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="Microsoft.Playwright" Version="1.55.0" />
