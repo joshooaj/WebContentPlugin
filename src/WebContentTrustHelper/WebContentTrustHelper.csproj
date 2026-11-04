@@ -30,4 +30,20 @@
     <OutputPath>..\..\output\WebContent\</OutputPath>
     <DefineConstants>TRACE;NETFRAMEWORK</DefineConstants>
   </PropertyGroup>
+
+  <!--
+    #89: stamp the exe with the same Nerdbank.GitVersioning build version as the plugin from
+    the same build (root version.json, same version as the plugin project's reference). An
+    unstamped 1.0.0.0 helper outranks every 0.1.y payload under MSI's file-copy rules, so a
+    Copy-Item stray shadowed upgrades forever; with the stamp, any upgrade to a newer build
+    replaces a drifted older helper and the drop self-heals. Pinned by
+    TrustHelperVersionStampingGuardTests (lockstep with the plugin project's nbgv version).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Nerdbank.GitVersioning">
+      <Version>3.10.94</Version>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
 </Project>
