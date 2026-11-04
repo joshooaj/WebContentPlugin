@@ -68,6 +68,7 @@ is not evidence the plugin never ran.
 | Untrusted deployment CA: banner for every user on proxied views, setup-mode-only elevated fix through a thumbprint-locked bundled helper, mid-session heal without restart (#72) | #72 | `ProxyCaTrustStateTests` (posture holder: Changed fires only on real flips, case-insensitive thumbprint equality, proxy-off Clear, throwing subscriber swallowed) + `ProxyLoopbackTlsTrustPostureTests` (every mint publishes from the LOCAL root-store probe not the wire, cache short-circuits republication, `InvalidateLeafCache` re-mint flips the posture with no restart); `ProxyTrustHelperTests` (usage matrix, unreadable 3, garbage/oversize/empty refused 2 before parsing, thumbprint mismatch = store never touched, matched = exactly one import with the verified cert, store exit propagates); `ProxyCaTrustBannerWiringGuardTests` (banner elements + Collapsed defaults, setup-only fix gate, `Verb="runas"` + NO in-process LocalMachine write in the view code, 1223 quiet + independent re-verification, invalidate+reload on confirmed fix, navigation re-check heals external fixes, drop ships but never links the helper) | See SC-10 below - **live rows PASSED 2026-11-03** (runs `20261103-053747`/`20261103-053809`/`20261103-053825`, drop `01D9D8A8…3789` both machines): deployed helper refuses every negative path with the pinned exit codes and zero dialogs (incl. the unprivileged store refusal = 4); the helper's FULL success path verified end-to-end ON the Event Server (import -> present -> remove -> absent, self-cleaned); trusted lab state shows no CA chrome on the live proxied view. The untrusted-live row (SC-10 row 4) is an elevated human step: both root stores refuse unattended removal on the client machine |
 | Proxied browser profiles keyed to the FULL proxied boundary — (Windows user, XProtect identity, VMS server) — so two Smart Clients on one machine logged into different VMS servers can never share a proxied profile or fetch channel (ADR-0004 child A; the claim/joining/handoff children are #93/#91, folder sweeping #94) | #92 | `BrowserProfileBoundaryTests` (server-key table: host+port fold, host case-insensitivity vs port sensitivity, sanitized graffiti, empty-host empty key; path table: same tuple identical path, SAME identity + DIFFERENT server different path, different browser id different path, exact `<root>\<user>\server-<key>\proxied-<guid D>` shape, lowercase-D leaf pin, all three DeriveUserKey fallback legs still name their user segment, missing-user keeps server separation at root level, missing-server uses the one `server-unknown` placeholder that never matches a resolved server, hostile `..\..\..\evil` legs stay three sanitized segments under the root, the `server-` prefix can never BE a traversal token) | See SC-11 below: the live proxied browser process's OWN `--user-data-dir` command line carries the boundary shape naming the configured VMS host, and no old-shape folder is written during the run |
 | Startup sweep reaps orphaned proxied profile folders and stale listener-claim files under the plugin data root — off the UI thread, journalled, never fatal, live browser's folder never forced (ADR-0004 consequence; #94) | #94 | `ProfileSweepCoreTests` (pure decision table: fresh keep / stale reap / locked skip / undetermined-activity keep / retention boundary, claim rows delegating staleness to the #93 seam — dead owner / refusing port / corrupt / foreign schema / cross-id reap, live owner + own-pid claim keep, sibling-gone reap, temp-litter age table, shape-recognition table: proxied/server/claim/claim-temp names, non-shape names invisible to the sweep); `ProfileSweepDiskTests` (same rows over a real temp directory: old-shape + boundary-shape reaps, EBWebView tree never descended, root-level fallback walk, claim/temp outcomes, once-per-deletion log lines, own-pid live claim kept, hostile foreign files under the root untouched, lockfile probe held only while an exclusive open fails); `ProfileSweepStartupGuardTests` (Init schedules the sweep on a one-shot threadpool timer and runs nothing synchronously, the callback swallows and journals every failure and composes BOTH lock witnesses, the timer is torn down in finally plus stopped in `Close()`, both sweep files cross into the test Compile list while the WMI witness + `System.Management` stay plugin-only) | See SC-12 below — **live row PASSED 2026-11-03** (run `20261103-220433`): a 12-row decoy table planted under the REAL data root resolves exactly per the decision table in the live Smart Client's startup sweep, journal line `11 scanned, 2 reaped, 1 skipped locked, 3 claims + 1 temp reaped` in MIPLog.txt, and real user state untouched |
+| Version-stamped trust helper: `WebContentTrustHelper.exe` carries the build's nbgv FileVersion like `WebContent.dll`, so an upgrade to a newer build replaces Copy-Item helper strays and the drop self-heals (IN-3's 12/13 gap closed) | #89 | `TrustHelperVersionStampingGuardTests` (the helper csproj carries the nbgv PackageReference with the plugin's IncludeAssets/PrivateAssets posture, NO second version.json beside the csproj, the plugin keeps its own reference so the lockstep check is not vacuous, helper/plugin nbgv versions equal) | See IN-6 below — **live row PASSED 2026-11-03 22:30**: ES seeded by Copy-Item with a stamped `0.1.298.22478` helper stray, `0.1.300.30776` default-option upgrade (exit 1641, stop/provision/restart chain inside the script, old-product REMOVE script skipped all three) ended **13/13 drop files hash-identical, mismatches=0** — the stray replaced, CA/DACL byte-identical, one registration, `Proxy fetcher ready` after; machines still carrying the pre-stamp `1.0.0.0` helper stay on the README's pure-`msiexec` migration (out of scope by design) |
 
 ## Manual host checks
 
@@ -2093,6 +2094,52 @@ CA + key DACL byte-identical to the pre-row state, remote temp `wces64` cleaned;
 hash-identical drop via the Copy-Item shortcut (its MSI registration stays `0.1.282.22971` - the
 IN-4 row-5 posture, unchanged). Smart Clients connected before 17:26 need the usual restart.
 
+### IN-6 Version-stamped trust helper - upgrades self-heal over Copy-Item strays (#89)
+
+The follow-up IN-3 filed: `WebContentTrustHelper.exe` was not version-stamped, and MSI's file-copy
+rule (never replace an existing file whose version equals or outranks the payload's) let the
+`1.0.0.0` helper stray survive EVERY upgrade - IN-3 row 1 ended 12/13 hash-identical while every
+nbgv-stamped file self-healed. Fix: the helper csproj carries the same `Nerdbank.GitVersioning`
+PackageReference as the plugin project (root `version.json` stays the single version source - no
+second version file), so the drop helper reports the build's nbgv FileVersion (`0.1.298.22478`
+== `WebContent.dll` in the first stamped build); the Setup harvest picks the stamped exe up with
+no installer change. Out of scope per the ticket: `WebContentServiceCtl`/`WebContentProxyCa` ride
+the MSI as Binary streams and re-stream every install (unaffected), and machines that already
+carry the `1.0.0.0` stray stay on the README's pure-`msiexec` uninstall/install migration - its
+MAJOR (1) outranks any `0.1.y` stamp, no new repair logic was built.
+
+1. **Upgrade over a helper-stray-seeded Event Server machine - PASSED 2026-11-03 22:30.** Harness
+   `.es-upgrade-89.ps1` on the credential WinRM session, mirroring IN-3 row 1's shape WITH the fix.
+   PRE (IN-5 machine): one registration `0.1.291.10692`, CA `E4D2…2377` / container
+   `da86e11f…f7ce2724…` / three-ACE key DACL, 13 drop files, service Running. SEED: `Copy-Item
+   -ToSession` of the previous commit's helper - stamped `0.1.298.22478`, SHA-256
+   `EC9C3C24…B46DB` - over the installed helper, hash re-verified ON the machine: a real
+   unregistered Copy-Item drift at an OLDER stamp than the incoming payload. UPGRADE:
+   `CascadiaWebContentPlugin.0.1.300.30776.msi` (SHA-256 `3E1E7ACD…F545`) staged + hash-verified
+   remotely, `msiexec /i /qn /l*v` → **exit 1641** (reboot requested - the WebView2 piece as in
+   IN-2/IN-4; machine NOT rebooted, and the post-state hashes prove every file was replaced inside
+   the run). MSI log chain inside one script: force-close (3073, all three client targets) →
+   `CustomActionSchedule(StopEventServerService,1026,stop…)` 22:30:51.770 →
+   `CustomActionSchedule(CreateProxyAuthority,1026,provision MilestoneEventServerService)`
+   22:30:57.226 → `CustomActionSchedule(RestartEventServerService,1026,restart…)` 22:30:57.525,
+   `MainEngineThread is returning 1641`; the old product's REMOVE script skipped all three
+   ES-gated actions (`NOT REMOVE`). POST: exactly one registration `0.1.300.30776`, CA + key DACL
+   byte-identical, service Running, `Proxy fetcher ready (…, export=…, triggers=…)` at
+   22:31:04.9 -08:00. **The verdict: full recursive hash+version comparison, local
+   `output\WebContent` vs the live drop: 13 local / 13 remote / mismatches=0** - the seeded
+   `0.1.298.x` stray came out replaced by the payload `0.1.300.30776` helper (`59364AC2…`),
+   exactly where the IN-3 original ended 12/13. Harness disclosure: the 500 ms service-journal
+   job's `Receive-Job` hit a transient WinRM "I/O operation aborted" right after `msiexec`
+   returned and killed the harness before its post-state block (the journal file was never
+   written - the action-schedule rows + Running POST state stand in for the transition journal);
+   the post-state + comparison re-ran from a re-invoked tail on a fresh session, and the remote
+   temp `wces89` was cleaned after it.
+
+Machine state after the row: ES on `0.1.300.30776` MSI-registered (single entry, new product code
+`1F88AE5F…` - the major upgrade retired `B39D7AD4…`), service Running, CA untouched. The ES has
+now LEFT the `1.0.0.0`-stray transition class: with a stamped helper registered, every future
+upgrade replaces helper drift by itself. BEAST unchanged (Copy-Item shortcut drop).
+
 ## Known high-risk regressions → pinned by
 
 | Regression (remediation it would undo) | Pinned by |
@@ -2135,6 +2182,7 @@ IN-4 row-5 posture, unchanged). Smart Clients connected before 17:26 need the us
 | Proxied profile/fetch-channel sharing ACROSS VMS servers (the boundary key silently regressing to the user-only shape, so one client rides another server's identity and Event Server session; ADR-0004 point 2) (#92) | `BrowserProfileBoundaryTests` (same-identity different-server different-path row, exact three-segment shape, placeholder-never-matches-resolved, no path escape), SC-11 (the live browser's own `--user-data-dir` names the configured VMS host; no old-shape writes) |
 | A non-proxied view silently losing OS (WinINET) proxy inheritance (a stray browser-arguments injection), or a proxied view falling back to the system proxy so the workspace allowlist stops being the whole story (#67) | `ProxyBrowserArgumentsTests` (the pin shape: all four schemes + `<-loopback>`), `ProxyWorkspaceProfileTests` (enabled always proxies; disabled emits no profile), SC-8 (both postures observed live on the real browser command lines and the OS-proxy harness journal) |
 | The untrusted-CA trust chain regressing: the banner never showing (silent broken-https UX) or showing while the CA IS trusted (alarm fatigue), the aggregate counting sessions instead of machines, the shipped helper accepting a wrong-thumbprint cert or writing the root store in-process (no consent dialogs), or the MC export no longer shipping the live leaf's bytes (#72, #80, #75) | `ProxyCaTrustStateTests` + `ProxyLoopbackTlsTrustPostureTests` (flip publication, root-store probe authority, invalidate->re-mint), `ProxyTrustHelperTests` (every refusal BEFORE any store/dialog), `ProxyCaTrustBannerWiringGuardTests` + `ProxyCaUntrustedReportWiringGuardTests` (banner/setup-gate pins; once-per-flip report + ES machine attribution gate + banner/export wiring), `ProxyDiagnosticsAggregatorTests` (per-machine dedup/cap) + `ProxyDiagnosticsWireTests` (pre-#80 frames decode), `ProxyCaExportTests`; live: MC-15, MC-20 row 1, SC-10 rows 1-3 (IN-5 re-pass 2026-11-03, both machines on drop `6B281447…07FD`) |
+| The trust helper dropping its nbgv stamp again, which silently re-opens the #89 gap: an unstamped `1.0.0.0` Copy-Item stray outranks every `0.1.y` payload under MSI file-copy rules and survives every future upgrade (IN-3 row 1's 12/13) | `TrustHelperVersionStampingGuardTests` (helper csproj nbgv authoring + no second version file + plugin lockstep); live: IN-6 (stamped stray seeded, upgrade replaced it, 13/13 hash-identical) |
 
 ## Scope notes (deliberate)
 
