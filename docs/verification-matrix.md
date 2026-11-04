@@ -72,6 +72,8 @@ is not evidence the plugin never ran.
 | A second concurrent Smart Client on the same proxied boundary: its failed CoreWebView2 initialization shows an honest in-view profile-ownership notice instead of a blank WebView, journals ONE line per failure naming the ownership cause + browser id, and answers Refresh by re-attempting creation through the WebView re-creation path (never Reload on a dead control; ADR-0004 point 5 interim contract - actually letting the second session JOIN is the separate #91/#95/#96 enablement work) | #87 | `BrowserInitFailureTests` (pure classifier: non-proxied failure presents nothing - the existing log-only surface untouched; proxied failure presents the ownership cause/headline/explanation with the browser id + verbatim technical message in the detail; missing message still presents; the ONE log line names cause + id + message; the ownership category is never mapped from any per-request wire code); `ProxyErrorPageTests` (#87 wording rows for the ownership cause/headline/explanation); `BrowserCommandAdmissionTests` (a failed PROXIED view admits Refresh alone via `canRecreateProfile` with every other action refused; the non-proxied crash state keeps its old table); `ProxiedInitErrorWiringGuardTests` (a failed proxied init publishes the contract through `PublishInitFailure` exactly once, Refresh on an errored proxied view re-creates and never Reloads dead, the recreation follows the same restore-address/isolation rule as view Init, the recreated WebView announces itself and the open view re-attaches it, the notice elements exist start-collapsed with probe AutomationIds and step the blank WebView aside, the classifier lands in both Compile lists) | See SC-13 below - **live row PASSED 2026-11-03** (run `20261103-233457`): a second live Smart Client onto the same boundary rendered the in-view notice (cause/headline/text + detail naming browser id `2963db34...` and the verbatim `0x8007139F`), the owner view stayed notice-free, and Refresh re-attempted creation with the notice reappearing and NEITHER client dying; the one-line journal is enforced only when the run proves the joiner can log at all (disclosed single-writer MIPLog measurement in SC-13); SUPERSEDED live shape by #95 (2026-11-04) - a second Smart Client now JOINS the boundary owner's listener, the notice's SC+SC live shape is retired (SC-13 keeps the historical record, the presentation stays unit-pinned for the browser-held fallback, live witness moved to SC-14) |
 | A second Smart Client on the same proxied boundary JOINS the boundary owner's claimed loopback listener instead of colliding on the browser profile: every proxied creation consults the claim BEFORE binding anything, the owner publishes its claim and binds exactly the claimed port, the joiner bakes that port into byte-identical `--proxy-server` arguments and binds NO listener of its own - one browser process, one loopback listener, one #69 session (joiner traffic counts in the owner's session); a live claim whose config fingerprint differs is joined anyway with exactly ONE audit (never refused, never re-claimed), and a claim file is deleted only when it parses Trusted AND names the releaser's own pid (live-foreign, future-schema, and corrupt slots are never evicted) (#95, ADR-0004 points 3-5) | #95 | `ProxyListenerLeaseTests` (no-claim path reserves an ephemeral port FIRST and names it in the claim, live-owner join on the owner's port holding nothing, fingerprint-mismatch join with exactly one audit and no reclaim, dead-owner-pid and refusing-port takeover each with one slot-naming audit, corrupt claim replaced+audited, own earlier claim on another port replaced quietly, unsettled protocol falls back unclaimed with the giveUp audit, port-reservation failure falls back without touching the slot, release deletes only the own parse-Trusted own-pid claim / never evicts another live owner / tolerates a missing slot / leaves a foreign-schema slot alone, two providers racing one slot resolve to exactly one owner + one joiner); `ListenerJoinWiringGuardTests` (source pins for the wiring BrowserManager cannot unit-execute: every proxied creation AND the proxy-enabled-since re-enable path consult the claim before anything binds, a joined browser binds no listener and carries the owner's port verbatim, the owner binds exactly the claimed port and every claim write has its paired release, the joined browser keeps the #88 view https-gate with targets tracking config edits, the claim path derives only from the SAME boundary legs as the profile folder, the lease class lands in both Compile lists); `ProxyBrowserArgumentsTests` (port-independent fingerprint rows: equal For(portA)/For(portB) args hash equal, the hash is one claim-file-safe token) | See SC-14 below - **live rows PASSED 2026-11-04** (runs `20261104-011831`/`012050`/`013207`, drop `2CC41544…E518` via `Build, DeployLocally`): two live Smart Clients render proxied pages on ONE browser process, one claim file naming owner pid + port and exactly ONE loopback `--proxy-server` port (== the claimed port), ZERO msedgewebview2 parented to the second client and zero `--parent-pid=` naming it, no ownership notice on either view, a join attempted mid the owner's re-navigation lands, and the MC Status tab shows exactly ONE live proxy session from a proven-zero baseline |
 
+| When the boundary's listener OWNER dies mid-session (clean close or hard kill) while joined clients sit open, the survivors heal WITHOUT user action in a bounded window: the claim watch (10 s/5 s heartbeat) re-reads each claimed browser's slot through the SAME claim protocol, the survivor takes a fresh GENERATION - the v2 claim's required `epoch` bumps on every takeover so all attached processes notice - and the boundary's proxied views are force-re-created (process-level browser arguments cannot hot-swap ports) onto the new port; a vanished own claim is re-published at the SAME port+generation (joiners never move), a transient read error never evicts a live owner, retries are bounded (5/generation, 15 s grace) with one GiveUp leaving the #87 notice, closed views are never resurrected, and the last view out the door leaves NO claim file (#96, ADR-0004 point 4) | #96 | `ClaimWatchCoreTests` (the whole pure watch table: dead-owner-pid handoff trigger, refusing-port staleness, vanished-slot owner Republish / joiner Rewire, foreign-schema Rewire through the protocol, own-pid-adoption + step-down-to-join posture rows, epoch/port/owner-pid drift under a joiner, recycle-window Retry with grace refusal + never-resurrect-closed-views + one-GiveUp termination + owner-dies-mid-handoff bounded restart); `ListenerClaimCoreTests`/`ListenerClaimStoreTests` (v2 epoch round-trip, pre-epoch v1 parses foreign, malformed epoch untrusted, takeover publishes displaced epoch + 1, on-disk epoch monotone, floor never regresses); `ProxyListenerLeaseTests` (lease surfaces epoch + owner pid, dead-owner takeover bumps the epoch through the lease, pinned-port republish holds port + generation); `ClaimHandoffWiringGuardTests` (watchdog armed at every proxied entry / stopped exactly once, the watch decides through the PRODUCTION liveness probes, UI-thread dispatch only, one re-creation call site = the #87 route, republish pins the served port, view-liveness read dispatcher-hops off the UI thread, core test-linked / timer plugin-only). See SC-15 below - **live rows PASSED 2026-11-04** (runs `20261104-033614`/`20261104-033857`): clean close (epoch 3→4, port 56765→60383, survivor pid owns the claim, page re-rendered, one WMI proxy port == new claim port) and hard kill (epoch 1→2, port 55582→52424, attempt 2 of 5 rendered); last-view teardown left zero claim files both times |
+
 ## Manual host checks
 
 Run after deploying new build output (`Invoke-psake -taskList Build, DeployLocally, DeployToVms`;
@@ -1914,6 +1916,78 @@ because a PREVIOUS probe row's killed client had leaked a session the 3-minute b
 reclaimed yet - the row now opens MC first and requires a proven-zero baseline, which is the
 honest shape of the witness (a genuine non-shared shape would still show 2 and fail).
 
+### SC-15 Owner death mid-session: fresh claim + forced re-creation of the boundary's proxied views (#96, ADR-0004 point 4)
+
+The owner of a boundary's loopback listener can die (clean close or crash) while other joined
+clients sit open - their browser processes carry the dead port in PROCESS-LEVEL launch arguments,
+so nothing they do can heal the view. #96 makes the boundary self-healing:
+
+- **Generation (epoch).** The claim schema is v2 with a REQUIRED `epoch` field; v1-era files
+  parse foreign (stale + audit, exactly the #93 rule). Every takeover publishes the displaced
+  epoch + 1, so every attached process notices the handoff from its own watch.
+- **The watch.** A per-client heartbeat (10 s due, 5 s period) re-reads each CLAIMED proxied
+  browser's claim slot and runs the pure `ClaimWatchCore` table over it: dead owner pid or
+  refusing port (the #93 staleness rule verbatim) ⇒ Rewire; vanished own slot or own-pid slot
+  naming a different port ⇒ Republish (same port, same generation - joiners never move);
+  transient READ ERROR ⇒ nothing (a momentary IO refusal never evicts a live owner); slot gone
+  while joined ⇒ Rewire; live foreign owner while owning ⇒ step down to join. The liveness probes
+  are the #93 store's OWN production probes - the watch can never disagree with the protocol.
+- **The handoff.** Rewire re-consults the lease seam (never a claim side-door): a joined survivor
+  becomes owner through the untouched atomic-create protocol at epoch + 1 on a fresh port, then
+  the view is re-created through the ONLY re-creation route (#87 `RecreateWebView`) so the
+  recycled browser process carries the new `--proxy-server` port. Bounded retry (5 per
+  generation, 15 s grace > the ~13 s recycle measured in #90); GiveUp ONCE leaves the honest #87
+  in-view notice; deliberately closed views are never resurrected; owner-dies-mid-handoff just
+  starts the same bounded cycle for the next generation.
+- **Last view out the door.** The final client's teardown releases its own claim, so no dead-owner
+  claim file lingers for hours (and #94's sweep reaps anything a crash orphaned by next startup).
+
+Automated: `ClaimWatchCoreTests` - the whole decision table no-IO/no-WPF (dead-owner handoff
+trigger, refusing-port staleness, vanished-slot owner/joiner split, foreign-schema rewire,
+own-pid posture adoption, port-mismatch republish, step-down-to-join, epoch/port/owner-pid drift
+under a joiner, recycle-window Retry, grace refusal, never-resurrect-closed-views, one-GiveUp
+termination, owner-dies-mid-handoff bounded restart); `ProxyListenerLeaseTests` - lease surfaces
+epoch + owner pid, dead-owner takeover bumps the epoch through the lease, pinned-port republish
+holds the generation; `ListenerClaimCoreTests`/`ListenerClaimStoreTests` - v2 epoch round-trip,
+v1-as-foreign, malformed epoch untrusted, on-disk epoch monotone + floor never regresses;
+`ClaimHandoffWiringGuardTests` - watchdog armed at every proxied entry / stopped exactly once,
+the Decide call rides the PRODUCTION liveness probes, UI-thread dispatch only, the rewire
+reclaims via the seam + recreates through the single #87 route, republish pins the served port,
+the view-liveness read hops the dispatcher off the UI thread (measured VerifyAccess kill), and
+the core is test-linked while the timer stays plugin-only.
+
+Live probes: `ScListenerHandoffProbeTests` (unattended), two rows -
+(1) `ProbeOwnerCleanCloseHealsJoinedView`: owner publishes claim generation N, a second client
+joins (both pages on the shared browser process), the owner closes CLEANLY (window close, process
+exit proven); within 180 s the claim must end at exactly one v2 slot naming the SURVIVOR pid, a
+port different from the dead owner's, epoch >= N+1; the survivor's proxied page must RE-RENDER
+on CDP without any user action; WMI must show exactly one loopback `--proxy-server` port, equal
+to the new claim port; then the survivor closes and NO claim file may remain (bounded 120 s);
+(2) `ProbeOwnerHardKillHealsJoinedView`: same witnesses after `Process.Kill()`-ing exactly the
+owner process (hard kill leaves the stale claim on disk - the dead-pid staleness row, not the
+released-slot row, must carry the handoff).
+
+```powershell
+Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ScListenerHandoffProbeTests' }
+```
+
+**Live record (BEAST, 2026-11-04):** both rows **PASSED** (drop `2D260723…FED5` via
+`Build, DeployLocally` - client-side-only change, the Event Server drop untouched). Clean-close
+(run `20261104-033614`): owner claim pid 34092 port 56765 epoch 3 → after the close the claim
+named survivor pid 22980, port 60383, epoch 4; the page re-rendered on the new generation; WMI
+ports `[60383]`; the watcher journalled the notice + `Boundary claim handoff re-creation ...
+(attempt 1 of 5, epoch 4)`; closing the last view left zero claim files. Hard-kill (run
+`20261104-033857`): owner pid 33472 port 55582 epoch 1 killed → claim pid 19976 port 52424
+epoch 2, page re-rendered, WMI ports `[52424]`, and the bounded retry proved itself (attempt 2
+of 5 rendered after attempt 1 met the still-recycling browser process); last-view teardown again
+left no claim. Two disclosures: the FIRST probe sessions died at the harness `Maximize` call
+because the brand-new watchdog's `IsViewLive` read hit WPF thread affinity (VerifyAccess) from
+the timer thread and its ExceptionHandler surfaced on every tick - fixed by the dispatcher hop
+pinned above (the failed sessions' MIPLog usefully PROVED the takeover chain live: a fresh
+client audited `the owner process (pid 26656) is no longer running` and claimed as owner); and
+the surviving client DOES journal its watch lines on this machine once the other client is gone
+(the conditional log branch enforced, not NOTE'd, in both rows).
+
 ## Installer checks
 
 ### IN-1 Installer force-closes running Milestone clients (#70)
@@ -2319,6 +2393,7 @@ upgrade replaces helper drift by itself. BEAST unchanged (Copy-Item shortcut dro
 | The trust helper dropping its nbgv stamp again, which silently re-opens the #89 gap: an unstamped `1.0.0.0` Copy-Item stray outranks every `0.1.y` payload under MSI file-copy rules and survives every future upgrade (IN-3 row 1's 12/13) | `TrustHelperVersionStampingGuardTests` (helper csproj nbgv authoring + no second version file + plugin lockstep); live: IN-6 (stamped stray seeded, upgrade replaced it, 13/13 hash-identical) |
 | A second concurrent Smart Client's failed proxied initialization silently rendering a blank WebView again, or the ownership notice leaking onto healthy/non-proxied views, or Refresh Reload-ing a dead `CoreWebView2` instead of re-creating it (#87) | `BrowserInitFailureTests` (proxied failure → ownership presentation, non-proxied → untouched log-only surface, one log line naming cause + id, category never mapped from a wire code), `ProxiedInitErrorWiringGuardTests` (single publish point, re-creation-only Refresh, re-attach + overlay wiring), `BrowserCommandAdmissionTests` (errored proxied view admits Refresh alone); live: SC-13 (historical interim shape, retired by #95 - the notice stays unit-pinned for the browser-held fallback) |
 | The second concurrent Smart Client regressing to the #87 collision: its own browser process on the shared profile (blank view / `0x8007139F`), a double-bound or claimed-but-unbound loopback listener, deleting/refusing a live foreign claim, or a second #69 session splitting the traffic (#95) | `ProxyListenerLeaseTests` (consult/claim/join/takeover/release table incl. fingerprint-mismatch join-with-one-audit and the one-slot two-provider race), `ListenerJoinWiringGuardTests` (consult-before-bind everywhere, no-listener joiner with the owner's port verbatim, owner binds exactly the claimed port, release paired with every claim write, same-boundary-leg claim path, both-Compile-lists pin), `ProxyBrowserArgumentsTests` (port-independent fingerprint); live: SC-14 (two clients render on ONE browser process, one claim + one port, nothing parented to the joiner, one shared session from a proven-zero baseline) |
+| An owner-death handoff regressing - the boundary keeps pointing at the dead owner's port (views stuck blank forever), the watch evicting a LIVE owner's claim on a transient read error, two survivors double-taking the slot without an epoch bump (attached processes never notice), hot-swapping arguments on a running browser process, endless re-creation loops, resurrecting deliberately closed views, or a dead-owner claim file lingering for hours (#96) | `ClaimWatchCoreTests` (dead-pid/refusing-port/epoch-drift Rewire rows, Error-read keeps, one-GiveUp + bounded-retry termination, closed-view keep), `ListenerClaimCoreTests`/`ListenerClaimStoreTests` (epoch monotone takeovers, floor never regresses, v1 foreign), `ProxyListenerLeaseTests` (epoch through the lease, pinned-port republish), `ClaimHandoffWiringGuardTests` (watchdog lifecycle, production probes only, UI dispatch, single #87 re-creation route, dispatcher-hopped view-liveness); live: SC-15 (clean-close + hard-kill survivors re-render with epoch bump + new port, last view leaves no claim) |
 
 ## Scope notes (deliberate)
 
