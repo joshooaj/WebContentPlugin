@@ -71,6 +71,7 @@ namespace WebContent.Tests
                 ProxyErrorPage.CategoryMalformedRequest,
                 ProxyErrorPage.CategoryMethodNotAllowed,
                 ProxyErrorPage.CategoryUnknownFailure,
+                ProxyErrorPage.CategoryProfileOwned,
             };
 
             foreach (var category in categories)

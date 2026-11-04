@@ -152,6 +152,19 @@ namespace WebContent.Client
 
         internal string ProxyBrowserArguments { get; set; }
 
+        /// <summary>True while this browser is fronted by the loopback proxy (its arguments carry --proxy-server).</summary>
+        internal bool IsProxied => ProxyBrowserArguments != null;
+
+        /// <summary>
+        /// #87: the in-view contract for a failed PROXIED initialization - set when
+        /// <see cref="BrowserInitFailure.TryPresent"/> decides the failure reads as profile
+        /// ownership, cleared when a new initialization attempt starts and on success. The view
+        /// renders it as an honest error overlay instead of a blank WebView; raised through
+        /// <see cref="PropertyChanged"/> so an open view reacts while the browser instance
+        /// itself survives.
+        /// </summary>
+        internal BrowserInitFailure.Presentation InitFailure { get; private set; }
+
         /// <summary>
         /// Distinct WebView2 user-data folder for a proxied profile (its own browser process, so
         /// the --proxy-server argument cannot collide with shared-folder WebViews); null when the
@@ -174,6 +187,14 @@ namespace WebContent.Client
 
                 try
                 {
+                    // #87: a new initialization attempt retires the previous ownership notice;
+                    // a fresh failure republishes it (this attempt or its event).
+                    if (InitFailure != null)
+                    {
+                        InitFailure = null;
+                        OnPropertyChanged(nameof(InitFailure));
+                    }
+
                     WebView.CoreWebView2InitializationCompleted += WebView_CoreWebView2InitializationCompleted;
                     WebView.SourceChanged += SourceChangedEventHandler;
 
@@ -188,7 +209,14 @@ namespace WebContent.Client
                 catch (Exception ex)
                 {
                     IsInitialized = false;
-                    EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Call to EnsureCoreWebView2Async failed. {ex.Message}\r\n{ex.StackTrace}");
+                    if (BrowserInitFailure.TryPresent(IsProxied, Id, ex.Message, out var presentation))
+                    {
+                        PublishInitFailure(presentation);
+                    }
+                    else
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"Call to EnsureCoreWebView2Async failed. {ex.Message}\r\n{ex.StackTrace}");
+                    }
                 }
             }
         }
@@ -209,13 +237,31 @@ namespace WebContent.Client
             webView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
             if (!e.IsSuccess)
             {
-                EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"CoreWebView2 initialization failed. InitializationException: {e.InitializationException?.Message}");
+                // #87 interim contract: a failed PROXIED initialization is the collision shape
+                // (ADR-0004) - one boundary profile folder, a per-process ephemeral proxy port
+                // baked into the arguments, and WebView2 refusing mismatched options on a shared
+                // user-data folder. Present honestly in-view instead of sitting blank; a
+                // non-proxied failure keeps its existing log-only surface untouched.
+                if (BrowserInitFailure.TryPresent(IsProxied, Id, e.InitializationException?.Message, out var presentation))
+                {
+                    PublishInitFailure(presentation);
+                }
+                else
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), $"CoreWebView2 initialization failed. InitializationException: {e.InitializationException?.Message}");
+                }
+
                 return;
             }
             if (webView.CoreWebView2 == null)
             {
                 EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), "CoreWebView2 is null after successful initialization.");
                 return;
+            }
+            if (InitFailure != null)
+            {
+                InitFailure = null;
+                OnPropertyChanged(nameof(InitFailure));
             }
             webView.CoreWebView2.Settings.AreDevToolsEnabled = AllowDevTools;
             webView.CoreWebView2.IsDocumentPlayingAudioChanged -= WebView_IsDocumentPlayingAudioChanged;
@@ -242,6 +288,19 @@ namespace WebContent.Client
                 webView.CoreWebView2.AddWebResourceRequestedFilter("https://*/*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
                 webView.CoreWebView2.WebResourceRequested += CoreWebView2_WebResourceRequested;
             }
+        }
+
+        /// <summary>
+        /// #87: records the failed-initialization presentation, journalling exactly ONE line
+        /// (the presentation's own log line already names the profile-ownership cause, the
+        /// browser id, and the verbatim technical message), and raises PropertyChanged so an
+        /// open view shows the notice the moment the failure lands.
+        /// </summary>
+        private void PublishInitFailure(BrowserInitFailure.Presentation presentation)
+        {
+            InitFailure = presentation;
+            EnvironmentManager.Instance.Log(true, nameof(BrowserInstance), presentation.LogLine);
+            OnPropertyChanged(nameof(InitFailure));
         }
 
         private void CoreWebView2_NavigationStarting(object sender, Microsoft.Web.WebView2.Core.CoreWebView2NavigationStartingEventArgs e)
@@ -566,6 +625,12 @@ namespace WebContent.Client
 
             _requiresRecreation = false;
             IsInitialized = false;
+
+            // #87: the Refresh path recreates the WebView while the view is open, so the open
+            // view must pick the fresh control up (reattach + rebind) without waiting for the
+            // next view re-selection; Init's own re-attach stays as it was.
+            OnPropertyChanged(nameof(WebView));
+
             Initialize();
         }
 

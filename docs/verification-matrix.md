@@ -69,6 +69,7 @@ is not evidence the plugin never ran.
 | Proxied browser profiles keyed to the FULL proxied boundary — (Windows user, XProtect identity, VMS server) — so two Smart Clients on one machine logged into different VMS servers can never share a proxied profile or fetch channel (ADR-0004 child A; the claim/joining/handoff children are #93/#91, folder sweeping #94) | #92 | `BrowserProfileBoundaryTests` (server-key table: host+port fold, host case-insensitivity vs port sensitivity, sanitized graffiti, empty-host empty key; path table: same tuple identical path, SAME identity + DIFFERENT server different path, different browser id different path, exact `<root>\<user>\server-<key>\proxied-<guid D>` shape, lowercase-D leaf pin, all three DeriveUserKey fallback legs still name their user segment, missing-user keeps server separation at root level, missing-server uses the one `server-unknown` placeholder that never matches a resolved server, hostile `..\..\..\evil` legs stay three sanitized segments under the root, the `server-` prefix can never BE a traversal token) | See SC-11 below: the live proxied browser process's OWN `--user-data-dir` command line carries the boundary shape naming the configured VMS host, and no old-shape folder is written during the run |
 | Startup sweep reaps orphaned proxied profile folders and stale listener-claim files under the plugin data root — off the UI thread, journalled, never fatal, live browser's folder never forced (ADR-0004 consequence; #94) | #94 | `ProfileSweepCoreTests` (pure decision table: fresh keep / stale reap / locked skip / undetermined-activity keep / retention boundary, claim rows delegating staleness to the #93 seam — dead owner / refusing port / corrupt / foreign schema / cross-id reap, live owner + own-pid claim keep, sibling-gone reap, temp-litter age table, shape-recognition table: proxied/server/claim/claim-temp names, non-shape names invisible to the sweep); `ProfileSweepDiskTests` (same rows over a real temp directory: old-shape + boundary-shape reaps, EBWebView tree never descended, root-level fallback walk, claim/temp outcomes, once-per-deletion log lines, own-pid live claim kept, hostile foreign files under the root untouched, lockfile probe held only while an exclusive open fails); `ProfileSweepStartupGuardTests` (Init schedules the sweep on a one-shot threadpool timer and runs nothing synchronously, the callback swallows and journals every failure and composes BOTH lock witnesses, the timer is torn down in finally plus stopped in `Close()`, both sweep files cross into the test Compile list while the WMI witness + `System.Management` stay plugin-only) | See SC-12 below — **live row PASSED 2026-11-03** (run `20261103-220433`): a 12-row decoy table planted under the REAL data root resolves exactly per the decision table in the live Smart Client's startup sweep, journal line `11 scanned, 2 reaped, 1 skipped locked, 3 claims + 1 temp reaped` in MIPLog.txt, and real user state untouched |
 | Version-stamped trust helper: `WebContentTrustHelper.exe` carries the build's nbgv FileVersion like `WebContent.dll`, so an upgrade to a newer build replaces Copy-Item helper strays and the drop self-heals (IN-3's 12/13 gap closed) | #89 | `TrustHelperVersionStampingGuardTests` (the helper csproj carries the nbgv PackageReference with the plugin's IncludeAssets/PrivateAssets posture, NO second version.json beside the csproj, the plugin keeps its own reference so the lockstep check is not vacuous, helper/plugin nbgv versions equal) | See IN-6 below — **live row PASSED 2026-11-03 22:30**: ES seeded by Copy-Item with a stamped `0.1.298.22478` helper stray, `0.1.300.30776` default-option upgrade (exit 1641, stop/provision/restart chain inside the script, old-product REMOVE script skipped all three) ended **13/13 drop files hash-identical, mismatches=0** — the stray replaced, CA/DACL byte-identical, one registration, `Proxy fetcher ready` after; machines still carrying the pre-stamp `1.0.0.0` helper stay on the README's pure-`msiexec` migration (out of scope by design) |
+| A second concurrent Smart Client on the same proxied boundary: its failed CoreWebView2 initialization shows an honest in-view profile-ownership notice instead of a blank WebView, journals ONE line per failure naming the ownership cause + browser id, and answers Refresh by re-attempting creation through the WebView re-creation path (never Reload on a dead control; ADR-0004 point 5 interim contract - actually letting the second session JOIN is the separate #91/#95/#96 enablement work) | #87 | `BrowserInitFailureTests` (pure classifier: non-proxied failure presents nothing - the existing log-only surface untouched; proxied failure presents the ownership cause/headline/explanation with the browser id + verbatim technical message in the detail; missing message still presents; the ONE log line names cause + id + message; the ownership category is never mapped from any per-request wire code); `ProxyErrorPageTests` (#87 wording rows for the ownership cause/headline/explanation); `BrowserCommandAdmissionTests` (a failed PROXIED view admits Refresh alone via `canRecreateProfile` with every other action refused; the non-proxied crash state keeps its old table); `ProxiedInitErrorWiringGuardTests` (a failed proxied init publishes the contract through `PublishInitFailure` exactly once, Refresh on an errored proxied view re-creates and never Reloads dead, the recreation follows the same restore-address/isolation rule as view Init, the recreated WebView announces itself and the open view re-attaches it, the notice elements exist start-collapsed with probe AutomationIds and step the blank WebView aside, the classifier lands in both Compile lists) | See SC-13 below - **live row PASSED 2026-11-03** (run `20261103-233457`): a second live Smart Client onto the same boundary rendered the in-view notice (cause/headline/text + detail naming browser id `2963db34...` and the verbatim `0x8007139F`), the owner view stayed notice-free, and Refresh re-attempted creation with the notice reappearing and NEITHER client dying; the one-line journal is enforced only when the run proves the joiner can log at all (disclosed single-writer MIPLog measurement in SC-13) |
 
 ## Manual host checks
 
@@ -1780,6 +1781,67 @@ lock witness - the lockfile and its parents are now stamped stale, and the follo
 sharing, which the running client's logger refuses, so the probe saw "no sweep lines" - fixed to
 the ReadWrite bystander open above.
 
+### SC-13 Second concurrent Smart Client on one proxied boundary: in-view profile-ownership notice (#87, ADR-0004 point 5)
+
+The collision #87 names (ADR-0004's opening): the boundary profile folder is deterministic per
+proxied boundary, every process starts its loopback listener on an ephemeral port and bakes that
+port into the browser arguments, and WebView2 refuses to initialize a shared user-data folder
+whose options differ from the process that owns the browser - so the second Smart Client process
+on one machine failed `EnsureCoreWebView2Async` and sat BLANK with one generic log line. The
+interim contract (point 5, before #95's join wiring exists): detect the collision-shaped failure
+on a PROXIED view, present an honest in-view profile-ownership notice - cause line, headline,
+explanation, and a support-grade detail naming the browser id plus the verbatim technical message
+- instead of the blank WebView, journal ONE line per failure through `PublishInitFailure` naming
+the ownership cause + browser id + message, and make toolbar Refresh re-attempt creation through
+the WebView re-creation path (Refresh admitted via `canRecreateProfile` while `CoreWebView2` never
+came up; never Reload on a dead control). Non-proxied init failures keep their existing log-only
+surface untouched, and nothing here lets the second session actually join - that is #91/#95/#96.
+The wording layer is shared with the gateway error pages but the `browser-profile-owned` category
+is NEW and unit-pinned never to be mapped from any per-request wire code.
+
+Automated: `BrowserInitFailureTests` - the pure classifier seam (non-proxied → nothing presented;
+proxied → the ownership presentation, exact category/cause/headline/explanation/detail shapes,
+missing exception message still presents, the ONE log line's content, the no-wire-code-mapping
+pin). `ProxyErrorPageTests` #87 rows - the ownership wording itself. `BrowserCommandAdmissionTests`
+- the `canRecreateProfile` admission table (errored proxied view: Refresh alone admitted; non-
+proxied crash state: old table unchanged). `ProxiedInitErrorWiringGuardTests` - the wiring that
+cannot be unit-executed (single `PublishInitFailure` per failure, event routing, Refresh →
+re-creation with view-Init's own address/isolation rules, re-attach of the recreated WebView,
+the collapsed-by-default notice elements with their AutomationIds, both-Compile-lists pin).
+
+Live probe: `ScProfileOwnershipProbeTests.ProbeSecondClientProfileOwnershipError` (unattended,
+mutates no live state) - launches TWO real Smart Client processes against the live VMS onto the
+same proxied lab workspace (same saved view item = same browser id = same boundary folder),
+witnesses the owner's browser id from the live msedgewebview2 `--user-data-dir` leaf, asserts the
+owner view is notice-free, then asserts the joiner's in-view notice (all four text elements via
+UIA, detail naming the browser id), clicks the toolbar Refresh (`NavReload`) and requires the
+client to survive and the notice to reappear (never blank).
+
+```powershell
+Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ScProfileOwnershipProbeTests' }
+```
+
+**Live record (BEAST, 2026-11-03):** **PASSED** (run `20261103-233457`, drop `FB6913E2…6F4EA`
+via `Build, DeployLocally` - client-side-only change, the Event Server drop untouched). The joiner
+rendered cause `Browser profile owned by another session`, headline `Another Smart Client session
+on this computer already opened this browser`, the boundary-folder explanation, and detail
+`Browser 2963db34-.... The group or resource is not in the correct state to perform the requested
+operation. (Exception from HRESULT: 0x8007139F)` - the verbatim WebView2 refusal; the owner's view
+stayed healthy and notice-free; `NavReload` was enabled, the Refresh re-attempt re-raised the
+notice within seconds, and neither client died. Two environment facts MEASURED while landing this
+row (both disclosed by the probe itself): (1) the machine-wide Smart Client MIPLog.txt is
+single-writer while a client lives - a second concurrent Smart Client journalled NOTHING (not
+even its plugin-load line; proven across runs `20261103-23:0x/23:1x` and this pass), so the
+joiner's ONE ownership log line cannot be witnessed live in the both-alive shape and the probe
+enforces it only when the run proves the joiner logged (here: 1 plugin-load line = owner only →
+NOTE branch), leaving the line's content and single call site pinned by unit tests; (2) killing
+the owner client takes its proxied msedgewebview2 process down with it (probe run `20261103-232700`
+found no surviving holder), so the crash-orphan collision shape #90 hoped for does not exist on
+this runtime either - the both-alive collision is the only live shape. Two earlier probe passes
+(`20261103-23:0x`, `20261103-23:1x`) were harness-side reds for the same measurement: they hard-
+failed the log assertion the machine cannot honestly satisfy; this pass keeps the assertion
+conditional and discloses the limitation instead.
+
 ## Installer checks
 
 ### IN-1 Installer force-closes running Milestone clients (#70)
@@ -2183,6 +2245,7 @@ upgrade replaces helper drift by itself. BEAST unchanged (Copy-Item shortcut dro
 | A non-proxied view silently losing OS (WinINET) proxy inheritance (a stray browser-arguments injection), or a proxied view falling back to the system proxy so the workspace allowlist stops being the whole story (#67) | `ProxyBrowserArgumentsTests` (the pin shape: all four schemes + `<-loopback>`), `ProxyWorkspaceProfileTests` (enabled always proxies; disabled emits no profile), SC-8 (both postures observed live on the real browser command lines and the OS-proxy harness journal) |
 | The untrusted-CA trust chain regressing: the banner never showing (silent broken-https UX) or showing while the CA IS trusted (alarm fatigue), the aggregate counting sessions instead of machines, the shipped helper accepting a wrong-thumbprint cert or writing the root store in-process (no consent dialogs), or the MC export no longer shipping the live leaf's bytes (#72, #80, #75) | `ProxyCaTrustStateTests` + `ProxyLoopbackTlsTrustPostureTests` (flip publication, root-store probe authority, invalidate->re-mint), `ProxyTrustHelperTests` (every refusal BEFORE any store/dialog), `ProxyCaTrustBannerWiringGuardTests` + `ProxyCaUntrustedReportWiringGuardTests` (banner/setup-gate pins; once-per-flip report + ES machine attribution gate + banner/export wiring), `ProxyDiagnosticsAggregatorTests` (per-machine dedup/cap) + `ProxyDiagnosticsWireTests` (pre-#80 frames decode), `ProxyCaExportTests`; live: MC-15, MC-20 row 1, SC-10 rows 1-3 (IN-5 re-pass 2026-11-03, both machines on drop `6B281447…07FD`) |
 | The trust helper dropping its nbgv stamp again, which silently re-opens the #89 gap: an unstamped `1.0.0.0` Copy-Item stray outranks every `0.1.y` payload under MSI file-copy rules and survives every future upgrade (IN-3 row 1's 12/13) | `TrustHelperVersionStampingGuardTests` (helper csproj nbgv authoring + no second version file + plugin lockstep); live: IN-6 (stamped stray seeded, upgrade replaced it, 13/13 hash-identical) |
+| A second concurrent Smart Client's failed proxied initialization silently rendering a blank WebView again, or the ownership notice leaking onto healthy/non-proxied views, or Refresh Reload-ing a dead `CoreWebView2` instead of re-creating it (#87) | `BrowserInitFailureTests` (proxied failure → ownership presentation, non-proxied → untouched log-only surface, one log line naming cause + id, category never mapped from a wire code), `ProxiedInitErrorWiringGuardTests` (single publish point, re-creation-only Refresh, re-attach + overlay wiring), `BrowserCommandAdmissionTests` (errored proxied view admits Refresh alone); live: SC-13 (second live client shows the notice, owner stays clean, Refresh re-attempt survives) |
 
 ## Scope notes (deliberate)
 

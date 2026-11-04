@@ -14,6 +14,10 @@ namespace WebContent.Tests
     /// second Smart Client process failed init against the shared proxied user-data folder, the
     /// old gate only checked the WPF-level IsLoaded - which stays true through an init failure -
     /// and a Refresh click died in Reload with an exception dialog.
+    /// #87 adds ONE narrow exception: a PROXIED browser in the failed-init state admits Refresh
+    /// through the canRecreateProfile route (Execute then re-creates the WebView instead of
+    /// calling Reload). Every other command, and every non-proxied failed view, stays exactly
+    /// as the crash rule requires.
     /// </summary>
     public class BrowserCommandAdmissionTests
     {
@@ -30,7 +34,23 @@ namespace WebContent.Tests
         {
             var action = (BrowserAction)Enum.Parse(typeof(BrowserAction), actionName);
             // canGoBack/canGoForward deliberately true: the rule must not trust stale flags.
-            Assert.False(BrowserCommandAdmission.IsAvailable(action, coreReady: false, canGoBack: true, canGoForward: true));
+            // canRecreateProfile false: this is the unchanged (non-proxied) crash state.
+            Assert.False(BrowserCommandAdmission.IsAvailable(action, coreReady: false, canGoBack: true, canGoForward: true, canRecreateProfile: false));
+        }
+
+        // #87: the errored proxied view's Refresh re-attempts creation through the re-creation
+        // path - admitted. No other command takes the route, and only when the caller vouches
+        // for proxied-plus-needs-recreation.
+        [Theory]
+        [InlineData("Refresh", true)]
+        [InlineData("NavigateBack", false)]
+        [InlineData("NavigateForward", false)]
+        [InlineData("NavigateHome", false)]
+        [InlineData("Print", false)]
+        public void FailedProxiedView_admitsRefreshForRecreationOnly(string actionName, bool expected)
+        {
+            var action = (BrowserAction)Enum.Parse(typeof(BrowserAction), actionName);
+            Assert.Equal(expected, BrowserCommandAdmission.IsAvailable(action, coreReady: false, canGoBack: false, canGoForward: false, canRecreateProfile: true));
         }
 
         [Theory]
@@ -40,16 +60,16 @@ namespace WebContent.Tests
         public void InitializedView_admitsStatelessCommands(string actionName)
         {
             var action = (BrowserAction)Enum.Parse(typeof(BrowserAction), actionName);
-            Assert.True(BrowserCommandAdmission.IsAvailable(action, coreReady: true, canGoBack: false, canGoForward: false));
+            Assert.True(BrowserCommandAdmission.IsAvailable(action, coreReady: true, canGoBack: false, canGoForward: false, canRecreateProfile: false));
         }
 
         [Fact]
         public void BackAndForward_needTheirHistoryFlag()
         {
-            Assert.True(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateBack, coreReady: true, canGoBack: true, canGoForward: false));
-            Assert.True(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateForward, coreReady: true, canGoBack: false, canGoForward: true));
-            Assert.False(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateBack, coreReady: true, canGoBack: false, canGoForward: true));
-            Assert.False(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateForward, coreReady: true, canGoBack: true, canGoForward: false));
+            Assert.True(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateBack, coreReady: true, canGoBack: true, canGoForward: false, canRecreateProfile: false));
+            Assert.True(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateForward, coreReady: true, canGoBack: false, canGoForward: true, canRecreateProfile: false));
+            Assert.False(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateBack, coreReady: true, canGoBack: false, canGoForward: true, canRecreateProfile: false));
+            Assert.False(BrowserCommandAdmission.IsAvailable(BrowserAction.NavigateForward, coreReady: true, canGoBack: true, canGoForward: false, canRecreateProfile: false));
         }
 
         [Fact]
@@ -60,7 +80,7 @@ namespace WebContent.Tests
             // pass a future command through.
             foreach (BrowserAction action in Enum.GetValues(typeof(BrowserAction)))
             {
-                var admitted = BrowserCommandAdmission.IsAvailable(action, coreReady: true, canGoBack: true, canGoForward: true);
+                var admitted = BrowserCommandAdmission.IsAvailable(action, coreReady: true, canGoBack: true, canGoForward: true, canRecreateProfile: false);
                 if (action == BrowserAction.NavigateTo)
                 {
                     // NavigateTo has no toolbar command and an empty Execute - never admitted.

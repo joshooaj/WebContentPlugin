@@ -348,6 +348,40 @@ namespace WebContent.Client
 
                 _viewItemManager.Settings.RecordSessionAddress(Address);
             }
+            else if (e.PropertyName == nameof(BrowserInstance.InitFailure) || e.PropertyName == nameof(BrowserInstance.WebView))
+            {
+                // #87: a failed (or freshly retried) initialization changes what the toolbar
+                // commands may do; no WebView navigation event fires in that state, so the
+                // gate is re-queried here.
+                _reloadCommand?.RaiseCanExecuteChanged();
+            }
+        }
+
+        /// <summary>
+        /// #87: the Refresh route for an errored proxied view — re-attempt creation through the
+        /// SAME re-creation path the view's Init uses on re-selection (restore address, same
+        /// isolation rule). Kept here so the command never touches view/layout plumbing; the
+        /// open view picks the fresh WebView2 control up from the browser's WebView property
+        /// change.
+        /// </summary>
+        internal void RecreateBrowserForRefresh()
+        {
+            // Resolve the tracked instance only: the Browser getter re-runs proxy reconciliation
+            // and could itself recreate, doubling the work of a Refresh click.
+            if (!BrowserManager.TryGetBrowser(Id, out var browser) || browser == null)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentViewModel), $"Refresh-recreation refused for view item {Id}: no browser instance.");
+                return;
+            }
+
+            var address = ResolveRestoreAddress() ?? Home;
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WebContentViewModel),
+                $"Refresh-recreation for view item {Id}: recreating the browser WebView at '{address}'.");
+            browser.RecreateWebView(
+                WebContentConfiguration.CreateNavigationUri(address, Home),
+                _viewItemManager?.Settings.IsolateBrowserInstances ?? false);
         }
 
         private object WorkspaceStateChangeHandler(Message message, FQID destination, FQID sender)

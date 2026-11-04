@@ -164,6 +164,12 @@ namespace WebContent.Client
                 {
                     AddWebViewToPanel(browser.WebView);
                 }
+
+                // #87 last, so the ownership overlay's WebView collapse lands after the fresh
+                // BrowserVisibility binding from this Init (a browser that already failed init
+                // shows the notice immediately on view (re-)selection, before any event fires).
+                BindInitFailure(browser);
+
                 EnvironmentManager.Instance.Log(false, nameof(WebContentUserControl), $"View item {_viewModel.Id} initialized successfully.");
             }
             catch (Exception ex)
@@ -203,6 +209,7 @@ namespace WebContent.Client
                 _isClosed = true;
                 UnbindBlockTally();
                 UnbindCaTrust();
+                UnbindInitFailure();
                 if (_viewModel != null)
                 {
                     _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
@@ -394,6 +401,7 @@ namespace WebContent.Client
             {
                 UpdateBlockedIndicator();
                 UpdateCaBanner();
+                UpdateProfileErrorOverlay();
             }
         }
 
@@ -790,6 +798,159 @@ namespace WebContent.Client
                 // Dispatcher shutdown: the fix outcome dies with the control; the store state is
                 // whatever the elevated helper actually did, which is auditable in its own log.
             }
+        }
+
+        #endregion
+
+        #region Proxied profile-ownership error (#87)
+
+        /// <summary>
+        /// #87: the browser instance whose <see cref="BrowserInstance.InitFailure"/> /
+        /// <see cref="BrowserInstance.WebView"/> changes this control follows. Like the #83
+        /// tally and the #72 trust posture it is browser-owned, so the subscription survives a
+        /// WebView recreation; only a different browser (or none) needs a re-subscription.
+        /// </summary>
+        private BrowserInstance _failureBrowser;
+
+        /// <summary>
+        /// Attach this control to the browser's failed-initialization contract and paint the
+        /// current state (a view re-selected onto an already-errored browser shows the notice
+        /// immediately; a failure that lands while the view is open arrives via PropertyChanged).
+        /// </summary>
+        private void BindInitFailure(BrowserInstance browser)
+        {
+            if (!ReferenceEquals(_failureBrowser, browser))
+            {
+                UnbindInitFailure();
+                _failureBrowser = browser;
+                if (browser != null)
+                {
+                    browser.PropertyChanged += Browser_ProxiedStateChanged;
+                }
+            }
+
+            UpdateProfileErrorOverlay();
+        }
+
+        private void UnbindInitFailure()
+        {
+            if (_failureBrowser != null)
+            {
+                _failureBrowser.PropertyChanged -= Browser_ProxiedStateChanged;
+                _failureBrowser = null;
+            }
+        }
+
+        private void Browser_ProxiedStateChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            if (e.PropertyName != nameof(BrowserInstance.InitFailure) && e.PropertyName != nameof(BrowserInstance.WebView))
+            {
+                return;
+            }
+
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_isClosed)
+                    {
+                        return;
+                    }
+
+                    if (e.PropertyName == nameof(BrowserInstance.WebView))
+                    {
+                        AttachRecreatedWebView();
+                    }
+
+                    UpdateProfileErrorOverlay();
+                }), DispatcherPriority.Background);
+            }
+            catch (Exception)
+            {
+                // Dispatcher shutdown mid-teardown: the control is going away anyway.
+            }
+        }
+
+        /// <summary>
+        /// #87: the Refresh path recreates the WebView while this view is open - pick the fresh
+        /// control up exactly like Init does (visibility binding + panel), no re-selection
+        /// needed. The re-attach for background/browser-moved cases stays untouched.
+        /// </summary>
+        private void AttachRecreatedWebView()
+        {
+            var webView = _failureBrowser?.WebView;
+            if (webView == null || _isClosed || _viewModel == null)
+            {
+                return;
+            }
+
+            if (!Panel.Children.Contains(webView))
+            {
+                webView.SetBinding(VisibilityProperty, new Binding("BrowserVisibility") { Source = _viewModel });
+                AddWebViewToPanel(webView);
+            }
+        }
+
+        /// <summary>
+        /// Paint the in-view contract: while a proxied initialization failure stands, the notice
+        /// shows and the blank WebView2 control is collapsed to it (a local Visibility value
+        /// outranks the BrowserVisibility binding - WebView2 is an HWND host nothing may be
+        /// composited over, so the blank control must step aside, not share the area). When the
+        /// failure clears (a recreation attempt began or succeeded), the control gets its
+        /// BrowserVisibility binding back. Every write is idempotent.
+        /// </summary>
+        private void UpdateProfileErrorOverlay()
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            var failure = _failureBrowser?.InitFailure;
+            if (failure != null)
+            {
+                profileOwnershipCause.Text = failure.CauseLabel;
+                profileOwnershipHeadline.Text = failure.Headline;
+                profileOwnershipText.Text = failure.Explanation;
+                profileOwnershipDetail.Text = failure.Detail;
+                profileOwnershipError.Visibility = Visibility.Visible;
+                CollapseBrowserWebView();
+            }
+            else if (profileOwnershipError.Visibility != Visibility.Collapsed)
+            {
+                profileOwnershipError.Visibility = Visibility.Collapsed;
+                RebindBrowserWebViewVisibility();
+            }
+        }
+
+        private void CollapseBrowserWebView()
+        {
+            var webView = _failureBrowser?.WebView;
+            if (webView == null)
+            {
+                return;
+            }
+
+            if (webView.Visibility != Visibility.Collapsed)
+            {
+                webView.SetValue(VisibilityProperty, Visibility.Collapsed);
+            }
+        }
+
+        private void RebindBrowserWebViewVisibility()
+        {
+            var webView = _failureBrowser?.WebView;
+            if (webView == null || _viewModel == null)
+            {
+                return;
+            }
+
+            webView.SetBinding(VisibilityProperty, new Binding("BrowserVisibility") { Source = _viewModel });
         }
 
         #endregion

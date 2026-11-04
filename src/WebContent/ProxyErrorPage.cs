@@ -36,6 +36,13 @@ namespace WebContent
         internal const string CategoryMethodNotAllowed = "method-not-allowed";
         internal const string CategoryUnknownFailure = "proxy-failure";
 
+        // #87: not a per-request proxy refusal and never mapped from a wire code - the whole
+        // PROXIED browser failed to initialize because the boundary profile folder is owned by
+        // another Smart Client process on this machine (ADR-0004 interim contract). The wording
+        // layer is shared with the refusal pages deliberately; the distinct category keeps it
+        // reading as profile ownership, never as a gateway fault.
+        internal const string CategoryProfileOwned = "browser-profile-owned";
+
         // The side attribution lines (#58: every page names which side failed).
         internal const string DecidedByLocalListener = "this computer (the workspace browser proxy)";
         internal const string DecidedByVmsServer = "the VMS Event Server (the server-side proxy component)";
@@ -102,6 +109,7 @@ namespace WebContent
                 case CategoryComponentUnavailable: return "VMS proxy component unavailable";
                 case CategoryMalformedRequest: return "Invalid request";
                 case CategoryMethodNotAllowed: return "Request method not allowed";
+                case CategoryProfileOwned: return "Browser profile owned by another session";
                 default: return "Proxy failure";
             }
         }
@@ -122,6 +130,7 @@ namespace WebContent
                 case CategoryComponentUnavailable: return "The VMS proxy is not running";
                 case CategoryMalformedRequest: return "The browser's request could not be understood";
                 case CategoryMethodNotAllowed: return "The proxy does not relay this kind of request";
+                case CategoryProfileOwned: return "Another Smart Client session on this computer already opened this browser";
                 default: return "The proxy reported a failure";
             }
         }
@@ -160,6 +169,8 @@ namespace WebContent
                     return "The request that reached the proxy was malformed, so the proxy refused it before deciding anything else.";
                 case CategoryMethodNotAllowed:
                     return "The workspace proxy only relays the verbs a browser page generates (GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH).";
+                case CategoryProfileOwned:
+                    return "This view's proxied browser profile lives at one folder per proxied boundary, and one still-running Smart Client session on this computer already owns that folder - only one session can drive one proxied browser at a time. Close the other Smart Client session on this computer and reload this view, or reload it after that session exits: the profile is free again as soon as its owner is gone.";
                 default:
                     return "The proxy refused this request for a reason that is not one of the named causes. The technical details below name it.";
             }
