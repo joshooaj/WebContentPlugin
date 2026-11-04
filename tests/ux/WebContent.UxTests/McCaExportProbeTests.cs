@@ -284,16 +284,28 @@ public class McCaExportProbeTests
         var edits = dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit)).ToList();
         var interesting = edits.Where(e =>
         {
-            var value = ReadEditText(e);
-            return string.Equals(value, DefaultFileName, StringComparison.OrdinalIgnoreCase)
-                   || string.Equals(e.AutomationId, "1001", StringComparison.OrdinalIgnoreCase)
-                   || (e.Name ?? string.Empty).IndexOf("file name", StringComparison.OrdinalIgnoreCase) >= 0;
+            try
+            {
+                var value = ReadEditText(e);
+                return string.Equals(value, DefaultFileName, StringComparison.OrdinalIgnoreCase)
+                       || string.Equals(e.AutomationId, "1001", StringComparison.OrdinalIgnoreCase)
+                       || (e.Name ?? string.Empty).IndexOf("file name", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch { return false; }
         }).ToList();
         foreach (var edit in interesting)
-            log.AppendLine($"dialog file-name edit: aid='{edit.AutomationId}' name='{edit.Name}' value='{ReadEditText(edit)}' rect={edit.BoundingRectangle}");
+        {
+            try { log.AppendLine($"dialog file-name edit: aid='{edit.AutomationId}' name='{edit.Name}' value='{ReadEditText(edit)}' rect={edit.BoundingRectangle}"); }
+            catch (Exception exception) { log.AppendLine($"dialog file-name edit unreadable: {exception.GetType().Name}: {exception.Message}"); }
+        }
 
-        var fileNameEdit = interesting.FirstOrDefault(e => string.Equals(ReadEditText(e), DefaultFileName, StringComparison.OrdinalIgnoreCase))
-            ?? interesting.FirstOrDefault(e => string.Equals(e.AutomationId, "1001", StringComparison.OrdinalIgnoreCase))
+        // The Win32 dialog's OWN File name edit is aid 1001 - that is the edit whose typed text the
+        // dialog's commit parser reads. The shell file-list item field (aid 'System.ItemNameDisplay')
+        // also echoes the default name, but its UIA provider can die mid-read (0x80040201 "an event
+        // was unable to invoke any of the subscribers", proved live 2026-11-03) and typing into it
+        // is not what the dialog parses - so prefer 1001 outright and keep the old tells as fallbacks.
+        var fileNameEdit = interesting.FirstOrDefault(e => string.Equals(e.AutomationId, "1001", StringComparison.OrdinalIgnoreCase))
+            ?? interesting.FirstOrDefault(e => string.Equals(ReadEditText(e), DefaultFileName, StringComparison.OrdinalIgnoreCase))
             ?? interesting.FirstOrDefault();
         Assert.NotNull(fileNameEdit);
 
@@ -384,7 +396,7 @@ public class McCaExportProbeTests
     private static string ReadEditText(AutomationElement edit)
     {
         try { return edit.Patterns.Value.IsSupported ? edit.Patterns.Value.Pattern.Value.Value : edit.Name; }
-        catch { return edit.Name; }
+        catch { try { return edit.Name; } catch { return null; } }
     }
 
     /// <summary>

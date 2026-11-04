@@ -15,7 +15,7 @@ named log marker. An area is **verified** only when all of its rows pass.
 | CI | `Tests` job in `.github/workflows/ci.yml` (runs on PRs and pushes) | job green before merge to `main`; the installer only publishes from `main` |
 | Deploy | `Invoke-psake -taskList DeployLocally, DeployToVms` (see `AGENTS.md`) | local drop hash-identical to `output\WebContent\`; ES restarts and logs its ready marker |
 | Manual host checks | Steps below, run against a deployed plugin per `AGENTS.md` | each row's expected outcome and log marker observed |
-| Full installer build | `.\build.ps1 [-Version x.y.z]` (also caches the WebView2 runtime and builds `src/Setup/setup.wixproj`) | exit 0; SBOM guard green; #70 sequencing guard throws unless the MSI force-closes the Milestone clients before RemoveFiles/InstallFiles with RemoveExistingProducts late; #82 service-flow guard pins the stop/restart actions (type 1026 at 1502/4001), their conditions, and the choice-page dialog hop |
+| Full installer build | `.\build.ps1 [-Version x.y.z]` (also caches the WebView2 runtime and builds `src/Setup/setup.wixproj`) | exit 0; SBOM guard green; #70 sequencing guard throws unless the MSI force-closes the Milestone clients before RemoveFiles/InstallFiles with RemoveExistingProducts late; #82 service-flow guard pins the stop/restart actions (type 1026 at 1502/4001), their conditions, and the choice-page dialog hop; #77 proxy-CA guard pins the `CreateProxyAuthority` action (1026 on the streamed `WebContentProxyCa.exe`, command line, slot after InstallFiles and before the restart, ES + `PROXY_SUPPORT` condition needles, checkbox Control row) |
 
 Manual-check logs: Smart Client → `%ProgramData%\Milestone\XProtect Smart Client\MIPLog.txt`
 (no `Logs\` subfolder); Management Client → `Logs\MIP.log` under its own ProgramData folder.
@@ -62,6 +62,7 @@ is not evidence the plugin never ran.
 | Plugin upgrade on an Event Server machine dying on the running service's locked drop, or racing a half-stopped service: the MSI stops `MilestoneEventServerService` only for existing installs, waits for the REAL Stopped state (no fixed sleep), installs, and restarts it per the wizard's finish-page choice - first installs and no-ES machines never stop or prompt | #82 | `EventServerServiceCtlTests` (exit-code decision table), `InstallerEsServiceFlowGuardTests` (authored condition/sequence/Binary pins), `build.ps1` compiled-package guard (1026 actions at 1502/4001, condition needles, choice-page hop) | See IN-2 below - **all live rows PASSED 2026-11-03** on the VMS machine with a 250 ms service-state journal: upgrade-Yes (stop->copy->start), upgrade-No (left Stopped), first-install (never stopped, start only on Yes), uninstall (untouched), and the no-ES machine (both actions skipped) - each exit 0 with the drop hash-verified |
 | MSI on the Event Server machine is THE supported deployment path; remote Copy-Item (psake `DeployToVms`, `deploy-event-server-plugin.ps1`) is a dev/test shortcut that never sets up proxy support and whose unregistered strays shadow an upgrade at equal file version | #68 | Docs + live rows (no new code surface); consumes the #70/#82 build-time guards | See IN-3 below - **live rows 2026-11-03** on the VMS machine: upgrade `0.1.282.22971` (+`0.1.284.59742` Copy-Item drift) → `0.1.287.14301` exit 1641 caught the shadow (12/13 hash-identical, the `1.0.0.0`-versioned trust-helper stray survived); the supported pure-`msiexec` uninstall/install migration then ended **13/13 hash-identical**, single registration, stop-action skipped, restart-action started the service, `Proxy fetcher ready` marker after the install, ES left Running |
 | Install-time deployment-CA provisioning: the MSI itself creates/reuses the proxy CA in `LocalMachine\Personal` and grants the Event Server service account private-key read - ONLY on an ES machine with the proxy opt-in ticked; the CA shape stays single-sourced (the action drives the plugin's own load-or-create by reflection, never carries a minting recipe of its own); machines without ES, or with the box unticked, never have cert stores touched | #77 | `ProxyCaProvisionCoreTests` (bad-vector refusal before anything is touched; SCM ObjectName → account mapping incl LocalSystem/built-in normalization; gateway failure skips the grant; unconfirmed grant fails the install; the authored `provision MilestoneEventServerService` vector parses to the fixed drop), `InstallerProxyCaGuardTests` (authored Binary/CA/condition/sequence pins, checkbox on the same options page, CN never drifts from `ProxyLoopbackTls.AuthorityCommonName`, NO CertificateRequest/CreateSelfSigned/MD5 in the helper, reused DACL logs untouched / missing grants repaired, the exe is never harvested into the drop), `build.ps1` compiled-package guard (1026 exe CA on the streamed `WebContentProxyCa.exe` binary with its command line, scheduled after InstallFiles / before InstallFinalize / before the restart, condition needles NOT REMOVE + EVENTSERVERSERVICEPRESENT + PROXY_SUPPORT, the PROXY_SUPPORT CheckBox Control row) | See IN-4 below - **live rows PASSED 2026-11-03** on the VMS machine: default-opt-in upgrade RAN `CreateProxyAuthority` inside the script (exit 1641, CA thumbprint `E4D2…`/key container/DACL byte-identical, drop hash-verified); the streamed exe run directly logged the plugin's own `Loaded deployment proxy CA…` + `already holds read access… DACL untouched`, refused every bad vector with exit 1, and after DACL surgery re-WROTE the `NETWORK SERVICE` read grant restoring the identical ACL; a second upgrade with `PROXY_SUPPORT=0` logged `Skipping action: CreateProxyAuthority` with stores byte-identical; the post-install mint probe re-passed live - plugin's own `Loaded deployment proxy CA…` + `Minted loopback proxy leaf` with the script never run. No-ES-machine rows honest-SKIPPED (no unattended elevation on BEAST): the same presence gate is live-proven skipped there by IN-2 row 5 and the CA condition is compiled-guard-pinned |
+| Epic #64 integration: the DEFAULT-option MSI run on the Event Server machine IS the provisioning story - clients force-closed, stop/wait/copy/CA-provision/restart inside one script, one hash-identical drop on both machines, and the client trust surface re-green on that drop | #64 | `.\build.ps1` re-green at the epic tip with all three compiled guards (#70/#82/#77) in one build; 1155 unit rows + Lint at the same commit | See IN-5 below - **all rows PASSED 2026-11-03**: the `0.1.291.10692` default-option upgrade (exit 0, 10.1 s real Stopped wait, CA byte-identical incl. key DACL, `Proxy fetcher ready` after), 10/10 drop files hash-identical ES-vs-local, and the one-run client-side re-pass MC-15 + MC-20 row 1 + SC-10 rows 1-3 (MC-15's two reds were a harness edit-pick bug, fixed and re-proven); the drifted unrecorded `0.1.290` registration was disclosed and cleaned by the upgrade |
 | OS-configured (WinINET) proxy inheritance for non-proxied views, and the deliberate contrast for proxied views (loopback pin wins; no admin-facing proxy-URL setting exists because the OS owns that layer) (#67) | #67 | `ProxyBrowserArgumentsTests` (the pin itself: every scheme routed to the loopback listener, `<-loopback` bypass off - nothing falls back to the system path); the inheritance claim is a live-host fact, pinned by the SC-8 probe rows below (`ScOsProxyInheritanceProbeTests`: WinINET snapshot/apply/restore, a logging forward-proxy harness on loopback, live `Win32_Process` command-line reads of the plugin's browser processes) | See SC-8 below: routing OFF + the per-user WinINET proxy pointed at the harness - the non-proxied view renders the harness marker page for an RFC 2606 `.invalid` host (which can never resolve, so a served page can only have ridden the OS proxy) with the browser's absolute-form GET in the journal and NO proxy switch on any browser command line; routing ON + the SAME OS proxy + the SAME url - the plugin's 403 page renders, the harness journals nothing for the origin, and the live browser command lines carry `--proxy-server=http=http://127.0.0.1:<listener>;...` plus `--proxy-bypass-list=<-loopback>`. **BEAST 2026-11-03: both rows PASSED** (`20261103-035256`, `20261103-040006`) |
 | Managed workspaces: security-relevant Smart Client view settings locked with "Managed by Administrator", cosmetic settings stay per-instance editable (locked-key overrides can never reach runtime) | #71 | `WorkspaceSettingLocksTests` (managed decision from the persisted WorkspaceId/DefinitionFingerprint; the locked set is exactly HomeAddress + legacy Address + ProxyEnabled + ProxyTargets, cosmetic/navigation keys never locked, identity keys never settings; seed decision table - locked/identity keys always enforced, cosmetic keys take the definition as initial value or re-initialise on definition change but a per-instance override survives inside an unchanged definition), `WorkspaceInstancePropertiesTests` #71 rows (hand-edited HomeAddress overwritten; definition proxy posture + allowlist enforced over stored values; cosmetic override kept, absent cosmetic seeded, changed definition re-initialises it; identity/fingerprint always enforced), `ManagedViewPropertiesPaneGuardTests` (home TextBox pins IsEnabled/ToolTip bindings + probe AutomationIds; both admin notices render only for managed items via one converter; NO cosmetic control declares an IsEnabled binding) | See SC-9 below - **live row PASSED 2026-11-03** (run `20261103-043150`, drop `3C777113…F63475`): Home renders disabled with the pinned URL visible + the admin note under Home AND Proxy, the checkbox stays enabled and its per-instance ON-state survives a full exit/re-enter-setup re-seed, locks still locked afterwards, `WebContent workspace seed:` marker in MIPLog; the standalone zero-change branch is pinned by the unit table + pane guard (no standalone view item in the lab) |
 | Untrusted deployment CA: banner for every user on proxied views, setup-mode-only elevated fix through a thumbprint-locked bundled helper, mid-session heal without restart (#72) | #72 | `ProxyCaTrustStateTests` (posture holder: Changed fires only on real flips, case-insensitive thumbprint equality, proxy-off Clear, throwing subscriber swallowed) + `ProxyLoopbackTlsTrustPostureTests` (every mint publishes from the LOCAL root-store probe not the wire, cache short-circuits republication, `InvalidateLeafCache` re-mint flips the posture with no restart); `ProxyTrustHelperTests` (usage matrix, unreadable 3, garbage/oversize/empty refused 2 before parsing, thumbprint mismatch = store never touched, matched = exactly one import with the verified cert, store exit propagates); `ProxyCaTrustBannerWiringGuardTests` (banner elements + Collapsed defaults, setup-only fix gate, `Verb="runas"` + NO in-process LocalMachine write in the view code, 1223 quiet + independent re-verification, invalidate+reload on confirmed fix, navigation re-check heals external fixes, drop ships but never links the helper) | See SC-10 below - **live rows PASSED 2026-11-03** (runs `20261103-053747`/`20261103-053809`/`20261103-053825`, drop `01D9D8A8…3789` both machines): deployed helper refuses every negative path with the pinned exit codes and zero dialogs (incl. the unprivileged store refusal = 4); the helper's FULL success path verified end-to-end ON the Event Server (import -> present -> remove -> absent, self-cleaned); trusted lab state shows no CA chrome on the live proxied view. The untrusted-live row (SC-10 row 4) is an elevated human step: both root stores refuse unattended removal on the client machine |
@@ -499,6 +500,17 @@ service, and the local copy needs no elevation). Verify each deployed file by ha
    `ValuePattern.SetValue` gets honoured only for the NAME - the dialog saves into its OWN folder, so
    the probe types the path with keystrokes and commits with ENTER.
 
+   Record (MC-15 re-pass, IN-5) - **live row PASSED 2026-11-03**, run `20261103-180100`, both
+   machines on drop `WebContent.dll 6B281447…07FD` (ES via the `0.1.291.10692` MSI, local box via
+   the Copy-Item shortcut): store read FIRST (one CA `E4D2…2377`, 816 DER bytes), answered/exported
+   marker pair, saved file byte-identical to the live store copy. This run exposed and fixed a
+   HARNESS selection bug: the common dialog's shell file-list carries a `System.ItemNameDisplay`
+   edit that also echoes the default name, and the old "first edit whose value matches" rule could
+   pick it - its UIA provider dies mid-read (`0x80040201`) and it is NOT the edit the dialog's
+   parser reads. The probe now prefers the Win32 dialog's own aid-`1001` File name edit
+   (red runs `20261103-173915`/`20261103-175427` both failed only in the harness - the ES answer
+   and the correctly-opened dialog are in both logs).
+
 ### MC-16 MC Diagnostics tab: live blocked list + one-click promotion (#84)
 
 1. Restart the Management Client with the new drop. `Invoke-psake -taskList Build, DeployLocally`
@@ -838,6 +850,11 @@ the elevated human-step route above is the outstanding operator task for the ful
 live chain - the shape matches the SC-10 row 4 precedent, and every link of the chain besides
 the store surgery is pinned by unit rows + source guards (report contract skew included: the
 explicit `[DataContract]` payload decodes pre-#80 frames with the machine list null).
+
+Record (MC-20 row 1 re-pass, IN-5) - **live PASSED 2026-11-03**, run `20261103-173817`, both
+machines on the one merged drop (`WebContent.dll 6B281447…07FD`): the healthy-posture trio
+(no banner while trusted, parked export button, normally-rendering Diagnostics tab) again green
+on the post-#77/#82 installer-current Event Server.
 
 ### SC-1 End-to-end proxied page load (#54)
 
@@ -1647,6 +1664,13 @@ CA to both stores in its finally block. The Fix-button CLICK itself (both OS dia
 post-click leaf-cache invalidation and reload) remains a human-observed flow; the declined-UAC
 (1223) and post-confirm re-verification outcomes are pinned by the unit/guard suites.
 
+**Live record (IN-5 re-pass, 2026-11-03):** rows 1-3 PASSED again on the epic-merged drop - both
+machines `WebContent.dll 6B281447…07FD`, deployed helper `39F244EC…D168` (row 2's refusal matrix
+and row 3's elevated import→present→remove→absent chain both ran against THAT exe; row 3's helper
+hash line names it explicitly): runs `20261103-173951` / `20261103-174159` / `20261103-174158`,
+artifact set identical to the 05:3x precedent. Row 4 stays SKIPPED-unattended (same elevated-
+store posture as before). See IN-5 for the installer-side half of the same integration pass.
+
 ## Installer checks
 
 ### IN-1 Installer force-closes running Milestone clients (#70)
@@ -1896,6 +1920,71 @@ need the usual restart. The mint probe rewrote the demo workspace's `https://172
 allowlist line to carry `accept-untrusted` (its documented self-managed row, same state the SC-3
 records have always left).
 
+### IN-5 Epic #64 integration: one default-option MSI run is the whole provisioning story (2026-11-03)
+
+The epic's own acceptance sentence, taken literally: an admin runs the tip MSI on the Event Server
+machine with **nothing but the defaults** (restart Yes, proxy support ON) and gets a live proxy
+feature - force-close of the Milestone clients, stop → real Stopped wait → copy → install-time CA
+provisioning (reuse) → restart → fetcher ready - while both machines end on ONE hash-identical drop
+and the client-side trust surface (MC-15 export, MC-20 aggregate, SC-10 banner/helper) re-passes on
+that same merged drop.
+
+Commit under test: `feat/proxy` tip `29c4995` - Lint + **1155 unit rows** green, and `.\build.ps1`
+re-green at the same commit with all THREE compiled package guards (#70 sequencing, #82 service
+flow, #77 proxy-CA) passing in one build. The MSI first built as `0.1.290.10692` turned out to hit
+pre-existing drift: the ES machine already carried a `0.1.290.10692` registration with **no matrix
+record** (installed 13:37 that day, no trail on either machine; service healthy, CA intact, drop
+stamped 290). Rather than layer a same-version install onto untracked state, the row ran at a
+forced `0.1.291.10692` (the IN-2 999.x forced-build precedent) - a true major upgrade over the
+drifted product code, which cleaned it out.
+
+1. **End-to-end ES upgrade, default options - PASSED 17:25.** `CascadiaWebContentPlugin.0.1.291.10692.msi`
+   (SHA-256 `8186DC89…2F57`) staged into the machine's temp via the credential WinRM session and
+   hash-verified remotely; `msiexec /i <msi> /qn /l*v <log>` → **exit 0** (no reboot request this
+   time - the 1641 of IN-2/IN-4 was the WebView2 piece and did not recur; recorded honestly). The
+   500 ms service journal (second session): `Running 17:25:27.0 → StopPending 28.0 → Stopped 38.1 →
+   StartPending 38.6 → Running 39.1` - a **10.1 s real wait** for Stopped, the file copy inside the
+   Stopped window. The verbose log carries the whole epic chain in order: deferred `WixCloseApplicationsDeferred`
+   (3073, all three client targets) → `CustomActionSchedule(StopEventServerService,1026,stop…)` at
+   17:25:27.553 → `CustomActionSchedule(CreateProxyAuthority,1026,provision MilestoneEventServerService)`
+   at **17:25:38.348** (after the stop's real Stopped wait, before) `CustomActionSchedule(RestartEventServerService,1026,restart…)`
+   at 17:25:38.479; the old product's REMOVE script skipped all three ES-gated actions (`NOT REMOVE`).
+   Read-only CA verify before/after: **byte-identical** - one CN-scoped CA, thumbprint
+   `E4D254D5…2377`, notAfter 2036-10-30, same key container `da86e11f…f7ce2724…`, same three-ACE
+   DACL. Registrations: exactly one, `0.1.291.10692`. ES MIP.log gained `Proxy fetcher ready
+   (…, export=WebContent.Proxy.CaExportRequest, triggers=WebContent proxy request)` at 17:25:46.7.
+2. **One drop, both machines, hash-verified - PASSED.** `DeployLocally` (dev shortcut, the local
+   box) plus the MSI above (the supported path) leave ALL 10 top-level drop files hash-identical
+   between the two installs - `WebContent.dll 6B281447…07FD` (assembly stamp `0.1.290.10692` from
+   nbgv; the MSI product version is the forced 291), and this time even `WebContentTrustHelper.exe`
+   `39F244EC…D168` matches: the helper was REGISTERED under the 290/291 MSI chain, so
+   RemoveFiles/InstallFiles cycled it normally - the #89 stale-stray gap stays honestly scoped to
+   unregistered Copy-Item strays, and #89 remains open for that case.
+3. **Client/MC trust surface re-passed on the merged drop - PASSED 17:38-18:01.** One `TestUI` run
+   (filter `McCaExport|McCaUntrustedAggregate|ScProxyTrust`, 7 facts, 3 m 42 s) plus one filtered
+   re-run: MC-20 row 1 healthy-no-banner `20261103-173817`; SC-10 row 1 no CA chrome on the live
+   proxied https view `20261103-173951`, row 2 the DEPLOYED helper (`39F244EC…` = this drop)
+   refuses every negative path incl. the unprivileged store write (exit 4, zero dialogs)
+   `20261103-174159`, row 3 the elevated-helper FULL import→present→remove→absent chain ON the
+   Event Server `20261103-174158`; MC-15 `20261103-180100` - the store read FIRST (one CA,
+   `E4D2…2377`, 816 DER bytes), the button answered, the Save-As file is byte-identical to the live
+   store copy, and the pane states the LocalMachine\\Root/GPO follow-up. MC-15 went red TWICE first -
+   harness-side only: the ES answered and the dialog opened with the default name both times, but
+   the probe's File-name-edit pick matched the shell file-list's `System.ItemNameDisplay` edit
+   (it echoes the default value), whose UIA provider died mid-read (`0x80040201`, an event unable
+   to invoke its subscribers) - fixed by preferring the Win32 dialog's own aid-`1001` edit, which
+   is the one whose typed text the dialog's parser reads (red runs `20261103-173915` /
+   `20261103-175427`, fix proven by the green re-run).
+
+Honest residues unchanged by this pass: MC-20 row 2 and SC-10 row 4 stay elevated human operator
+steps (store surgery on the client machine refuses unattended); #89 (version-stamp the helper) stays
+open for Copy-Item-stray labs.
+
+Machine state after the rows: ES on `0.1.291.10692` MSI-registered (single entry), service Running,
+CA + key DACL byte-identical to the pre-row state, remote temp `wces64` cleaned; BEAST carries the
+hash-identical drop via the Copy-Item shortcut (its MSI registration stays `0.1.282.22971` - the
+IN-4 row-5 posture, unchanged). Smart Clients connected before 17:26 need the usual restart.
+
 ## Known high-risk regressions → pinned by
 
 | Regression (remediation it would undo) | Pinned by |
@@ -1936,6 +2025,7 @@ records have always left).
 | Plugin upgrade on an Event Server machine racing the running service's locked drop: the stop/restart CAs drifting outside the script or after the file copy, the stop assuming instead of WAITING for the real Stopped state, the stop firing on first installs / no-ES machines, or the finish-page choice losing its wire to the restart action (#82) | `EventServerServiceCtlTests` (exit-code decision table incl. StopPending), `InstallerEsServiceFlowGuardTests` (authored conditions/sequence/Binary), `build.ps1` compiled-package guard (1026 at 1502/4001, condition needles, choice-page hop), IN-2 (five live rows with a 250 ms service-state journal, all exit 0/1641, plus the live full-UI walkthrough of the choice page incl. its hidden-on-no-ES posture) |
 | The install-time CA provisioning regressing: `CreateProxyAuthority` escaping the ES+opt-in gate, moving before InstallFiles (the reflection target would not be on disk) or outside the script, losing `Return="check"` so a failed provision ships as success, the helper growing its OWN minting recipe (the ADR-0003 single-recipe rule), the CN drifting from the plugin's, or the key grant going missing/unconfirmed so every leaf mint dies Access-denied (#77) | `ProxyCaProvisionCoreTests` (refusal-before-touch, account mapping, grant-missing fails the install), `InstallerProxyCaGuardTests` (condition/ordering/checkbox/CN/mint-free-helper/never-harvested pins), `build.ps1` compiled-package guard (1026+Binary+command line, slots after InstallFiles / before InstallFinalize / before the restart, needles, PROXY_SUPPORT Control row), IN-4 (live reuse/DACL-surgery re-grant/declined-skip rows + the plugin's own post-install `Loaded deployment proxy CA` + mint markers with the script never run) |
 | A non-proxied view silently losing OS (WinINET) proxy inheritance (a stray browser-arguments injection), or a proxied view falling back to the system proxy so the workspace allowlist stops being the whole story (#67) | `ProxyBrowserArgumentsTests` (the pin shape: all four schemes + `<-loopback>`), `ProxyWorkspaceProfileTests` (enabled always proxies; disabled emits no profile), SC-8 (both postures observed live on the real browser command lines and the OS-proxy harness journal) |
+| The untrusted-CA trust chain regressing: the banner never showing (silent broken-https UX) or showing while the CA IS trusted (alarm fatigue), the aggregate counting sessions instead of machines, the shipped helper accepting a wrong-thumbprint cert or writing the root store in-process (no consent dialogs), or the MC export no longer shipping the live leaf's bytes (#72, #80, #75) | `ProxyCaTrustStateTests` + `ProxyLoopbackTlsTrustPostureTests` (flip publication, root-store probe authority, invalidate->re-mint), `ProxyTrustHelperTests` (every refusal BEFORE any store/dialog), `ProxyCaTrustBannerWiringGuardTests` + `ProxyCaUntrustedReportWiringGuardTests` (banner/setup-gate pins; once-per-flip report + ES machine attribution gate + banner/export wiring), `ProxyDiagnosticsAggregatorTests` (per-machine dedup/cap) + `ProxyDiagnosticsWireTests` (pre-#80 frames decode), `ProxyCaExportTests`; live: MC-15, MC-20 row 1, SC-10 rows 1-3 (IN-5 re-pass 2026-11-03, both machines on drop `6B281447…07FD`) |
 
 ## Scope notes (deliberate)
 
