@@ -17,5 +17,28 @@ namespace WebContent
             return $"--proxy-server=http=http://127.0.0.1:{port};https=http://127.0.0.1:{port};ws=http://127.0.0.1:{port};wss=http://127.0.0.1:{port} " +
                    "--proxy-bypass-list=<-loopback>";
         }
+
+        /// <summary>
+        /// ADR-0004 (#95): the browser-argument posture MINUS the per-process loopback port, as a
+        /// lowercase SHA-256 hex the claim file can carry on one space-free line. Every process on
+        /// this build derives the identical value, so a joiner can tell whether the live claim
+        /// describes a matching configuration; the port itself is deliberately excluded because a
+        /// joiner COMPOSES the owner's port into its own identical argument.
+        /// </summary>
+        internal static string PortIndependentFingerprint()
+        {
+            var template = For(0).Replace("127.0.0.1:0", "127.0.0.1:{port}");
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(template));
+                var sb = new System.Text.StringBuilder(hash.Length * 2);
+                foreach (var b in hash)
+                {
+                    sb.Append(b.ToString("x2"));
+                }
+
+                return sb.ToString();
+            }
+        }
     }
 }

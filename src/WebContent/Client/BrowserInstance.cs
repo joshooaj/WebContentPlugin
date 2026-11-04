@@ -156,6 +156,24 @@ namespace WebContent.Client
         internal bool IsProxied => ProxyBrowserArguments != null;
 
         /// <summary>
+        /// #95: the boundary's listener-claim file this browser's process OWNS (null for a joined
+        /// or unproxied browser). Its published port is exactly what <see cref="ProxyListener"/>
+        /// serves, so the teardown paths delete it when the listener goes away.
+        /// </summary>
+        internal string ProxyClaimPath { get; set; }
+
+        /// <summary>
+        /// #95: the allowlist entries the #88 view-layer https refusal gate applies when this
+        /// browser has no listener of its own (a JOINED proxied browser enforces through the
+        /// owner's listener, but its own view still renders the friendly refusal page instead of
+        /// Chromium's bare CONNECT error). An owned browser's gate reads the listener's live set
+        /// and these copies are only the fallback.
+        /// </summary>
+        internal System.Collections.Generic.IReadOnlyList<string> ProxyViewTargets { get; set; }
+
+        internal System.Collections.Generic.IReadOnlyList<string> ProxyViewFloorHosts { get; set; }
+
+        /// <summary>
         /// #87: the in-view contract for a failed PROXIED initialization - set when
         /// <see cref="BrowserInitFailure.TryPresent"/> decides the failure reads as profile
         /// ownership, cleared when a new initialization attempt starts and on success. The view
@@ -282,8 +300,11 @@ namespace WebContent.Client
             // the same friendly page, committed at the requested URL, before any CONNECT.
             // (Plain http keeps riding the proxy's absolute-form 403; ws/wss upgrades are not
             // surfaced by this event and keep the CONNECT posture - documented asymmetry.)
+            // #95: a JOINED proxied browser has no listener, but its view keeps the gate - the
+            // decision runs over this browser's stored entry copies while the owner's listener
+            // does the enforcing, so both clients inside one boundary show the same refusal UX.
             webView.CoreWebView2.WebResourceRequested -= CoreWebView2_WebResourceRequested;
-            if (ProxyListener != null)
+            if (ProxyListener != null || ProxyViewTargets != null)
             {
                 webView.CoreWebView2.AddWebResourceRequestedFilter("https://*/*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
                 webView.CoreWebView2.WebResourceRequested += CoreWebView2_WebResourceRequested;
@@ -372,9 +393,14 @@ namespace WebContent.Client
         {
             try
             {
+                // #95: an owned browser's gate reads its listener's live entry set; a joined
+                // browser reads the entries its process resolved for the workspace (the shared
+                // browser process's owner enforces the same policy at fetch time).
                 var listener = ProxyListener;
+                var targets = listener != null ? listener.CanonicalTargets : ProxyViewTargets;
+                var floorHosts = listener != null ? listener.VmsFloorHosts : ProxyViewFloorHosts;
                 var core = WebView?.CoreWebView2;
-                if (listener == null || core == null || e.Request == null)
+                if (targets == null || core == null || e.Request == null)
                 {
                     return;
                 }
@@ -385,8 +411,8 @@ namespace WebContent.Client
                 }
 
                 if (!ProxyViewRefusal.TryRefuseHttpsRequest(
-                        listener.CanonicalTargets,
-                        listener.VmsFloorHosts,
+                        targets,
+                        floorHosts,
                         uri,
                         e.Request.Method,
                         out var rejectReason,
@@ -598,6 +624,12 @@ namespace WebContent.Client
             var proxyListener = ProxyListener;
             ProxyListener = null;
             proxyListener?.Stop();
+
+            // #95: the claim slot publishes the port THIS listener served; with the listener gone
+            // the slot must go too (own-pid-guarded - a live takeover is never evicted).
+            var claimPath = ProxyClaimPath;
+            ProxyClaimPath = null;
+            ProxyListenerLeaseProvider.ReleaseOwnClaimFile(claimPath);
         }
 
         public void RecreateWebView(Uri initialAddress, bool isolateInstances)

@@ -30,5 +30,37 @@ namespace WebContent.Tests
 
             Assert.Contains("--proxy-bypass-list=<-loopback>", args);
         }
+
+        [Fact]
+        public void ThePortIndependentFingerprintIsTheHashOfThePortSubstitutedArgumentTemplate()
+        {
+            // #95: every process on this build derives the identical value (join check), and it
+            // covers EVERY port-independent part of the arguments - recompute the template by
+            // hand and the hash must match, so changing For() changes the fingerprint.
+            var fp = ProxyBrowserArguments.PortIndependentFingerprint();
+            var template = ProxyBrowserArguments.For(0).Replace("127.0.0.1:0", "127.0.0.1:{port}");
+
+            string expected;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                expected = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(template)))
+                    .Replace("-", "")
+                    .ToLowerInvariant();
+            }
+
+            Assert.Equal(expected, fp);
+        }
+
+        [Fact]
+        public void TheFingerprintIsAClaimFileSafeSingleHexToken()
+        {
+            // The claim line format is name=value split on the FIRST '='; the value must carry no
+            // spaces, newlines or leading structure the strict parser could trip on.
+            var fp = ProxyBrowserArguments.PortIndependentFingerprint();
+
+            Assert.Matches("^[0-9a-f]{64}$", fp);
+            Assert.DoesNotContain(" ", fp);
+            Assert.DoesNotContain("\n", fp);
+        }
     }
 }

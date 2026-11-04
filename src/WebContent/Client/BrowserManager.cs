@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net.Sockets;
 using System.Threading.Tasks;
 
 using Microsoft.Web.WebView2.Wpf;
@@ -10,6 +11,14 @@ namespace WebContent.Client
     public static class BrowserManager
     {
         private static readonly BrowserRegistry<BrowserInstance> _registry = new BrowserRegistry<BrowserInstance>();
+
+        /// <summary>
+        /// #95 (ADR-0004 point 3): every proxied browser creation/re-enable consults the boundary's
+        /// listener claim BEFORE a loopback listener is bound - the first process inside a boundary
+        /// owns the slot and binds the port its claim publishes, later processes join that port with
+        /// the identical --proxy-server argument instead of colliding on the shared profile (#87).
+        /// </summary>
+        private static readonly ProxyListenerLeaseProvider _leases = new ProxyListenerLeaseProvider();
 
         public static BrowserInstance GetBrowser(Guid id)
         {
@@ -56,31 +65,57 @@ namespace WebContent.Client
             LoopbackProxyListener listener = null;
             string proxyArguments = null;
             string proxyUserDataFolder = null;
+            string proxyClaimPath = null;
             if (proxyProfile != null)
             {
-                // #69: one diagnostics session per proxied browser, attributed to the workspace item
-                // the profile was resolved for. Block reports, session lifecycle, and traffic
-                // attribution all hang off its id; the Event Server backstops it with an idle sweep.
-                listener = new LoopbackProxyListener(
-                    proxyProfile.CanonicalTargets,
-                    FetchThroughMessaging,
-                    new ProxyViewSessionContext
-                    {
-                        SessionId = Guid.NewGuid().ToString("N"),
-                        WorkspaceItemId = proxyProfile.WorkspaceItemId,
-                        WorkspaceFingerprint = proxyProfile.WorkspaceFingerprint,
-                        ClientMachine = Environment.MachineName,
-                    },
-                    blocks,
-                    proxyProfile.VmsFloorHosts,
-                    caTrust);
-                listener.Start();
-                proxyArguments = ProxyBrowserArguments.For(listener.Port);
+                // #95: consult the boundary's listener claim BEFORE any listener is bound. One
+                // process owns (and publishes) the port; every other process inside the boundary
+                // joins it with the identical argument, which is exactly what makes WebView2
+                // ATTACH to the owner's browser process instead of failing options-match (#87).
                 proxyUserDataFolder = ProxiedUserDataFolder(id);
-                EnvironmentManager.Instance.Log(
-                    false,
-                    nameof(BrowserManager),
-                    $"Proxied browser {id}: loopback listener on 127.0.0.1:{listener.Port}, {proxyProfile.CanonicalTargets.Count} allowlisted target(s), boundary profile '{proxyUserDataFolder}'.");
+                var claimPath = BrowserProfileIdentity.GetListenerClaimPath(id);
+                var lease = _leases.Acquire(claimPath, id, ProxyBrowserArguments.PortIndependentFingerprint());
+                foreach (var audit in lease.AuditLines)
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(BrowserManager), audit);
+                }
+
+                if (lease.Role == ProxyListenerLeaseRole.Joined)
+                {
+                    // No own listener, and so no own #69 session or block-report forwarder: every
+                    // proxied fetch rides the OWNER's listener and Event Server channel, one
+                    // diagnostics session per proxied profile (ADR-0004 point 4, accepted).
+                    proxyArguments = ProxyBrowserArguments.For(lease.Port);
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(BrowserManager),
+                        $"Proxied browser {id} joined the boundary owner's loopback listener on 127.0.0.1:{lease.Port} (claim '{claimPath}'); this process binds no listener and reports no own session, {proxyProfile.CanonicalTargets.Count} allowlisted target(s), boundary profile '{proxyUserDataFolder}'.");
+                }
+                else
+                {
+                    // #69: one diagnostics session per proxied browser, attributed to the workspace item
+                    // the profile was resolved for. Block reports, session lifecycle, and traffic
+                    // attribution all hang off its id; the Event Server backstops it with an idle sweep.
+                    listener = new LoopbackProxyListener(
+                        proxyProfile.CanonicalTargets,
+                        FetchThroughMessaging,
+                        new ProxyViewSessionContext
+                        {
+                            SessionId = Guid.NewGuid().ToString("N"),
+                            WorkspaceItemId = proxyProfile.WorkspaceItemId,
+                            WorkspaceFingerprint = proxyProfile.WorkspaceFingerprint,
+                            ClientMachine = Environment.MachineName,
+                        },
+                        blocks,
+                        proxyProfile.VmsFloorHosts,
+                        caTrust);
+                    proxyClaimPath = StartListenerOnLeasedPort(listener, lease, claimPath, id);
+                    proxyArguments = ProxyBrowserArguments.For(listener.Port);
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(BrowserManager),
+                        $"Proxied browser {id}: loopback listener on 127.0.0.1:{listener.Port} ({(proxyClaimPath != null ? "claim owner" : "ephemeral fallback - no claim")}), {proxyProfile.CanonicalTargets.Count} allowlisted target(s), boundary profile '{proxyUserDataFolder}'.");
+                }
             }
 
             try
@@ -107,12 +142,68 @@ namespace WebContent.Client
                 browser.ProxyCaTrust = caTrust;
                 browser.ProxyBrowserArguments = proxyArguments;
                 browser.ProxyUserDataFolder = proxyUserDataFolder;
+                browser.ProxyClaimPath = proxyClaimPath;
+                browser.ProxyViewTargets = proxyProfile?.CanonicalTargets;
+                browser.ProxyViewFloorHosts = proxyProfile?.VmsFloorHosts;
                 return browser;
             }
             catch (Exception)
             {
                 listener?.Stop();
+                if (proxyClaimPath != null)
+                {
+                    // A browser that was never created must not leave a claim naming a port
+                    // nobody will serve.
+                    _leases.Release(proxyClaimPath);
+                }
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Starts the owner's listener on the EXACT port its claim published - the joiner bakes
+        /// that port into its identical argument, so a bind elsewhere would strand every joiner.
+        /// The reservation is a two-step race against processes outside the boundary (any local
+        /// process may grab the freed port between probe and bind); on a refused bind the claim
+        /// is released and the listener falls back to today's ephemeral posture, so a published
+        /// claim never describes a port that was never bound. Returns the claim path to track
+        /// for teardown, or null when this browser runs unclaimed.
+        /// </summary>
+        private static string StartListenerOnLeasedPort(LoopbackProxyListener listener, ProxyListenerLease lease, string claimPath, Guid id)
+        {
+            if (lease.Role == ProxyListenerLeaseRole.Owner)
+            {
+                try
+                {
+                    listener.Start(lease.Port);
+                    return claimPath;
+                }
+                catch (SocketException ex)
+                {
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(BrowserManager),
+                        $"Proxied browser {id}: the claimed loopback port {lease.Port} refused to bind ({ex.Message}); releasing the claim and binding an ephemeral port instead - a claim must never name a port nobody serves.");
+                    _leases.Release(claimPath);
+                }
+            }
+
+            listener.Start();
+            return null;
+        }
+
+        /// <summary>
+        /// Drops this browser's claim slot when the browser owned one (teardown paths). A joined
+        /// browser owns nothing to release; a browser whose slot was already taken over keeps the
+        /// takeover intact (<see cref="ProxyListenerLeaseProvider.ReleaseOwnClaimFile"/>).
+        /// </summary>
+        private static void ReleaseOwnClaim(BrowserInstance browser)
+        {
+            var claimPath = browser.ProxyClaimPath;
+            browser.ProxyClaimPath = null;
+            if (claimPath != null)
+            {
+                _leases.Release(claimPath);
             }
         }
 
@@ -144,6 +235,10 @@ namespace WebContent.Client
                 if (browser.ProxyBrowserArguments != null)
                 {
                     browser.ProxyListener?.UpdateTargets(proxyProfile.CanonicalTargets, proxyProfile.VmsFloorHosts);
+                    // #95: a JOINED browser has no listener of its own to update; keep its view-side
+                    // #88 gate copies current so the gate follows a target edit without a re-selection.
+                    browser.ProxyViewTargets = proxyProfile.CanonicalTargets;
+                    browser.ProxyViewFloorHosts = proxyProfile.VmsFloorHosts;
                     return false;
                 }
 
@@ -160,6 +255,31 @@ namespace WebContent.Client
                 var caTrust = browser.ProxyCaTrust ?? new ProxyCaTrustState();
                 browser.ProxyCaTrust = caTrust;
 
+                // #95: a proxy toggled back on mid-session consults the SAME claim as creation -
+                // if another process owns this boundary's listener right now, join it instead of
+                // binding a second one onto the shared profile.
+                browser.ProxyUserDataFolder = ProxiedUserDataFolder(browser.Id);
+                var claimPath = BrowserProfileIdentity.GetListenerClaimPath(browser.Id);
+                var lease = _leases.Acquire(claimPath, browser.Id, ProxyBrowserArguments.PortIndependentFingerprint());
+                foreach (var audit in lease.AuditLines)
+                {
+                    EnvironmentManager.Instance.Log(true, nameof(BrowserManager), audit);
+                }
+
+                if (lease.Role == ProxyListenerLeaseRole.Joined)
+                {
+                    browser.ProxyListener = null;
+                    browser.ProxyClaimPath = null;
+                    browser.ProxyBrowserArguments = ProxyBrowserArguments.For(lease.Port);
+                    browser.ProxyViewTargets = proxyProfile.CanonicalTargets;
+                    browser.ProxyViewFloorHosts = proxyProfile.VmsFloorHosts;
+                    EnvironmentManager.Instance.Log(
+                        false,
+                        nameof(BrowserManager),
+                        $"Proxied browser {browser.Id} rewired to join the boundary owner's loopback listener 127.0.0.1:{lease.Port} (proxy enabled since the browser was created), boundary profile '{browser.ProxyUserDataFolder}'.");
+                    return true;
+                }
+
                 var listener = new LoopbackProxyListener(
                     proxyProfile.CanonicalTargets,
                     FetchThroughMessaging,
@@ -172,14 +292,15 @@ namespace WebContent.Client
                     tally,
                     proxyProfile.VmsFloorHosts,
                     caTrust);
-                listener.Start();
+                browser.ProxyClaimPath = StartListenerOnLeasedPort(listener, lease, claimPath, browser.Id);
                 browser.ProxyListener = listener;
                 browser.ProxyBrowserArguments = ProxyBrowserArguments.For(listener.Port);
-                browser.ProxyUserDataFolder = ProxiedUserDataFolder(browser.Id);
+                browser.ProxyViewTargets = proxyProfile.CanonicalTargets;
+                browser.ProxyViewFloorHosts = proxyProfile.VmsFloorHosts;
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(BrowserManager),
-                    $"Proxied browser {browser.Id} rewired to loopback listener 127.0.0.1:{listener.Port} (proxy enabled since the browser was created), boundary profile '{browser.ProxyUserDataFolder}'.");
+                    $"Proxied browser {browser.Id} rewired to loopback listener 127.0.0.1:{listener.Port} (proxy enabled since the browser was created, {(browser.ProxyClaimPath != null ? "claim owner" : "ephemeral fallback - no claim")}), boundary profile '{browser.ProxyUserDataFolder}'.");
                 return true;
             }
 
@@ -192,7 +313,12 @@ namespace WebContent.Client
             browser.ProxyListener = null;
             browser.ProxyBrowserArguments = null;
             browser.ProxyUserDataFolder = null;
+            browser.ProxyViewTargets = null;
+            browser.ProxyViewFloorHosts = null;
             stopped?.Stop();
+            // #95: a stopped owner must not leave its claim naming a dead port for another process
+            // to join (or stall on); a joined browser owns nothing and releases nothing.
+            ReleaseOwnClaim(browser);
             browser.ProxyBlocks?.Reset();
             // #72: no loopback listener, no deployment CA behind this view - the banner can
             // never honestly claim "the proxy certificate is not trusted" for a direct browser.
@@ -251,6 +377,9 @@ namespace WebContent.Client
                 try
                 {
                     browser?.ProxyListener?.Stop();
+                    // #95: with the listener stopped the published port is dead; release the
+                    // claim now instead of leaving joiners to probe a corpse.
+                    ReleaseOwnClaim(browser);
                 }
                 catch (Exception ex)
                 {

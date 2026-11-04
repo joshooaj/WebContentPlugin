@@ -161,10 +161,15 @@ namespace WebContent.Client
             _vmsFloorHosts = vmsFloorHosts == null ? new string[0] : (IReadOnlyList<string>)new List<string>(vmsFloorHosts);
         }
 
-        /// <summary>Bind 127.0.0.1:0 and start accepting. The assigned port is available after.</summary>
-        internal void Start()
+        /// <summary>
+        /// Bind 127.0.0.1:&lt;port&gt; (0 = OS-assigned ephemeral port) and start accepting. The
+        /// assigned port is available after. #95: a claim OWNER binds the exact port its published
+        /// claim names — joiners bake that port into their identical --proxy-server argument, so
+        /// the real bind MUST land on the claimed port.
+        /// </summary>
+        internal void Start(int port = 0)
         {
-            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener = new TcpListener(IPAddress.Loopback, port);
             _listener.Start();
             Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
             _ = Task.Run(AcceptLoopAsync);

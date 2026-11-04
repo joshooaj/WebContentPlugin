@@ -101,6 +101,22 @@ namespace WebContent.Client
         }
 
         /// <summary>
+        /// ADR-0004 (#95): the listener-claim slot for a proxied browser - the SAME boundary legs
+        /// as <see cref="GetProxiedUserDataFolder"/> (Windows user, XProtect identity, VMS server),
+        /// composed by <see cref="BrowserProfileKey.ComposeListenerClaimPath"/> as the profile
+        /// folder's <c>.claim</c> sibling. Deriving both from identical legs is what fences a
+        /// joined process to the very profile folder its browser attaches to.
+        /// </summary>
+        internal static string GetListenerClaimPath(Guid browserId)
+        {
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                BrowserProfileKey.DataFolderRootName);
+
+            return BrowserProfileKey.ComposeListenerClaimPath(root, GetCurrentUserKey(), GetCurrentServerKey(), browserId);
+        }
+
+        /// <summary>
         /// Returns the WebView2 <c>UserDataFolder</c> to use, scoped to the current XProtect
         /// user. Falls back to the shared root folder (with a logged warning) when the
         /// identity is unavailable, e.g. before login is established.
