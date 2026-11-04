@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -37,6 +38,7 @@ namespace WebContent
         private bool _workspaceLoadSucceeded;
         private Timer _workspaceRetryTimer;
         private DateTime _nextProxyChannelRetryUtc = DateTime.MinValue;
+        private Timer _profileSweepTimer;
 
         public override Guid Id => PluginId;
 
@@ -168,6 +170,9 @@ namespace WebContent
                     RegisterWorkspaceRecoveryReceivers();
                     StartWorkspaceRetryTimer();
                     EnsureWorkspacesLoaded(force: false, reason: "Smart Client Init");
+                    // #94 (ADR-0004 consequence): reap orphaned proxied profile folders and stale
+                    // listener claims off the UI thread; never fatal to the view.
+                    ScheduleProxiedProfileSweep();
                     break;
                 case EnvironmentType.Standalone:
                 case EnvironmentType.ManagementServer:
@@ -185,6 +190,7 @@ namespace WebContent
         public override async void Close()
         {
             StopWorkspaceRetryTimer();
+            StopProxiedProfileSweepTimer();
             UnregisterWorkspaceRecoveryReceivers();
             BrowserManager.StopAllProxyListeners();
 
@@ -258,6 +264,102 @@ namespace WebContent
 
             _nextProxyChannelRetryUtc = now.AddSeconds(30);
             ProvisionProxyFetchClient();
+        }
+
+        /// <summary>
+        /// #94 (ADR-0004: the proxied profile folders need an owner for disk cleanup, which
+        /// nothing did today): a bounded startup sweep reaps orphaned <c>proxied-*</c> profile
+        /// folders past the retention window and stale listener-claim files under this Windows
+        /// user's browser data root. One-shot timer, ten seconds in: the disk walk NEVER runs on
+        /// the startup UI thread, and every failure path is journalled - a throwing sweep can
+        /// never break a view. A folder a live browser holds is skipped, never forced.
+        /// </summary>
+        private void ScheduleProxiedProfileSweep()
+        {
+            if (_profileSweepTimer != null)
+            {
+                return;
+            }
+
+            _profileSweepTimer = new Timer(ProfileSweepCallback, null, TimeSpan.FromSeconds(10), Timeout.InfiniteTimeSpan);
+        }
+
+        private void StopProxiedProfileSweepTimer()
+        {
+            var timer = _profileSweepTimer;
+            if (timer == null)
+            {
+                return;
+            }
+
+            _profileSweepTimer = null;
+            timer.Dispose();
+        }
+
+        private void ProfileSweepCallback(object state)
+        {
+            try
+            {
+                var dataRoot = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    BrowserProfileKey.DataFolderRootName);
+
+                var processWitness = new BrowserProcessLockWitness();
+                var sweep = new ProfileSweep(browserLockHeld: folder =>
+                    ProfileSweep.BrowserLockFileHeld(folder) || processWitness.NamesFolder(folder));
+                var report = sweep.Run(dataRoot);
+
+                if (processWitness.ProbeError != null)
+                {
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(ProfileSweep),
+                        "The browser-process lock witness could not read process command lines (" + processWitness.ProbeError +
+                        "); the sweep ran on the lockfile probe and the never-force delete failure alone.");
+                }
+
+                foreach (var line in report.LogLines)
+                {
+                    EnvironmentManager.Instance.Log(false, nameof(ProfileSweep), line);
+                }
+
+                EnvironmentManager.Instance.Log(
+                    false,
+                    nameof(ProfileSweep),
+                    "Startup proxied-profile sweep: " + report.ProxiedFoldersSeen + " proxied folder(s) scanned, " +
+                    report.ProxiedFoldersReaped + " reaped, " + report.ProxiedFoldersSkippedLocked + " skipped locked, " +
+                    report.ClaimFilesReaped + " claim file(s) and " + report.ClaimTempFilesReaped + " claim temp file(s) reaped " +
+                    "(retention " + ProfileSweep.DefaultFolderRetention.TotalDays + " day(s), data root '" + dataRoot + "').");
+            }
+            catch (Exception ex)
+            {
+                // Never fatal to any view: the sweep is disk hygiene, not view plumbing.
+                try
+                {
+                    EnvironmentManager.Instance.Log(
+                        true,
+                        nameof(ProfileSweep),
+                        "Startup proxied-profile sweep failed (ignored; it reruns at next startup): " + ex);
+                }
+                catch (Exception)
+                {
+                }
+            }
+            finally
+            {
+                var timer = _profileSweepTimer;
+                _profileSweepTimer = null;
+                if (timer != null)
+                {
+                    try
+                    {
+                        timer.Dispose();
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
         }
 
         private void RegisterWorkspaceRecoveryReceivers()

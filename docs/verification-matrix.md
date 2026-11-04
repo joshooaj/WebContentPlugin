@@ -67,6 +67,7 @@ is not evidence the plugin never ran.
 | Managed workspaces: security-relevant Smart Client view settings locked with "Managed by Administrator", cosmetic settings stay per-instance editable (locked-key overrides can never reach runtime) | #71 | `WorkspaceSettingLocksTests` (managed decision from the persisted WorkspaceId/DefinitionFingerprint; the locked set is exactly HomeAddress + legacy Address + ProxyEnabled + ProxyTargets, cosmetic/navigation keys never locked, identity keys never settings; seed decision table - locked/identity keys always enforced, cosmetic keys take the definition as initial value or re-initialise on definition change but a per-instance override survives inside an unchanged definition), `WorkspaceInstancePropertiesTests` #71 rows (hand-edited HomeAddress overwritten; definition proxy posture + allowlist enforced over stored values; cosmetic override kept, absent cosmetic seeded, changed definition re-initialises it; identity/fingerprint always enforced), `ManagedViewPropertiesPaneGuardTests` (home TextBox pins IsEnabled/ToolTip bindings + probe AutomationIds; both admin notices render only for managed items via one converter; NO cosmetic control declares an IsEnabled binding) | See SC-9 below - **live row PASSED 2026-11-03** (run `20261103-043150`, drop `3C777113…F63475`): Home renders disabled with the pinned URL visible + the admin note under Home AND Proxy, the checkbox stays enabled and its per-instance ON-state survives a full exit/re-enter-setup re-seed, locks still locked afterwards, `WebContent workspace seed:` marker in MIPLog; the standalone zero-change branch is pinned by the unit table + pane guard (no standalone view item in the lab) |
 | Untrusted deployment CA: banner for every user on proxied views, setup-mode-only elevated fix through a thumbprint-locked bundled helper, mid-session heal without restart (#72) | #72 | `ProxyCaTrustStateTests` (posture holder: Changed fires only on real flips, case-insensitive thumbprint equality, proxy-off Clear, throwing subscriber swallowed) + `ProxyLoopbackTlsTrustPostureTests` (every mint publishes from the LOCAL root-store probe not the wire, cache short-circuits republication, `InvalidateLeafCache` re-mint flips the posture with no restart); `ProxyTrustHelperTests` (usage matrix, unreadable 3, garbage/oversize/empty refused 2 before parsing, thumbprint mismatch = store never touched, matched = exactly one import with the verified cert, store exit propagates); `ProxyCaTrustBannerWiringGuardTests` (banner elements + Collapsed defaults, setup-only fix gate, `Verb="runas"` + NO in-process LocalMachine write in the view code, 1223 quiet + independent re-verification, invalidate+reload on confirmed fix, navigation re-check heals external fixes, drop ships but never links the helper) | See SC-10 below - **live rows PASSED 2026-11-03** (runs `20261103-053747`/`20261103-053809`/`20261103-053825`, drop `01D9D8A8…3789` both machines): deployed helper refuses every negative path with the pinned exit codes and zero dialogs (incl. the unprivileged store refusal = 4); the helper's FULL success path verified end-to-end ON the Event Server (import -> present -> remove -> absent, self-cleaned); trusted lab state shows no CA chrome on the live proxied view. The untrusted-live row (SC-10 row 4) is an elevated human step: both root stores refuse unattended removal on the client machine |
 | Proxied browser profiles keyed to the FULL proxied boundary — (Windows user, XProtect identity, VMS server) — so two Smart Clients on one machine logged into different VMS servers can never share a proxied profile or fetch channel (ADR-0004 child A; the claim/joining/handoff children are #93/#91, folder sweeping #94) | #92 | `BrowserProfileBoundaryTests` (server-key table: host+port fold, host case-insensitivity vs port sensitivity, sanitized graffiti, empty-host empty key; path table: same tuple identical path, SAME identity + DIFFERENT server different path, different browser id different path, exact `<root>\<user>\server-<key>\proxied-<guid D>` shape, lowercase-D leaf pin, all three DeriveUserKey fallback legs still name their user segment, missing-user keeps server separation at root level, missing-server uses the one `server-unknown` placeholder that never matches a resolved server, hostile `..\..\..\evil` legs stay three sanitized segments under the root, the `server-` prefix can never BE a traversal token) | See SC-11 below: the live proxied browser process's OWN `--user-data-dir` command line carries the boundary shape naming the configured VMS host, and no old-shape folder is written during the run |
+| Startup sweep reaps orphaned proxied profile folders and stale listener-claim files under the plugin data root — off the UI thread, journalled, never fatal, live browser's folder never forced (ADR-0004 consequence; #94) | #94 | `ProfileSweepCoreTests` (pure decision table: fresh keep / stale reap / locked skip / undetermined-activity keep / retention boundary, claim rows delegating staleness to the #93 seam — dead owner / refusing port / corrupt / foreign schema / cross-id reap, live owner + own-pid claim keep, sibling-gone reap, temp-litter age table, shape-recognition table: proxied/server/claim/claim-temp names, non-shape names invisible to the sweep); `ProfileSweepDiskTests` (same rows over a real temp directory: old-shape + boundary-shape reaps, EBWebView tree never descended, root-level fallback walk, claim/temp outcomes, once-per-deletion log lines, own-pid live claim kept, hostile foreign files under the root untouched, lockfile probe held only while an exclusive open fails); `ProfileSweepStartupGuardTests` (Init schedules the sweep on a one-shot threadpool timer and runs nothing synchronously, the callback swallows and journals every failure and composes BOTH lock witnesses, the timer is torn down in finally plus stopped in `Close()`, both sweep files cross into the test Compile list while the WMI witness + `System.Management` stay plugin-only) | See SC-12 below — **live row PASSED 2026-11-03** (run `20261103-220433`): a 12-row decoy table planted under the REAL data root resolves exactly per the decision table in the live Smart Client's startup sweep, journal line `11 scanned, 2 reaped, 1 skipped locked, 3 claims + 1 temp reaped` in MIPLog.txt, and real user state untouched |
 
 ## Manual host checks
 
@@ -1719,6 +1720,64 @@ that run's journal already showed the boundary folder being CREATED; `20261103-2
 WebView2 RUNTIME process names its own `<requested UDF>\EBWebView` subfolder in `--user-data-dir`,
 so the row now strips that suffix before shape-matching (pitfall recorded for #93/#94: claim files
 and sweeps live under the plugin-requested UDF, never inside `EBWebView`).
+
+### SC-12 Startup sweep of orphaned proxied profiles and stale claims (#94, ADR-0004)
+
+ADR-0004 named the consequence #94 closes: with per-boundary proxied folders, on-disk litter
+needs an owner for cleanup - the pre-#92 old-shape folders left by #92's re-keying, folder trees
+whose browser never returns, and listener-claim files (#93) whose owner process died before any
+join could reap them. Nothing swept any of it. Now each Smart Client startup runs ONE bounded
+sweep ten seconds after plugin Init, on the threadpool (never the UI thread), over ONLY the
+plugin's own shape classes under this Windows user's data root: `<user>\proxied-*` (old shape)
+and `<user>\server-<leg>\proxied-*` (boundary shape) folders past a 30-day retention, their
+sibling `.claim` slots (staleness decided by the SAME #93 seam: dead owner pid / refusing port /
+corrupt / foreign schema / cross-browser-id / sibling folder gone), and `.claim.tmp-*` litter
+older than 24 h. A folder a live browser holds is skipped, never forced - the lockfile
+exclusive-open probe AND a once-per-sweep `Win32_Process` command-line witness (the same witness
+SC-8/SC-11 trust) both feed that, and the final arbiter is the delete itself: a refusal is
+journalled, never retried, never fatal. The non-proxied `EBWebView` tree and every non-shape
+file or folder are invisible to the walk. Every reap/skip logs exactly once under source
+`ProfileSweep`; the sweep summary line names the counts and the retention.
+
+Automated: `ProfileSweepCoreTests` - the pure decision table with no FS, process, or socket
+(fresh keep / stale reap / locked skip whatever its age / undetermined activity keep / boundary
+and future timestamps; claim rows delegating staleness to `ListenerClaimCore.Decide`; temp-litter
+age; shape recognition that keeps every non-plugin name invisible). `ProfileSweepDiskTests` -
+the same rows over a real temp directory (both folder shapes reaped, EBWebView never descended,
+root-level fallback walk, sibling-gone claim reap, own-pid claim never reaped, hostile foreign
+files left alone, lockfile probe held only while an exclusive open fails).
+`ProfileSweepStartupGuardTests` - the wiring shape (Init schedules only, one-shot threadpool
+timer, callback swallows+journals everything, both witnesses composed, timer stopped in `Close()`,
+both sweep files in the test Compile list while the WMI witness + `System.Management` stay
+plugin-only).
+
+Live probe: `ScProfileSweepProbeTests.ProbeProxiedProfileSweepStartup` (unattended, mutates ONLY
+its own `probe-94-sweep-user` folder under the real data root, torn down in `finally`) - plants a
+12-row decoy table (old-shape stale, boundary-shape stale, fresh folder, ancient non-proxied
+EBWebView tree, dead-owner / live-owner / cross-id / corrupt claims each beside a FRESH folder,
+old + fresh claim-temp litter, a stale folder whose `EBWebView\lockfile` the probe process holds
+exclusively), launches the real Smart Client against the live VMS, and reads every outcome back
+from disk: the four stale folders/claims and the old litter are gone, everything live/fresh/non-
+shape survives, and the Smart Client MIP log (read with `FileShare.ReadWrite` - the running
+client holds MIPLog.txt; pitfall recorded) carries the `ProfileSweep` lines.
+
+```powershell
+Invoke-psake -taskList TestUI -parameters @{ TestFilter = 'FullyQualifiedName~ScProfileSweepProbeTests' }
+```
+
+**Live record (BEAST, 2026-11-03):** **PASSED** (final run `20261103-220923`, drop deployed via
+`Build, DeployLocally`). All 12 decoy rows resolved per the decision table; the journal line:
+`Startup proxied-profile sweep: 11 proxied folder(s) scanned, 2 reaped, 1 skipped locked, 3 claim
+file(s) and 1 claim temp file(s) reaped (retention 30 day(s), data root ...SmartClient.WebContentData)`.
+Real user state untouched by the same run: the two genuine pre-#92 orphans under the live user
+key (last writes 10-30/10-31) were KEPT - inside retention - and only sweep past 11-30 will take
+them; the live `server-vms.joshooaj.com-443` boundary folder and both `EBWebView` trees stood
+untouched. Two earlier runs were harness-side only (disclosed): `20261103-220054` planted the
+held lockfile with a FRESH timestamp, so row (k) was kept by the freshness rule instead of the
+lock witness - the lockfile and its parents are now stamped stale, and the following runs journal
+`1 skipped locked` naming that folder; `20261103-220753` read MIPLog.txt with `File.ReadLines`
+sharing, which the running client's logger refuses, so the probe saw "no sweep lines" - fixed to
+the ReadWrite bystander open above.
 
 ## Installer checks
 

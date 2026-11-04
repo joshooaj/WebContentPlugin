@@ -25,6 +25,8 @@
     <Compile Include="..\WebContent\Client\BrowserProfileKey.cs" Link="BrowserProfileKey.cs" />
     <Compile Include="..\WebContent\Client\ListenerClaim.cs" Link="ListenerClaim.cs" />
     <Compile Include="..\WebContent\Client\ListenerClaimStore.cs" Link="ListenerClaimStore.cs" />
+    <Compile Include="..\WebContent\Client\ProfileSweepCore.cs" Link="ProfileSweepCore.cs" />
+    <Compile Include="..\WebContent\Client\ProfileSweep.cs" Link="ProfileSweep.cs" />
     <Compile Include="..\WebContent\Client\BrowserRegistry.cs" Link="BrowserRegistry.cs" />
     <Compile Include="..\WebContent\Client\CallbackOwnership.cs" Link="CallbackOwnership.cs" />
     <Compile Include="..\WebContent\Client\WorkspaceDefinition.cs" Link="WorkspaceDefinition.cs" />
