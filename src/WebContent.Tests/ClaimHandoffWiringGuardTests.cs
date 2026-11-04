@@ -61,6 +61,13 @@ namespace WebContent.Tests
 
             // WebView work is dispatched to the UI thread - the timer thread never touches views.
             Assert.Contains("app.Dispatcher.BeginInvoke(new Action(() => PerformHandoffRewire(browser, claimPath)))", collapsed);
+
+            // (measured live, #96) the view-liveness read the watch performs FROM THE TIMER THREAD
+            // hops through the control's dispatcher - a raw CoreWebView2 read off the owning
+            // thread throws VerifyAccess and silently kills every watch tick.
+            var instance = Collapse(ReadClient("BrowserInstance.cs"));
+            Assert.Contains("web.Dispatcher.CheckAccess()", instance);
+            Assert.Contains("web.Dispatcher.Invoke(() => IsInitialized && web.CoreWebView2 != null && InitFailure == null)", instance);
         }
 
         [Fact]

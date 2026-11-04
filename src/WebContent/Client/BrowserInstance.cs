@@ -227,12 +227,29 @@ namespace WebContent.Client
         /// standing)? The claim watch's retry/give-up rows read exactly this; a deliberately
         /// closed view answers false but never carries <see cref="InitFailure"/>, so the watch
         /// distinguishes "creation failed" from "user closed it".
+        ///
+        /// THREADING (measured live): the claim watch calls this from its TIMER thread, and
+        /// reading CoreWebView2 off the owning thread throws InvalidOperationException(VerifyAccess) -
+        /// the whole watch pass would die every tick. Off the UI thread the read hops through the
+        /// control's dispatcher; it is one cheap property read per browser per tick and the UI
+        /// thread never waits on the watch, so it cannot deadlock.
         /// </summary>
         internal bool IsViewLive()
         {
             try
             {
-                return IsInitialized && WebView != null && WebView.CoreWebView2 != null && InitFailure == null;
+                var web = WebView;
+                if (web == null)
+                {
+                    return false;
+                }
+
+                if (web.Dispatcher.CheckAccess())
+                {
+                    return IsInitialized && web.CoreWebView2 != null && InitFailure == null;
+                }
+
+                return web.Dispatcher.Invoke(() => IsInitialized && web.CoreWebView2 != null && InitFailure == null);
             }
             catch (ObjectDisposedException)
             {
