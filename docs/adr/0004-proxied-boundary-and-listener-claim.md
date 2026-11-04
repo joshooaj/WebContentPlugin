@@ -1,6 +1,6 @@
 # ADR-0004: Scope proxied browser state and listener ownership to the proxied boundary
 
-- **Status:** Accepted (re-claim/handoff semantics pending #90)
+- **Status:** Accepted (point 5 settled by #90's measurements, 2026-11-03)
 - **Tickets:** [joshooaj/WebContentPlugin#87] (symptom and interim fix), [joshooaj/WebContentPlugin#90] (browser-process lifetime probe), [joshooaj/WebContentPlugin#91] (enablement) — builds on ADR-0001, ADR-0002, ADR-0003
 
 Proxied views run a loopback listener whose port is baked into the WebView2 browser arguments, while the proxied user-data folder is deterministic per workspace item. WebView2 shares one user-data folder, and one browser process, across host processes only when the environment options match exactly, so a second Smart Client process on the same machine fails initialization and shows a blank view (#87). We decided to *enable* that second process rather than fragment the profile: one shared proxied profile per workspace item, with ownership made explicit by a claim record instead of implicit in process race order. Cross-process profile sharing (cookies, cache, logins) is then free, which fragmenting the profile would throw away and laboriously rebuild.
@@ -13,7 +13,7 @@ The sharing is fenced by the **proxied boundary**: the (Windows user, XProtect i
 2. **Key the proxied profile and the listener claim on the full proxied boundary** (Windows user, already implicit in the per-user data root, plus XProtect identity plus VMS server). Crossing the boundary is impossible by construction, so a client can never ride another identity's or another server's proxy session.
 3. **Keep the ephemeral loopback port; publish a claim.** The owning process records browser id, port, owning process id, and config fingerprint under the boundary-scoped data root, written atomically. A joining process reads the claim and composes the identical `--proxy-server` argument rather than binding its own listener. A claim whose owner process is gone or whose port is unresponsive is stale.
 4. **Accept the within-boundary consequence.** Inside one boundary every proxied fetch rides the owner process's Event Server connection, and #69 diagnostics show one session per proxied profile rather than per client process. This is deliberate, not an oversight.
-5. **Defer the handoff.** What happens when the owner exits (force re-create, re-claim order) waits for #90's measured browser-process lifetime behavior. Until enablement lands, #87's in-view "another Smart Client session owns this profile" error is the visible contract.
+5. **Handoff (measured by #90).** The browser process survives the owner host's clean exit AND crash while any attached host remains, so at handoff the views are alive but their baked-in port is dead: the rule is stale claim (dead pid / unresponsive port) -> one survivor re-claims a fresh listener, the claim epoch bumps, attached processes release their proxied WebViews, and the browser process recycles to carry the new port. A fresh init respawns a destroyed collection in ~13 s measured. #87's in-view ownership error covers the window. Until enablement lands, #87's error is also the whole contract.
 
 ## Consequences
 
