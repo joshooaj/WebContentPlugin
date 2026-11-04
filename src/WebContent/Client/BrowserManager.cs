@@ -80,7 +80,7 @@ namespace WebContent.Client
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(BrowserManager),
-                    $"Proxied browser {id}: loopback listener on 127.0.0.1:{listener.Port}, {proxyProfile.CanonicalTargets.Count} allowlisted target(s).");
+                    $"Proxied browser {id}: loopback listener on 127.0.0.1:{listener.Port}, {proxyProfile.CanonicalTargets.Count} allowlisted target(s), boundary profile '{proxyUserDataFolder}'.");
             }
 
             try
@@ -179,7 +179,7 @@ namespace WebContent.Client
                 EnvironmentManager.Instance.Log(
                     false,
                     nameof(BrowserManager),
-                    $"Proxied browser {browser.Id} rewired to loopback listener 127.0.0.1:{listener.Port} (proxy enabled since the browser was created).");
+                    $"Proxied browser {browser.Id} rewired to loopback listener 127.0.0.1:{listener.Port} (proxy enabled since the browser was created), boundary profile '{browser.ProxyUserDataFolder}'.");
                 return true;
             }
 
@@ -204,9 +204,17 @@ namespace WebContent.Client
             return true;
         }
 
+        /// <summary>
+        /// ADR-0004 (#92): the proxied profile folder is keyed to the FULL proxied boundary
+        /// (Windows user + XProtect identity + VMS server), not just the user leg — two Smart
+        /// Clients logged into different VMS servers never share a proxied profile or fetch
+        /// channel, even when the identity value itself collides. The shape is
+        /// <c>&lt;per-user root&gt;\server-&lt;server key&gt;\proxied-&lt;browser id&gt;</c>;
+        /// the non-proxied profile key stays untouched.
+        /// </summary>
         private static string ProxiedUserDataFolder(Guid id)
         {
-            return System.IO.Path.Combine(BrowserProfileIdentity.GetUserDataFolder(), "proxied-" + id);
+            return BrowserProfileIdentity.GetProxiedUserDataFolder(id);
         }
 
         /// <summary>
