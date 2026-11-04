@@ -20,7 +20,7 @@ namespace WebContent.Tests
         [Fact]
         public void Serialize_Parse_Roundtrips_Every_Field()
         {
-            var claim = new ListenerClaim(BrowserId, 49321, 4242, "fp-abc-123", 1762000000123L);
+            var claim = new ListenerClaim(BrowserId, 49321, 4242, "fp-abc-123", 1762000000123L, 7);
 
             var read = ListenerClaim.Read(claim.Serialize());
 
@@ -30,14 +30,15 @@ namespace WebContent.Tests
             Assert.Equal(4242, read.Claim.OwnerPid);
             Assert.Equal("fp-abc-123", read.Claim.ConfigFingerprint);
             Assert.Equal(1762000000123L, read.Claim.ClaimedAtUnixMs);
+            Assert.Equal(7, read.Claim.Epoch);
         }
 
         [Fact]
         public void Foreign_Schema_Version_Is_Untrusted_Never_A_Crash()
         {
             // A future build's version: an old reader must treat it as untrusted, never brick.
-            var future = "webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") +
-                         "\nport=49321\nownerPid=4242\nconfigFingerprint=fp\nclaimedAtUnixMs=1\n";
+            var future = "webcontent-listener-claim/3\nbrowserId=" + BrowserId.ToString("D") +
+                         "\nport=49321\nownerPid=4242\nconfigFingerprint=fp\nclaimedAtUnixMs=1\nepoch=1\n";
 
             var read = ListenerClaim.Read(future);
 
@@ -46,12 +47,27 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void Pre_Epoch_Schema_One_Is_An_Older_Version_Not_Trusted()
+        {
+            // #96: schema v1 had no epoch. Per the versioning contract an OLDER schema parses
+            // exactly like a foreign one - untrusted, treated as stale with an audit - which is
+            // how a build predating the handoff generation is displaced on first consult.
+            var v1 = "webcontent-listener-claim/1\nbrowserId=" + BrowserId.ToString("D") +
+                     "\nport=49321\nownerPid=4242\nconfigFingerprint=fp\nclaimedAtUnixMs=1\n";
+
+            var read = ListenerClaim.Read(v1);
+
+            Assert.Equal(ListenerClaimReadKind.Untrusted, read.Kind);
+            Assert.Contains("version", read.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public void Unknown_Future_Fields_In_The_Current_Version_Are_Tolerated()
         {
-            // The version header is the compatibility gate; extra fields inside version 1 must not
-            // brick the reader (that is what "future fields don't brick old readers" means).
-            var withFutureField = "webcontent-listener-claim/1\nbrowserId=" + BrowserId.ToString("D") +
-                                  "\nport=49321\nownerPid=4242\nconfigFingerprint=fp\nclaimedAtUnixMs=1\nepoch=7\n";
+            // The version header is the compatibility gate; extra fields inside the known version
+            // must not brick the reader (that is what "future fields don't brick old readers" means).
+            var withFutureField = "webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") +
+                                  "\nport=49321\nownerPid=4242\nconfigFingerprint=fp\nclaimedAtUnixMs=1\nepoch=7\nsomeFutureField=hello\n";
 
             var read = ListenerClaim.Read(withFutureField);
 
@@ -64,25 +80,41 @@ namespace WebContent.Tests
             Assert.Equal(ListenerClaimReadKind.Untrusted, ListenerClaim.Read("this is not a claim").Kind);
             Assert.Equal(ListenerClaimReadKind.Untrusted, ListenerClaim.Read(string.Empty).Kind);
 
-            var missingField = "webcontent-listener-claim/1\nport=49321\nownerPid=4242\n";
+            var missingField = "webcontent-listener-claim/2\nport=49321\nownerPid=4242\n";
             var read = ListenerClaim.Read(missingField);
             Assert.Equal(ListenerClaimReadKind.Untrusted, read.Kind);
             Assert.Contains("missing", read.Reason, StringComparison.OrdinalIgnoreCase);
+
+            // #96: an epoch-less body inside schema 2 is a missing REQUIRED field, not a default.
+            var missingEpoch = "webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") +
+                               "\nport=49321\nownerPid=4242\nconfigFingerprint=fp\nclaimedAtUnixMs=1\n";
+            var epochRead = ListenerClaim.Read(missingEpoch);
+            Assert.Equal(ListenerClaimReadKind.Untrusted, epochRead.Kind);
+            Assert.Contains("missing", epochRead.Reason, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
         public void Malformed_Values_Are_Untrusted()
         {
             Assert.Equal(ListenerClaimReadKind.Untrusted,
-                ListenerClaim.Read("webcontent-listener-claim/1\nbrowserId=not-a-guid\nport=1\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\n").Kind);
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=not-a-guid\nport=1\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=1\n").Kind);
             Assert.Equal(ListenerClaimReadKind.Untrusted,
-                ListenerClaim.Read("webcontent-listener-claim/1\nbrowserId=" + BrowserId.ToString("D") + "\nport=99999\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\n").Kind);
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") + "\nport=99999\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=1\n").Kind);
             Assert.Equal(ListenerClaimReadKind.Untrusted,
-                ListenerClaim.Read("webcontent-listener-claim/1\nbrowserId=" + BrowserId.ToString("D") + "\nport=-5\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\n").Kind);
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") + "\nport=-5\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=1\n").Kind);
             Assert.Equal(ListenerClaimReadKind.Untrusted,
-                ListenerClaim.Read("webcontent-listener-claim/1\nbrowserId=" + BrowserId.ToString("D") + "\nport=1\nownerPid=0\nconfigFingerprint=x\nclaimedAtUnixMs=0\n").Kind);
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") + "\nport=1\nownerPid=0\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=1\n").Kind);
             Assert.Equal(ListenerClaimReadKind.Untrusted,
-                ListenerClaim.Read("webcontent-listener-claim/1\nbrowserId=" + BrowserId.ToString("D") + "\nport=1\nport=2\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\n").Kind);
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") + "\nport=1\nport=2\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=1\n").Kind);
+
+            // #96: the epoch must be a positive count - zero, negatives, and garbage are all
+            // unusable generations (a takeover can never "reset" the boundary's history).
+            Assert.Equal(ListenerClaimReadKind.Untrusted,
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") + "\nport=1\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=0\n").Kind);
+            Assert.Equal(ListenerClaimReadKind.Untrusted,
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") + "\nport=1\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=-3\n").Kind);
+            Assert.Equal(ListenerClaimReadKind.Untrusted,
+                ListenerClaim.Read("webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") + "\nport=1\nownerPid=1\nconfigFingerprint=x\nclaimedAtUnixMs=0\nepoch=seven\n").Kind);
         }
 
         // ---- the decision table ----------------------------------------------------------------
@@ -191,6 +223,82 @@ namespace WebContent.Tests
 
             Assert.Equal(ListenerClaimStep.Join, move.Step);
             Assert.False(move.JoinFingerprintMatches);
+        }
+
+        // ---- #96: generation (epoch) rules the handoff rides -------------------------------------
+
+        [Fact]
+        public void ClaimNew_Has_No_Generated_Epoch_The_Caller_Floor_Governs()
+        {
+            var move = ListenerClaimCore.Decide(ListenerClaimRead.NotFound(), Intended(), Alive, PortOk);
+
+            Assert.Null(move.NewEpoch);
+        }
+
+        [Fact]
+        public void Untrusted_Slot_Has_No_Knowable_Previous_Generation()
+        {
+            var move = ListenerClaimCore.Decide(ListenerClaim.Read("garbage"), Intended(), Alive, PortOk);
+
+            Assert.Equal(ListenerClaimStep.ClaimOverStale, move.Step);
+            Assert.Null(move.NewEpoch);
+        }
+
+        [Fact]
+        public void Taking_Over_A_Dead_Owner_Publishes_The_Next_Generation()
+        {
+            // THE #96 handoff rule: the replacement claim names the displaced claim's epoch + 1,
+            // so every process that joined the dead owner notices the change from its own watch.
+            var deadOwner = new ListenerClaim(BrowserId, 49321, 777, "fp", 1L, 4);
+
+            var move = ListenerClaimCore.Decide(ListenerClaimRead.Trusted(deadOwner), Intended(), pid => false, PortOk);
+
+            Assert.Equal(ListenerClaimStep.ClaimOverStale, move.Step);
+            Assert.Equal(5, move.NewEpoch);
+        }
+
+        [Fact]
+        public void Taking_Over_A_Refusing_Port_Publishes_The_Next_Generation()
+        {
+            var deadPort = new ListenerClaim(BrowserId, 49321, 777, "fp", 1L, 9);
+
+            var move = ListenerClaimCore.Decide(ListenerClaimRead.Trusted(deadPort), Intended(), Alive, port => false);
+
+            Assert.Equal(ListenerClaimStep.ClaimOverStale, move.Step);
+            Assert.Equal(10, move.NewEpoch);
+        }
+
+        [Fact]
+        public void Replacing_Own_Earlier_Claim_Also_Advances_The_Generation()
+        {
+            var ownStale = new ListenerClaim(BrowserId, 49321, 1000, "fp", 1L, 3);
+
+            var move = ListenerClaimCore.Decide(ListenerClaimRead.Trusted(ownStale), Intended(port: 50111), Alive, PortOk);
+
+            Assert.Equal(ListenerClaimStep.ClaimOverStale, move.Step);
+            Assert.Equal(4, move.NewEpoch);
+        }
+
+        [Fact]
+        public void Cross_Browser_Id_Litter_Takeover_Keeps_The_Generation_Monotone()
+        {
+            var foreign = new ListenerClaim(Guid.NewGuid(), 49321, 777, "fp", 1L, 6);
+
+            var move = ListenerClaimCore.Decide(ListenerClaimRead.Trusted(foreign), Intended(), Alive, PortOk);
+
+            Assert.Equal(ListenerClaimStep.ClaimOverStale, move.Step);
+            Assert.Equal(7, move.NewEpoch);
+        }
+
+        [Fact]
+        public void Join_Hands_Back_The_Owner_Record_With_Its_Generation()
+        {
+            var live = new ListenerClaim(BrowserId, 49321, 777, "fp", 1L, 12);
+
+            var move = ListenerClaimCore.Decide(ListenerClaimRead.Trusted(live), Intended(), Alive, PortOk);
+
+            Assert.Equal(ListenerClaimStep.Join, move.Step);
+            Assert.Equal(12, move.JoinClaim.Epoch);
         }
     }
 }

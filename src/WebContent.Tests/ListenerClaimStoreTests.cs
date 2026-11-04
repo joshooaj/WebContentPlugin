@@ -138,13 +138,82 @@ namespace WebContent.Tests
         public void Foreign_Schema_Claim_File_Is_Never_Trusted_And_Is_Replaced_With_An_Audit_Line()
         {
             File.WriteAllText(_claimPath,
-                "webcontent-listener-claim/2\nbrowserId=" + BrowserId.ToString("D") +
-                "\nport=49321\nownerPid=777\nconfigFingerprint=fp\nclaimedAtUnixMs=1\n");
+                "webcontent-listener-claim/3\nbrowserId=" + BrowserId.ToString("D") +
+                "\nport=49321\nownerPid=777\nconfigFingerprint=fp\nclaimedAtUnixMs=1\nepoch=1\n");
 
             var taker = StoreFor(ownPid: 2000).Claim(_claimPath, BrowserId, 49321, "fp");
 
             Assert.Equal(ListenerClaimOutcome.Owner, taker.Outcome);
             Assert.Contains("version", taker.AuditLines.Single(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        // ---- #96: the generation the handoff rides, end to end over real files ---------------------
+
+        [Fact]
+        public void First_Claim_Of_A_Boundary_Is_Generation_One()
+        {
+            StoreFor(ownPid: 1000).Claim(_claimPath, BrowserId, 49321, "fp");
+
+            var parsed = ListenerClaim.Read(ReadClaimFile());
+            Assert.Equal(1, parsed.Claim.Epoch);
+        }
+
+        [Fact]
+        public void Owner_Death_Takeover_Publishes_Previous_Epoch_Plus_One_On_Disk()
+        {
+            // The #96 handoff witness on real files: the displaced generation is one lower than
+            // what the survivor writes, and the survivor's record hands the new epoch back.
+            StoreFor(ownPid: 1000).Claim(_claimPath, BrowserId, 49321, "fp");
+            var displaced = ListenerClaim.Read(ReadClaimFile()).Claim.Epoch;
+
+            var survivor = StoreFor(ownPid: 2000, pidAlive: pid => pid != 1000)
+                .Claim(_claimPath, BrowserId, 50999, "fp", floorEpoch: displaced);
+
+            Assert.Equal(ListenerClaimOutcome.Owner, survivor.Outcome);
+            Assert.Equal(displaced + 1, survivor.Claim.Epoch);
+            Assert.Contains("epoch=" + (displaced + 1), ReadClaimFile());
+        }
+
+        [Fact]
+        public void A_Known_Floor_Keeps_The_Generation_Monotone_Across_A_Corrupt_Handoff()
+        {
+            // Corrupt content erases the on-disk epoch, but a watcher that REMEMBERS generation 5
+            // re-claims with a bumped floor, and the floor is what lands on disk - a joiner that
+            // saw 5 always notices the 6.
+            File.WriteAllText(_claimPath, "scrambled slot");
+
+            var taker = StoreFor(ownPid: 2000).Claim(_claimPath, BrowserId, 50999, "fp", floorEpoch: 6);
+
+            Assert.Equal(ListenerClaimOutcome.Owner, taker.Outcome);
+            Assert.Equal(6, ListenerClaim.Read(ReadClaimFile()).Claim.Epoch);
+        }
+
+        [Fact]
+        public void Floor_Never_Regresses_A_Known_Higher_On_Disk_Epoch()
+        {
+            // A stale floor (a watcher that lost track) must not reset the boundary's history:
+            // the parsed epoch + 1 outranks it.
+            File.WriteAllText(_claimPath,
+                new ListenerClaim(BrowserId, 49321, 777, "fp", 1, 9).Serialize());
+
+            var taker = StoreFor(ownPid: 2000, pidAlive: pid => pid != 777)
+                .Claim(_claimPath, BrowserId, 50999, "fp", floorEpoch: 1);
+
+            Assert.Equal(ListenerClaimOutcome.Owner, taker.Outcome);
+            Assert.Equal(10, ListenerClaim.Read(ReadClaimFile()).Claim.Epoch);
+        }
+
+        [Fact]
+        public void Idempotent_Self_Reclaim_Reports_The_On_Disk_Generation_Not_A_New_One()
+        {
+            var store = StoreFor(ownPid: 1000);
+            store.Claim(_claimPath, BrowserId, 49321, "fp");
+
+            var again = store.Claim(_claimPath, BrowserId, 49321, "fp");
+
+            Assert.Equal(ListenerClaimOutcome.Owner, again.Outcome);
+            Assert.Equal(1, again.Claim.Epoch);
+            Assert.Equal(1, ListenerClaim.Read(ReadClaimFile()).Claim.Epoch);
         }
 
         [Fact]

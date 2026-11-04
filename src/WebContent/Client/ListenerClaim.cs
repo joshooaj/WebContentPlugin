@@ -8,8 +8,10 @@ namespace WebContent.Client
     /// ADR-0004 (#93): the listener-claim record one client process publishes for ONE proxied
     /// boundary, so the other processes on that boundary join its loopback listener instead of
     /// binding their own (the per-process ephemeral-port mismatch is the #87 blank view). The
-    /// record names browser id, loopback port, owning process id, config fingerprint and the
-    /// claim timestamp; <see cref="BrowserProfileKey.ComposeListenerClaimPath"/> derives the
+    /// record names browser id, loopback port, owning process id, config fingerprint, the
+    /// claim timestamp, and (#96) the listener GENERATION (epoch): every takeover publishes the
+    /// previous epoch + 1 so all processes attached to the boundary notice the handoff. The
+    /// <see cref="BrowserProfileKey.ComposeListenerClaimPath"/> derives the
     /// file path from the full boundary, so crossing the boundary is impossible by construction.
     ///
     /// This class is pure: schema serialize/parse only, no filesystem, no process. The schema is
@@ -25,7 +27,7 @@ namespace WebContent.Client
         /// The only schema version this build writes and trusts. A file whose header names any
         /// other version is foreign: never trusted, treated as stale, audited.
         /// </summary>
-        internal const int CurrentSchemaVersion = 1;
+        internal const int CurrentSchemaVersion = 2;
 
         /// <summary>
         /// First line of a claim file: <c>webcontent-listener-claim/&lt;version&gt;</c>.
@@ -55,13 +57,25 @@ namespace WebContent.Client
         /// </summary>
         internal long ClaimedAtUnixMs { get; private set; }
 
-        internal ListenerClaim(Guid browserId, int port, int ownerPid, string configFingerprint, long claimedAtUnixMs)
+        /// <summary>
+        /// #96: the generation of this boundary's listener. Every process attached to the
+        /// boundary records the epoch it joined under; when a takeover replaces a claim the new
+        /// claim names the previous epoch + 1, so EVERY attached process notices the change from
+        /// its own watch (a live browser process cannot change its --proxy-server arguments -
+        /// the epoch change is what triggers the forced re-creation of the boundary's views).
+        /// Schema v1 had no epoch: it parses as a foreign version (stale, audited), which is
+        /// exactly the #93 rule for older schemas.
+        /// </summary>
+        internal long Epoch { get; set; }
+
+        internal ListenerClaim(Guid browserId, int port, int ownerPid, string configFingerprint, long claimedAtUnixMs, long epoch = 1)
         {
             BrowserId = browserId;
             Port = port;
             OwnerPid = ownerPid;
             ConfigFingerprint = configFingerprint ?? string.Empty;
             ClaimedAtUnixMs = claimedAtUnixMs;
+            Epoch = epoch;
         }
 
         /// <summary>
@@ -74,7 +88,8 @@ namespace WebContent.Client
                    "port=" + Port.ToString(CultureInfo.InvariantCulture) + "\n" +
                    "ownerPid=" + OwnerPid.ToString(CultureInfo.InvariantCulture) + "\n" +
                    "configFingerprint=" + ConfigFingerprint + "\n" +
-                   "claimedAtUnixMs=" + ClaimedAtUnixMs.ToString(CultureInfo.InvariantCulture) + "\n";
+                   "claimedAtUnixMs=" + ClaimedAtUnixMs.ToString(CultureInfo.InvariantCulture) + "\n" +
+                   "epoch=" + Epoch.ToString(CultureInfo.InvariantCulture) + "\n";
         }
 
         /// <summary>
@@ -149,12 +164,13 @@ namespace WebContent.Client
                 values.Add(key, line.Substring(split + 1));
             }
 
-            string browserIdText, portText, ownerPidText, fingerprintText, claimedAtText;
+            string browserIdText, portText, ownerPidText, fingerprintText, claimedAtText, epochText;
             if (!values.TryGetValue("browserId", out browserIdText) ||
                 !values.TryGetValue("port", out portText) ||
                 !values.TryGetValue("ownerPid", out ownerPidText) ||
                 !values.TryGetValue("configFingerprint", out fingerprintText) ||
-                !values.TryGetValue("claimedAtUnixMs", out claimedAtText))
+                !values.TryGetValue("claimedAtUnixMs", out claimedAtText) ||
+                !values.TryGetValue("epoch", out epochText))
             {
                 return ListenerClaimRead.Untrusted("a required field is missing");
             }
@@ -183,7 +199,13 @@ namespace WebContent.Client
                 return ListenerClaimRead.Untrusted("the claimedAtUnixMs is not a usable timestamp");
             }
 
-            return ListenerClaimRead.Trusted(new ListenerClaim(browserId, port, ownerPid, fingerprintText, claimedAt));
+            long epoch;
+            if (!long.TryParse(epochText, NumberStyles.None, CultureInfo.InvariantCulture, out epoch) || epoch < 1)
+            {
+                return ListenerClaimRead.Untrusted("the epoch is not a usable generation number");
+            }
+
+            return ListenerClaimRead.Trusted(new ListenerClaim(browserId, port, ownerPid, fingerprintText, claimedAt, epoch));
         }
     }
 
@@ -260,18 +282,27 @@ namespace WebContent.Client
         internal ListenerClaim JoinClaim { get; private set; }
 
         /// <summary>
+        /// #96: the generation a replacement claim must publish. Set for a takeover of a claim
+        /// this build could PARSE (previous epoch + 1, so the boundary's attached processes all
+        /// notice the handoff); null where no previous generation is knowable (absent slot,
+        /// corrupt or foreign-schema content) and the caller's floor epoch governs.
+        /// </summary>
+        internal long? NewEpoch { get; private set; }
+
+        /// <summary>
         /// On a join: whether the owner's config fingerprint matches this process's intended
         /// fingerprint. Informational for the caller (a mismatch says the live claim describes a
         /// different browser-argument posture); deciding what to do about it is child C/#96 wiring.
         /// </summary>
         internal bool JoinFingerprintMatches { get; private set; }
 
-        internal ListenerClaimMove(ListenerClaimStep step, string audit = null, ListenerClaim joinClaim = null, bool joinFingerprintMatches = false)
+        internal ListenerClaimMove(ListenerClaimStep step, string audit = null, ListenerClaim joinClaim = null, bool joinFingerprintMatches = false, long? newEpoch = null)
         {
             Step = step;
             Audit = audit;
             JoinClaim = joinClaim;
             JoinFingerprintMatches = joinFingerprintMatches;
+            NewEpoch = newEpoch;
         }
     }
 
@@ -316,7 +347,8 @@ namespace WebContent.Client
                     if (claim.BrowserId != intended.BrowserId)
                     {
                         return new ListenerClaimMove(ListenerClaimStep.ClaimOverStale,
-                            "the claim names browser " + claim.BrowserId.ToString("D") + ", not " + intended.BrowserId.ToString("D"));
+                            "the claim names browser " + claim.BrowserId.ToString("D") + ", not " + intended.BrowserId.ToString("D"),
+                            null, false, claim.Epoch + 1);
                     }
 
                     if (claim.OwnerPid == intended.OwnerPid)
@@ -331,20 +363,23 @@ namespace WebContent.Client
 
                         return new ListenerClaimMove(ListenerClaimStep.ClaimOverStale,
                             "the claim is this process's own earlier claim (port " +
-                            claim.Port.ToString(CultureInfo.InvariantCulture) + ")");
+                            claim.Port.ToString(CultureInfo.InvariantCulture) + ")",
+                            null, false, claim.Epoch + 1);
                     }
 
                     if (!ownerProcessAlive(claim.OwnerPid))
                     {
                         return new ListenerClaimMove(ListenerClaimStep.ClaimOverStale,
-                            "the owner process (pid " + claim.OwnerPid.ToString(CultureInfo.InvariantCulture) + ") is no longer running");
+                            "the owner process (pid " + claim.OwnerPid.ToString(CultureInfo.InvariantCulture) + ") is no longer running",
+                            null, false, claim.Epoch + 1);
                     }
 
                     if (!loopbackPortConnectable(claim.Port))
                     {
                         return new ListenerClaimMove(ListenerClaimStep.ClaimOverStale,
                             "the owner's loopback port (" + claim.Port.ToString(CultureInfo.InvariantCulture) +
-                            ") refused a connect probe");
+                            ") refused a connect probe",
+                            null, false, claim.Epoch + 1);
                     }
 
                     return new ListenerClaimMove(

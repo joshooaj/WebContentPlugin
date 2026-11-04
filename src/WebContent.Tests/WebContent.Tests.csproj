@@ -22,6 +22,7 @@
     <Compile Include="..\WebContent\Browser\BrowserSessionTable.cs" Link="Browser\BrowserSessionTable.cs" />
     <Compile Include="..\WebContent\Client\BrowserCommandAdmission.cs" Link="BrowserCommandAdmission.cs" />
     <Compile Include="..\WebContent\Client\BrowserInitFailure.cs" Link="BrowserInitFailure.cs" />
+    <Compile Include="..\WebContent\Client\ClaimWatchCore.cs" Link="ClaimWatchCore.cs" />
     <Compile Include="..\WebContent\Enums.cs" Link="Enums.cs" />
     <Compile Include="..\WebContent\Client\BrowserProfileKey.cs" Link="BrowserProfileKey.cs" />
     <Compile Include="..\WebContent\Client\ListenerClaim.cs" Link="ListenerClaim.cs" />

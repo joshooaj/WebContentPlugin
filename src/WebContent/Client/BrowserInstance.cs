@@ -163,6 +163,38 @@ namespace WebContent.Client
         internal string ProxyClaimPath { get; set; }
 
         /// <summary>
+        /// #96: the claim generation this browser last owned or joined under (0 for an unclaimed
+        /// ephemeral fallback, which the claim watch deliberately ignores). The watch compares
+        /// the live slot against owner pid + port + this epoch; a mismatch is the handoff signal,
+        /// and the forced WebView re-creation is the only cure (the browser process's
+        /// --proxy-server arguments cannot change while it lives).
+        /// </summary>
+        internal long ProxyClaimEpoch { get; set; }
+
+        /// <summary>#96: the owner pid recorded with <see cref="ProxyClaimEpoch"/> (own pid when this browser owns the slot).</summary>
+        internal int ProxyClaimOwnerPid { get; set; }
+
+        /// <summary>#96: the boundary port currently baked into this browser's arguments.</summary>
+        internal int ProxyClaimPort { get; set; }
+
+        /// <summary>
+        /// #96: re-creation attempts spent on the CURRENT claim generation (reset when the
+        /// arguments change to a new generation; bounded by <see cref="ClaimWatchCore.MaxHandoffRetries"/>).
+        /// </summary>
+        internal int ProxyHandoffAttempts { get; set; }
+
+        /// <summary>#96: when the last WebView creation attempt started (unix ms) — the retry grace's clock.</summary>
+        internal long ProxyLastInitAttemptUnixMs { get; set; }
+
+        /// <summary>
+        /// #96: the workspace proxy profile this browser was created/rewired with, snapshotted on
+        /// the instance so a mid-session boundary handoff can promote this process to listener
+        /// owner without the view model being involved (the promotion builds a fresh
+        /// <see cref="LoopbackProxyListener"/> from exactly these targets).
+        /// </summary>
+        internal ProxyWorkspaceProfile ProxyProfile { get; set; }
+
+        /// <summary>
         /// #95: the allowlist entries the #88 view-layer https refusal gate applies when this
         /// browser has no listener of its own (a JOINED proxied browser enforces through the
         /// owner's listener, but its own view still renders the friendly refusal page instead of
@@ -190,11 +222,34 @@ namespace WebContent.Client
         /// </summary>
         internal string ProxyUserDataFolder { get; set; }
 
+        /// <summary>
+        /// #96: is a live proxied view actually up (initialized, attached, no failed-init notice
+        /// standing)? The claim watch's retry/give-up rows read exactly this; a deliberately
+        /// closed view answers false but never carries <see cref="InitFailure"/>, so the watch
+        /// distinguishes "creation failed" from "user closed it".
+        /// </summary>
+        internal bool IsViewLive()
+        {
+            try
+            {
+                return IsInitialized && WebView != null && WebView.CoreWebView2 != null && InitFailure == null;
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+        }
+
         public void Initialize()
         {
             lock (_sync)
             {
                 if (IsInitialized || _requiresRecreation) return;
+
+                // #96: every creation attempt stamps the retry-grace clock (the claim watch
+                // spaces re-creation attempts against this stamp - the recycled WebView2
+                // collection takes seconds to respawn, #90).
+                ProxyLastInitAttemptUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
                 if (WebView == null)
                 {

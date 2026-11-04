@@ -47,14 +47,26 @@ namespace WebContent.Client
         /// <summary>Claim slot to release on browser teardown; null unless this process owns it.</summary>
         internal string ClaimPath { get; }
 
+        /// <summary>
+        /// #96: the generation the slot now names (Owner: the epoch this process published;
+        /// Joined: the live owner's epoch; UnclaimedFallback: 0). The consuming browser records
+        /// it and its claim watcher compares every consult against it.
+        /// </summary>
+        internal long Epoch { get; }
+
+        /// <summary>#96: the pid the slot's liveness rides (own pid for Owner, the owner's for Joined; 0 on fallback).</summary>
+        internal int OwnerPid { get; }
+
         internal IReadOnlyList<string> AuditLines { get; }
 
-        internal ProxyListenerLease(ProxyListenerLeaseRole role, int port, string claimPath, IReadOnlyList<string> auditLines)
+        internal ProxyListenerLease(ProxyListenerLeaseRole role, int port, string claimPath, IReadOnlyList<string> auditLines, long epoch = 0, int ownerPid = 0)
         {
             Role = role;
             Port = port;
             ClaimPath = claimPath;
             AuditLines = auditLines ?? new string[0];
+            Epoch = epoch;
+            OwnerPid = ownerPid;
         }
     }
 
@@ -101,9 +113,23 @@ namespace WebContent.Client
         /// browser could ever reach, so refusing to join buys a blank view and nothing else
         /// (#95 triage decision).
         /// </summary>
-        internal ProxyListenerLease Acquire(string claimPath, Guid browserId, string configFingerprint)
+        /// <param name="floorEpoch">#96: the generation this process last recorded for the slot
+        /// (1 for a first consult). Takeovers publish at least the displaced claim's epoch + 1.</param>
+        /// <param name="pinPort">#96: a port this process ALREADY serves (an owner re-publishing
+        /// its vanished/corrupted slot). Skips the reserve-first dance: the intended claim names
+        /// the bound port verbatim, so joiners keep composing the argument they already carry.</param>
+        internal ProxyListenerLease Acquire(string claimPath, Guid browserId, string configFingerprint, long floorEpoch = 1, int? pinPort = null)
         {
-            var port = _portAllocator();
+            int port;
+            if (pinPort != null && pinPort.Value >= 1 && pinPort.Value <= 65535)
+            {
+                port = pinPort.Value;
+            }
+            else
+            {
+                port = _portAllocator();
+            }
+
             if (port < 1 || port > 65535)
             {
                 return new ProxyListenerLease(ProxyListenerLeaseRole.UnclaimedFallback, 0, null, new[]
@@ -112,14 +138,14 @@ namespace WebContent.Client
                 });
             }
 
-            var attempt = _store.Claim(claimPath, browserId, port, configFingerprint);
+            var attempt = _store.Claim(claimPath, browserId, port, configFingerprint, floorEpoch);
             switch (attempt.Outcome)
             {
                 case ListenerClaimOutcome.Owner:
-                    return new ProxyListenerLease(ProxyListenerLeaseRole.Owner, attempt.Claim.Port, claimPath, attempt.AuditLines);
+                    return new ProxyListenerLease(ProxyListenerLeaseRole.Owner, attempt.Claim.Port, claimPath, attempt.AuditLines, attempt.Claim.Epoch, attempt.Claim.OwnerPid);
 
                 case ListenerClaimOutcome.Joined:
-                    return new ProxyListenerLease(ProxyListenerLeaseRole.Joined, attempt.Claim.Port, null, attempt.AuditLines);
+                    return new ProxyListenerLease(ProxyListenerLeaseRole.Joined, attempt.Claim.Port, null, attempt.AuditLines, attempt.Claim.Epoch, attempt.Claim.OwnerPid);
 
                 default:
                     return new ProxyListenerLease(ProxyListenerLeaseRole.UnclaimedFallback, 0, null, attempt.AuditLines);

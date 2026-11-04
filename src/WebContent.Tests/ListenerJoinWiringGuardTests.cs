@@ -31,15 +31,16 @@ namespace WebContent.Tests
         {
             var collapsed = Collapse(ReadClient("BrowserManager.cs"));
 
-            // One lease provider, consulted from BOTH proxied entry points (creation and the
-            // mid-session proxy re-enable), each keyed to the boundary claim path.
+            // One lease provider, consulted from every claim-protocol entry point - creation, the
+            // mid-session proxy re-enable, and both #96 healing routes (re-publish, handoff
+            // rewire) - each keyed to the boundary claim path.
             Assert.Contains("private static readonly ProxyListenerLeaseProvider _leases = new ProxyListenerLeaseProvider();", collapsed);
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(collapsed, @"BrowserProfileIdentity\.GetListenerClaimPath\(").Count);
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(collapsed, @"_leases\.Acquire\(").Count);
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(collapsed, @"ProxyBrowserArguments\.PortIndependentFingerprint\(\)").Count);
+            Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(collapsed, @"BrowserProfileIdentity\.GetListenerClaimPath\(").Count);
+            Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(collapsed, @"_leases\.Acquire\(").Count);
+            Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(collapsed, @"ProxyBrowserArguments\.PortIndependentFingerprint\(\)").Count);
 
-            // Every claim audit the store handed back is journalled verbatim, both entry points.
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(collapsed, @"foreach \(var audit in lease\.AuditLines\)").Count);
+            // Every claim audit the store handed back is journalled verbatim, at every entry point.
+            Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(collapsed, @"foreach \(var audit in lease\.AuditLines\)").Count);
         }
 
         [Fact]
@@ -47,15 +48,15 @@ namespace WebContent.Tests
         {
             var collapsed = Collapse(ReadClient("BrowserManager.cs"));
 
-            // Both entry points branch on the lease role, and the JOIN branch composes the
-            // identical argument from the owner's port with NO listener construction and no claim
-            // path recorded (the joiner owns nothing).
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(collapsed, @"if \(lease\.Role == ProxyListenerLeaseRole\.Joined\)").Count);
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(collapsed, @"ProxyBrowserArguments\.For\(lease\.Port\)").Count);
+            // Every entry point and both #96 healing routes branch on the lease role, and the JOIN
+            // branch composes the identical argument from the owner's port with NO listener
+            // construction and no claim path recorded (the joiner owns nothing).
+            Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(collapsed, @"if \(lease\.Role == ProxyListenerLeaseRole\.Joined\)").Count);
+            Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(collapsed, @"ProxyBrowserArguments\.For\(lease\.Port\)").Count);
             Assert.Contains("joined the boundary owner's loopback listener", collapsed);
 
             // The owner route always runs through the lease-aware starter, never a bare Start().
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(collapsed, @"StartListenerOnLeasedPort\(listener, lease, claimPath, ").Count);
+            Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(collapsed, @"StartListenerOnLeasedPort\(listener, lease, claimPath, ").Count);
         }
 
         [Fact]
@@ -75,9 +76,10 @@ namespace WebContent.Tests
             Assert.Contains("_listener = new TcpListener(IPAddress.Loopback, port);", listener);
 
             // Release paths: browser creation failure, proxy disable, plugin teardown, and browser
-            // Dispose all reach a release; the shared rule only deletes OWN-pid slots.
+            // Dispose all reach a release, and both #96 handoff posture changes pair every claim
+            // drop with a release; the shared rule only deletes OWN-pid slots.
             Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(manager, @"_leases\.Release\(").Count);
-            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(manager, @"ReleaseOwnClaim\(browser\);").Count);
+            Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(manager, @"ReleaseOwnClaim\(browser\);").Count);
             var instance = Collapse(ReadClient("BrowserInstance.cs"));
             Assert.Contains("ProxyListenerLeaseProvider.ReleaseOwnClaimFile(claimPath);", instance);
         }

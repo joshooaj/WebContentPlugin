@@ -96,6 +96,56 @@ namespace WebContent.Tests
         }
 
         [Fact]
+        public void The_Lease_Surfaces_The_Claims_Epoch_And_Owner_Pid()
+        {
+            // #96: the consuming browser records lease.Epoch / lease.OwnerPid as its claim posture;
+            // the watch compares every later consult against them.
+            var owner = ProviderFor(ownPid: 1000, reservedPort: 49321).Acquire(_claimPath, BrowserId, "fp");
+            Assert.Equal(ProxyListenerLeaseRole.Owner, owner.Role);
+            Assert.Equal(1, owner.Epoch);
+            Assert.Equal(1000, owner.OwnerPid);
+
+            var joiner = ProviderFor(ownPid: 2000, reservedPort: 50999).Acquire(_claimPath, BrowserId, "fp");
+            Assert.Equal(ProxyListenerLeaseRole.Joined, joiner.Role);
+            Assert.Equal(1, joiner.Epoch);
+            Assert.Equal(1000, joiner.OwnerPid);
+        }
+
+        [Fact]
+        public void A_Dead_Owner_Takeover_Publishes_The_Next_Epoch_Through_The_Lease()
+        {
+            // #96: every process attached to the boundary notices the handoff because the new
+            // generation's epoch is one past what they joined under.
+            ProviderFor(ownPid: 1000, reservedPort: 49321).Acquire(_claimPath, BrowserId, "fp");
+            var joiner = ProviderFor(ownPid: 2000, reservedPort: 50999).Acquire(_claimPath, BrowserId, "fp");
+            Assert.Equal(1, joiner.Epoch);
+
+            // pid 1000 is gone; pid 2000 survives and takes the handoff.
+            var survivor = ProviderFor(ownPid: 2000, reservedPort: 51500, pidAlive: pid => pid != 1000).Acquire(_claimPath, BrowserId, "fp");
+
+            Assert.Equal(ProxyListenerLeaseRole.Owner, survivor.Role);
+            Assert.Equal(2, survivor.Epoch);
+            Assert.Equal(2, ListenerClaim.Read(ReadClaimFile()).Claim.Epoch);
+        }
+
+        [Fact]
+        public void APinnedPort_Republishes_Own_Slot_At_The_Same_Generation()
+        {
+            // #96 owner-side repair: the listener never stopped serving, so the republished record
+            // names the port actually served and the epoch stays - views that did NOT die must not
+            // see an epoch change and re-create after all.
+            var first = ProviderFor(ownPid: 2000, reservedPort: 49321).Acquire(_claimPath, BrowserId, "fp");
+
+            var republished = ProviderFor(ownPid: 2000, reservedPort: 51500).Acquire(_claimPath, BrowserId, "fp", floorEpoch: first.Epoch, pinPort: first.Port);
+
+            Assert.Equal(ProxyListenerLeaseRole.Owner, republished.Role);
+            Assert.Equal(49321, republished.Port);   // the allocator's 51500 was SKIPPED: pinned
+            Assert.Equal(1, republished.Epoch);      // same generation
+            Assert.Equal(2000, republished.OwnerPid);
+            Assert.Equal(1, ListenerClaim.Read(ReadClaimFile()).Claim.Epoch);
+        }
+
+        [Fact]
         public void Fingerprint_Mismatch_On_A_Live_Claim_Joins_With_Exactly_One_Audit_And_No_Reclaim()
         {
             // The #95 triage rule: a live owner with a different config posture is JOINED anyway

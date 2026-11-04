@@ -252,14 +252,20 @@ namespace WebContent.Client
         /// INTENDS to bind (it binds only if the outcome is <see cref="ListenerClaimOutcome.Owner"/>,
         /// or composes the owner's port on <see cref="ListenerClaimOutcome.Joined"/>).
         /// </summary>
-        internal ListenerClaimAttempt Claim(string claimPath, Guid browserId, int intendedPort, string configFingerprint)
+        /// <param name="floorEpoch">#96: the generation this process last knew for this slot (its
+        /// own recorded epoch, or 1 for a first consult). A takeover of a PARSEABLE claim always
+        /// bumps past the parsed epoch; where the previous generation is unknowable (absent,
+        /// corrupt, or foreign-schema slot) the floor keeps the generation monotone for the
+        /// watcher that remembers it.</param>
+        internal ListenerClaimAttempt Claim(string claimPath, Guid browserId, int intendedPort, string configFingerprint, long floorEpoch = 1)
         {
             var intended = new ListenerClaim(
                 browserId,
                 intendedPort,
                 _ownerPid,
                 configFingerprint,
-                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                floorEpoch < 1 ? 1 : floorEpoch);
 
             var audits = new List<string>();
 
@@ -278,13 +284,21 @@ namespace WebContent.Client
                     audits.Add(AuditLine(claimPath, move.Audit));
                 }
 
+                if (move.NewEpoch.HasValue && move.NewEpoch.Value > intended.Epoch)
+                {
+                    // #96: the replacement generation names the displaced claim's epoch + 1, so
+                    // every process that JOINED the displaced claim notices the handoff.
+                    intended.Epoch = move.NewEpoch.Value;
+                }
+
                 switch (move.Step)
                 {
                     case ListenerClaimStep.Join:
                         // Our own published record came back: that is ownership, not a join.
+                        // Report the ON-DISK record - it is the slot's truth (epoch included).
                         if (move.JoinClaim.OwnerPid == _ownerPid)
                         {
-                            return new ListenerClaimAttempt(ListenerClaimOutcome.Owner, intended, audits);
+                            return new ListenerClaimAttempt(ListenerClaimOutcome.Owner, move.JoinClaim, audits);
                         }
 
                         if (!move.JoinFingerprintMatches)
