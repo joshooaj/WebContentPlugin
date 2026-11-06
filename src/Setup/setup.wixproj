@@ -9,7 +9,13 @@
     <PropertyGroup>
         <BuildVersion>0.1.1</BuildVersion>
         <HarvestPath>..\..\output\WebContent</HarvestPath>
-        <DefineConstants>Version=$(BuildVersion);HarvestPath=$(HarvestPath)</DefineConstants>
+        <!-- #82: the Event Server service custom-action exe. Built by the ProjectReference
+             below (never harvested - it rides the MSI as a Binary stream, not in the drop);
+             the path carries $(Configuration) so the Binary always matches this build.
+             #77: the deployment-CA provisioning exe, same posture (Binary stream, not drop). -->
+        <ServiceCtlExePath>..\WebContentServiceCtl\bin\$(Configuration)\WebContentServiceCtl.exe</ServiceCtlExePath>
+        <ProxyCaExePath>..\WebContentProxyCa\bin\$(Configuration)\WebContentProxyCa.exe</ProxyCaExePath>
+        <DefineConstants>Version=$(BuildVersion);HarvestPath=$(HarvestPath);ServiceCtlExePath=$(ServiceCtlExePath);ProxyCaExePath=$(ProxyCaExePath)</DefineConstants>
         <OutputPath>..\..\output\Setup</OutputPath>
         <OutputName>CascadiaWebContentPlugin.$(BuildVersion)</OutputName>
         <SuppressIces>ICE61</SuppressIces>
@@ -19,10 +25,19 @@
 
     <ItemGroup>
         <PackageReference Include="WixToolset.UI.wixext" Version="7.0.1" />
+        <PackageReference Include="WixToolset.Util.wixext" Version="7.0.1" />
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="../WebContent/WebContent.csproj" />
+        <!-- #82: build-order only; the CA exe is consumed as a Binary SourceFile, never linked. -->
+        <ProjectReference Include="../WebContentServiceCtl/WebContentServiceCtl.csproj">
+            <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+        </ProjectReference>
+        <!-- #77: same posture for the deployment-CA helper exe. -->
+        <ProjectReference Include="../WebContentProxyCa/WebContentProxyCa.csproj">
+            <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+        </ProjectReference>
     </ItemGroup>
 
     <PropertyGroup>

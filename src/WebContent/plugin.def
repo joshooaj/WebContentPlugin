@@ -1,4 +1,4 @@
 ﻿<plugin>
   <file name="WebContent.dll"/>
-  <load env="SmartClient, Administration"/>
+  <load env="SmartClient, Administration, Service"/>
 </plugin>

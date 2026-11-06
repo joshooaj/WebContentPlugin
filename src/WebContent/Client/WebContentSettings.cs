@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+
 using WebContent;
 
 namespace WebContent.Client
@@ -190,6 +192,47 @@ namespace WebContent.Client
             }
         }
 
+        /// <summary>
+        /// Ticket #52: admin-owned proxy state for this workspace. Read-only on the client: the
+        /// Smart Client user can see whether the browser routes through the VMS server and which
+        /// targets are allowlisted, but only the Management Client admin may change it.
+        /// </summary>
+        public string ProxyLabel => Strings.ProxyLabel;
+
+        public bool ProxyEnabled => WebContentConfiguration.GetBoolean(GetProperty, false, nameof(ProxyEnabled));
+
+        /// <summary>
+        /// Raw canonical comma-separated proxy targets property (#52 seeding). The listener
+        /// consumes this through <see cref="ProxyWorkspaceProfile.TryCreate"/>.
+        /// </summary>
+        public string ProxyTargetsProperty => WebContentConfiguration.GetString(GetProperty, string.Empty, "ProxyTargets");
+
+        public string ProxyDisplay
+        {
+            get
+            {
+                if (!ProxyEnabled)
+                {
+                    return Strings.ProxyDisplayDisabled;
+                }
+
+                var rawTargets = WebContentConfiguration.GetString(GetProperty, string.Empty, "ProxyTargets");
+                var targets = new List<string>();
+                foreach (var target in (rawTargets ?? string.Empty).Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = target.Trim();
+                    if (trimmed.Length > 0)
+                    {
+                        targets.Add(trimmed);
+                    }
+                }
+
+                return targets.Count == 0
+                    ? Strings.ProxyDisplayEnabledNoTargets
+                    : Strings.ProxyDisplayEnabledPrefix + " " + string.Join(", ", targets);
+            }
+        }
+
         public Guid InstanceId
         {
             get => WebContentConfiguration.GetGuid(GetProperty, Guid.Empty, nameof(InstanceId));
@@ -207,6 +250,41 @@ namespace WebContent.Client
         /// </summary>
         public string DefinitionFingerprint =>
             WebContentConfiguration.GetString(GetProperty, string.Empty, WorkspaceViewItemSync.FingerprintKey);
+
+        /// <summary>
+        /// The id of the workspace this browser view lives on (the seed key the workspace plugin
+        /// publishes under <see cref="WorkspaceViewItemSync.WorkspaceIdKey"/>). Proxy diagnostics
+        /// (ticket #69) attribute block reports and sessions to it; empty for standalone items.
+        /// Read-only: written by the seeding path, never by the plugin runtime.
+        /// </summary>
+        public string WorkspaceItemId =>
+            WebContentConfiguration.GetString(GetProperty, string.Empty, WorkspaceViewItemSync.WorkspaceIdKey);
+
+        /// <summary>
+        /// Ticket #71: true when this view item is provisioned inside an admin-defined (managed)
+        /// workspace - its persisted store carries the workspace identity the seeding path wrote.
+        /// A standalone (manually placed) view item carries neither key and keeps every setting
+        /// user-owned.
+        /// </summary>
+        public bool IsManagedWorkspace =>
+            WorkspaceSettingLocks.IsManagedWorkspace(WorkspaceItemId, DefinitionFingerprint);
+
+        /// <summary>
+        /// Ticket #71: the home/target URL of a managed view item is pinned by the workspace
+        /// definition (the definition builder always writes it), so the properties pane renders
+        /// the field read-only with the "Managed by Administrator" indicator. The seed keeps the
+        /// definition authoritative regardless of what is stored, so the UI is not the only
+        /// enforcement. Standalone items keep the editable field.
+        /// </summary>
+        public bool IsHomeAddressEditable => !IsManagedWorkspace;
+
+        public string ManagedByAdministratorLabel => Strings.ManagedByAdministratorLabel;
+
+        /// <summary>
+        /// Tooltip for the locked home-address field; null means "no tooltip" when the field is
+        /// user-owned (ticket #71).
+        /// </summary>
+        public string HomeAddressToolTip => IsManagedWorkspace ? Strings.ManagedByAdministratorLabel : null;
 
         /// <summary>
         /// Updates the session-scoped last-visited URL for this workspace tab. No-op for
@@ -253,7 +331,7 @@ namespace WebContent.Client
             return true;
         }
 
-        private WebContentViewItemManager _viewItemManager;
+        private readonly WebContentViewItemManager _viewItemManager;
         private bool _disposed;
 
         public WebContentSettings()

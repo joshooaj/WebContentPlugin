@@ -35,14 +35,19 @@ namespace WebContent.Client
         }
 
         /// <summary>
-        /// Returns the definition entries that must be written to the view item's property store:
-        /// everything whose current value differs from the admin-defined value. For
-        /// workspace-provisioned view items the admin definition is authoritative, so stale
-        /// layout values are overwritten rather than preserved.
+        /// Returns the definition entries that must be written to the view item's property store.
+        /// Ticket #71 policy (see <see cref="WorkspaceSettingLocks"/>): identity keys and the
+        /// security-relevant locked keys (home URL, proxy posture, allowlist) are ALWAYS enforced
+        /// when they differ, so a stored per-instance override of one - from an older build or a
+        /// hand edit - can never reach runtime. Cosmetic/navigation keys only receive their
+        /// initial value from the definition, or are re-initialised when <paramref
+        /// name="definitionChanged"/> signals the admin edited the definition; after that the
+        /// Smart Client user's per-instance choice wins.
         /// </summary>
         public static IReadOnlyList<KeyValuePair<string, string>> ComputeSeed(
             Func<string, string> currentProvider,
-            IReadOnlyDictionary<string, string> definition)
+            IReadOnlyDictionary<string, string> definition,
+            bool definitionChanged = false)
         {
             var result = new List<KeyValuePair<string, string>>();
             if (currentProvider == null || definition == null)
@@ -52,7 +57,7 @@ namespace WebContent.Client
 
             foreach (var entry in definition)
             {
-                if (!string.Equals(currentProvider(entry.Key), entry.Value, StringComparison.Ordinal))
+                if (WorkspaceSettingLocks.ShouldWriteSeedValue(entry.Key, currentProvider(entry.Key), entry.Value, definitionChanged))
                 {
                     result.Add(entry);
                 }

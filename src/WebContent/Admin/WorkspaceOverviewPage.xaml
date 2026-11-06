@@ -70,6 +70,19 @@
         </StackPanel>
       </Grid>
 
+      <TextBlock Style="{StaticResource PageTitleStyle}" FontSize="16" Margin="0,18,0,0" Text="Proxy certificate export" />
+      <TextBlock Style="{StaticResource BodyTextStyle}" Margin="0,6,0,10" TextWrapping="Wrap"
+                 Text="Proxied HTTPS pages are served with certificates signed by this deployment's certificate authority, which lives on the Event Server machine. Smart Client machines trust it only once its public certificate sits in their LocalMachine\Root store - the recommended path is to push it there with Active Directory Group Policy. Export it at any time; the private key never leaves the Event Server." />
+      <StackPanel Orientation="Horizontal">
+        <Button x:Name="btnProxyCaExport" AutomationProperties.AutomationId="proxyCaExportButton"
+                Content="Export proxy certificate" Padding="10,4" Click="OnProxyCaExport" />
+      </StackPanel>
+      <TextBlock x:Name="txtProxyCaExportResult" Style="{StaticResource SecondaryTextStyle}" Margin="0,8,0,0"
+                 TextWrapping="Wrap" Visibility="Collapsed" />
+      <Border x:Name="proxyCaExportError" Style="{StaticResource ErrorBannerStyle}" Margin="0,8,0,0" Visibility="Collapsed">
+        <TextBlock x:Name="txtProxyCaExportError" Style="{StaticResource ErrorBannerTextStyle}" TextWrapping="Wrap" />
+      </Border>
+
     </StackPanel>
   </ScrollViewer>
 </UserControl>

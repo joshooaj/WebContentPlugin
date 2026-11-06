@@ -392,5 +392,806 @@ namespace WebContent {
                 return ResourceManager.GetString("WorkspaceConfigErrorMissingBrowserConfig", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Route web traffic through the VMS server proxy.
+        /// </summary>
+        internal static string ProxyEnabledLabel {
+            get {
+                return ResourceManager.GetString("ProxyEnabledLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy targets.
+        /// </summary>
+        internal static string ProxyTargetsLabel {
+            get {
+                return ResourceManager.GetString("ProxyTargetsLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to One row per allowlisted target: pick the scheme, enter the host, and add a port only when the target is not on the scheme default. Wildcards: *.foo.bar.com allows that domain&apos;s subdomains (never the apex itself), and a lone * allows any host of that scheme except literal IP addresses, localhost and this VMS&apos;s own hosts - list those explicitly. Only allowlisted targets can be reached through the proxy..
+        /// </summary>
+        internal static string ProxyTargetsHint {
+            get {
+                return ResourceManager.GetString("ProxyTargetsHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add target.
+        /// </summary>
+        internal static string ProxyAddTargetButton {
+            get {
+                return ResourceManager.GetString("ProxyAddTargetButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Scheme.
+        /// </summary>
+        internal static string ProxyColumnScheme {
+            get {
+                return ResourceManager.GetString("ProxyColumnScheme", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Host.
+        /// </summary>
+        internal static string ProxyColumnHost {
+            get {
+                return ResourceManager.GetString("ProxyColumnHost", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Port.
+        /// </summary>
+        internal static string ProxyColumnPort {
+            get {
+                return ResourceManager.GetString("ProxyColumnPort", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Accept untrusted.
+        /// </summary>
+        internal static string ProxyColumnAcceptUntrusted {
+            get {
+                return ResourceManager.GetString("ProxyColumnAcceptUntrusted", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Problem.
+        /// </summary>
+        internal static string ProxyColumnProblem {
+            get {
+                return ResourceManager.GetString("ProxyColumnProblem", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} row(s) in the allowlist.
+        /// </summary>
+        internal static string ProxyRowCounterFormat {
+            get {
+                return ResourceManager.GetString("ProxyRowCounterFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The allowlist contains the full-host wildcard (*): the Event Server will fetch ANY host on that scheme - every host except literal IP addresses, localhost and this VMS&apos;s own hosts. Use *.domain.com to bound a wildcard to one domain..
+        /// </summary>
+        internal static string ProxyWildcardWarning {
+            get {
+                return ResourceManager.GetString("ProxyWildcardWarning", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A host or wildcard pattern is required..
+        /// </summary>
+        internal static string ProxyRowErrorHostRequired {
+            get {
+                return ResourceManager.GetString("ProxyRowErrorHostRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Port must be a number between 0 and 65535; leave it empty for the scheme default..
+        /// </summary>
+        internal static string ProxyRowErrorPortInvalid {
+            get {
+                return ResourceManager.GetString("ProxyRowErrorPortInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid host or wildcard pattern..
+        /// </summary>
+        internal static string ProxyRowErrorHostInvalid {
+            get {
+                return ResourceManager.GetString("ProxyRowErrorHostInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} is not a valid proxy target. Fix the highlighted row or remove it before saving..
+        /// </summary>
+        internal static string InvalidProxyTargetMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyTargetMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy is enabled but no target is allowlisted. Add at least one proxy target or disable the proxy..
+        /// </summary>
+        internal static string MissingProxyTargetsMessage {
+            get {
+                return ResourceManager.GetString("MissingProxyTargetsMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Max proxied response size (MB).
+        /// </summary>
+        internal static string ProxyCapLabel {
+            get {
+                return ResourceManager.GetString("ProxyCapLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Bigger responses are refused with a &quot;response too large&quot; page. Default 5 MB, maximum 20 MB; leave empty for the default. Applies to proxied fetch traffic only - streamed traffic like websockets is not size-capped..
+        /// </summary>
+        internal static string ProxyCapHint {
+            get {
+                return ResourceManager.GetString("ProxyCapHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid proxy response size. Enter a whole number of megabytes between 1 and 20, or leave the field empty for the default 5 MB..
+        /// </summary>
+        internal static string InvalidProxyCapMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyCapMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Advanced: headers.
+        /// </summary>
+        internal static string ProxyHeadersSectionLabel {
+            get {
+                return ResourceManager.GetString("ProxyHeadersSectionLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add, override or strip headers on each leg of the proxied traffic: the request list rewrites what the VMS Event Server sends to the target, the response list rewrites what comes back. Connection-level headers (Connection, Keep-Alive, TE, Trailer, Transfer-Encoding, Upgrade, any Proxy- header, Host, Content-Length) are always stripped by the proxy and can never be configured here. Nothing is added by default - the proxy adds no Via or X-Forwarded-For of its own, so the VMS topology stays invisible to the target unless you choose to disclose it..
+        /// </summary>
+        internal static string ProxyHeadersHint {
+            get {
+                return ResourceManager.GetString("ProxyHeadersHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Request headers.
+        /// </summary>
+        internal static string ProxyRequestHeadersLabel {
+            get {
+                return ResourceManager.GetString("ProxyRequestHeadersLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Response headers.
+        /// </summary>
+        internal static string ProxyResponseHeadersLabel {
+            get {
+                return ResourceManager.GetString("ProxyResponseHeadersLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add request header.
+        /// </summary>
+        internal static string ProxyHeaderAddRequestButton {
+            get {
+                return ResourceManager.GetString("ProxyHeaderAddRequestButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add response header.
+        /// </summary>
+        internal static string ProxyHeaderAddResponseButton {
+            get {
+                return ResourceManager.GetString("ProxyHeaderAddResponseButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Header.
+        /// </summary>
+        internal static string ProxyColumnHeaderName {
+            get {
+                return ResourceManager.GetString("ProxyColumnHeaderName", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Value.
+        /// </summary>
+        internal static string ProxyColumnHeaderValue {
+            get {
+                return ResourceManager.GetString("ProxyColumnHeaderValue", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Strip.
+        /// </summary>
+        internal static string ProxyColumnHeaderStrip {
+            get {
+                return ResourceManager.GetString("ProxyColumnHeaderStrip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} rule(s).
+        /// </summary>
+        internal static string ProxyHeaderRowCounterFormat {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowCounterFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A header name is required..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorNameRequired {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorNameRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid header name (letters, digits and the characters ! # $ % &amp; &apos; * + - . ^ _ ` | ~ are allowed)..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorNameInvalid {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorNameInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is reserved for the proxy connection and cannot be configured..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorForbidden {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorForbidden", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Enter a value for &apos;{0}&apos;, or tick Strip to remove the header instead..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorValueRequired {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorValueRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The header value must not contain a line break..
+        /// </summary>
+        internal static string ProxyHeaderRowErrorValueLineBreak {
+            get {
+                return ResourceManager.GetString("ProxyHeaderRowErrorValueLineBreak", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy header policy has invalid row(s): {0}. Fix the highlighted rows or remove them before saving..
+        /// </summary>
+        internal static string InvalidProxyHeaderMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyHeaderMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Rule triggers.
+        /// </summary>
+        internal static string ProxyTriggersSectionLabel {
+            get {
+                return ResourceManager.GetString("ProxyTriggersSectionLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to One row per trigger: when proxied traffic matches the URL pattern, the method, and the response status, the VMS Event Server raises the XProtect event type shown in the Event raised column (&quot;WebContent proxy request&quot;)..
+        /// </summary>
+        internal static string ProxyTriggersHint {
+            get {
+                return ResourceManager.GetString("ProxyTriggersHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to URL pattern.
+        /// </summary>
+        internal static string ProxyColumnTriggerUrl {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerUrl", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Method.
+        /// </summary>
+        internal static string ProxyColumnTriggerMethod {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerMethod", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Status.
+        /// </summary>
+        internal static string ProxyColumnTriggerStatus {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerStatus", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Event raised.
+        /// </summary>
+        internal static string ProxyColumnTriggerEvent {
+            get {
+                return ResourceManager.GetString("ProxyColumnTriggerEvent", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add trigger.
+        /// </summary>
+        internal static string ProxyTriggerAddButton {
+            get {
+                return ResourceManager.GetString("ProxyTriggerAddButton", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} trigger(s).
+        /// </summary>
+        internal static string ProxyTriggerRowCounterFormat {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowCounterFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to A trigger URL pattern is required..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorUrlRequired {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorUrlRequired", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a valid trigger URL pattern (scheme://host[:port][/path-glob], or the lone *)..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorUrlInvalid {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorUrlInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a method filter (one verb, or * for any method)..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorMethodInvalid {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorMethodInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to &apos;{0}&apos; is not a status filter (blank for any, a class like 4xx, or an exact code 100-599)..
+        /// </summary>
+        internal static string ProxyTriggerRowErrorStatusInvalid {
+            get {
+                return ResourceManager.GetString("ProxyTriggerRowErrorStatusInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy trigger list has invalid row(s): {0}. Fix the highlighted rows or remove them before saving..
+        /// </summary>
+        internal static string InvalidProxyTriggerMessage {
+            get {
+                return ResourceManager.GetString("InvalidProxyTriggerMessage", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy:.
+        /// </summary>
+        internal static string ProxyLabel {
+            get {
+                return ResourceManager.GetString("ProxyLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Managed by Administrator.
+        /// </summary>
+        internal static string ManagedByAdministratorLabel {
+            get {
+                return ResourceManager.GetString("ManagedByAdministratorLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Disabled - browser connects directly.
+        /// </summary>
+        internal static string ProxyDisplayDisabled {
+            get {
+                return ResourceManager.GetString("ProxyDisplayDisabled", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Enabled - no targets allowlisted.
+        /// </summary>
+        internal static string ProxyDisplayEnabledNoTargets {
+            get {
+                return ResourceManager.GetString("ProxyDisplayEnabledNoTargets", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Enabled - allowlisted targets:.
+        /// </summary>
+        internal static string ProxyDisplayEnabledPrefix {
+            get {
+                return ResourceManager.GetString("ProxyDisplayEnabledPrefix", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Test proxy fetch.
+        /// </summary>
+        internal static string ProxyTestFetchLabel {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Sends a proxy-fetch request from this Management Client across MIP messaging to the Event Server and reports what came back. Requires the Web Content plugin loaded on the Event Server (restart the Event Server service after deployment)..
+        /// </summary>
+        internal static string ProxyTestFetchHint {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchHint", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Fetching through the Event Server....
+        /// </summary>
+        internal static string ProxyTestFetchRunning {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchRunning", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy fetch harness is not connected. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment..
+        /// </summary>
+        internal static string ProxyTestFetchNotConnected {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchNotConnected", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to HTTP {0} - {1} bytes fetched in {2:0.0}s.
+        /// </summary>
+        internal static string ProxyTestFetchSuccessFormat {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchSuccessFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy fetch {0} after {1:0.0}s - {2}.
+        /// </summary>
+        internal static string ProxyTestFetchFailureFormat {
+            get {
+                return ResourceManager.GetString("ProxyTestFetchFailureFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} live proxy session(s) - {1:0.0} requests/min, sent {2}/s, received {3}/s.
+        /// </summary>
+        internal static string StatusSummaryFormat {
+            get {
+                return ResourceManager.GetString("StatusSummaryFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No live proxy sessions on this workspace right now. Open a Web Content workspace tab in a Smart Client to see it here.
+        /// </summary>
+        internal static string StatusNoSessions {
+            get {
+                return ResourceManager.GetString("StatusNoSessions", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No status from the Event Server: this Management Client has no proxy messaging channel to it..
+        /// </summary>
+        internal static string StatusNotConnected {
+            get {
+                return ResourceManager.GetString("StatusNotConnected", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The Event Server does not know this workspace any more, so it has no proxy sessions to report..
+        /// </summary>
+        internal static string StatusWorkspaceGone {
+            get {
+                return ResourceManager.GetString("StatusWorkspaceGone", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy status query failed ({0}) - {1}.
+        /// </summary>
+        internal static string StatusQueryFailedFormat {
+            get {
+                return ResourceManager.GetString("StatusQueryFailedFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No workspace item context: this page cannot ask the Event Server for a status snapshot..
+        /// </summary>
+        internal static string StatusNoItemContext {
+            get {
+                return ResourceManager.GetString("StatusNoItemContext", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} blocked proxy origin(s) reported for this workspace since the Event Server started tracking. Newest refusal first. The list lives in the Event Server&apos;s memory only - it resets when the Event Server service restarts..
+        /// </summary>
+        internal static string DiagnosticsSummaryFormat {
+            get {
+                return ResourceManager.GetString("DiagnosticsSummaryFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Nothing has been blocked on this workspace since the Event Server started tracking. As Smart Clients open proxied views and the proxy refuses their requests, every refused origin appears here with its cause and hit count. The list lives in the Event Server&apos;s memory only - it resets when the Event Server service restarts..
+        /// </summary>
+        internal static string DiagnosticsEmpty {
+            get {
+                return ResourceManager.GetString("DiagnosticsEmpty", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to on allowlist.
+        /// </summary>
+        internal static string DiagnosticsStatusAllowlisted {
+            get {
+                return ResourceManager.GetString("DiagnosticsStatusAllowlisted", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to certificate trust, not the allowlist.
+        /// </summary>
+        internal static string DiagnosticsStatusCertTrust {
+            get {
+                return ResourceManager.GetString("DiagnosticsStatusCertTrust", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Could not add &apos;{0}&apos; to the allowlist: it is not an exact proxy origin the allowlist can name..
+        /// </summary>
+        internal static string DiagnosticsPromotionRefusedFormat {
+            get {
+                return ResourceManager.GetString("DiagnosticsPromotionRefusedFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} client machine(s) report that the proxy certificate is NOT trusted on their PC. Export it here and distribute it to those machines - their users see a warning banner, and proxied HTTPS pages show a certificate error, until the certificate sits in those machines&apos; trusted roots..
+        /// </summary>
+        internal static string CaUntrustedBannerFormat {
+            get {
+                return ResourceManager.GetString("CaUntrustedBannerFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Machines: {0}.
+        /// </summary>
+        internal static string CaUntrustedMachinesFormat {
+            get {
+                return ResourceManager.GetString("CaUntrustedMachinesFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} ({1} report(s)).
+        /// </summary>
+        internal static string CaUntrustedMachineFormat {
+            get {
+                return ResourceManager.GetString("CaUntrustedMachineFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to 1 resource blocked.
+        /// </summary>
+        internal static string BlockedResourcesIndicatorOne {
+            get {
+                return ResourceManager.GetString("BlockedResourcesIndicatorOne", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} resources blocked.
+        /// </summary>
+        internal static string BlockedResourcesIndicatorMany {
+            get {
+                return ResourceManager.GetString("BlockedResourcesIndicatorMany", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy refused page resources during this page load. Click to list them..
+        /// </summary>
+        internal static string BlockedResourcesToolTip {
+            get {
+                return ResourceManager.GetString("BlockedResourcesToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Blocked page resources (this page load):.
+        /// </summary>
+        internal static string BlockedResourcesHeader {
+            get {
+                return ResourceManager.GetString("BlockedResourcesHeader", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Asking the Event Server for its proxy authority certificate….
+        /// </summary>
+        internal static string ProxyCaExportRunning {
+            get {
+                return ResourceManager.GetString("ProxyCaExportRunning", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No answer from the Event Server: this Management Client has no proxy messaging channel to it. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment..
+        /// </summary>
+        internal static string ProxyCaExportNotConnected {
+            get {
+                return ResourceManager.GetString("ProxyCaExportNotConnected", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy authority certificate does not exist yet on the Event Server. It is created the first time a proxied HTTPS target is used, or you can provision it once on the Event Server machine - see the plugin README..
+        /// </summary>
+        internal static string ProxyCaExportMissing {
+            get {
+                return ResourceManager.GetString("ProxyCaExportMissing", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Proxy certificate export failed ({0}) - {1}.
+        /// </summary>
+        internal static string ProxyCaExportFailedFormat {
+            get {
+                return ResourceManager.GetString("ProxyCaExportFailedFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Save the proxy authority certificate.
+        /// </summary>
+        internal static string ProxyCaExportSaveTitle {
+            get {
+                return ResourceManager.GetString("ProxyCaExportSaveTitle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to X.509 certificate (DER)|*.cer.
+        /// </summary>
+        internal static string ProxyCaExportSaveFilter {
+            get {
+                return ResourceManager.GetString("ProxyCaExportSaveFilter", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Export cancelled - nothing was written..
+        /// </summary>
+        internal static string ProxyCaExportCancelled {
+            get {
+                return ResourceManager.GetString("ProxyCaExportCancelled", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Saved {0} (thumbprint {1}). Distribute it to Smart Client machines&apos; LocalMachine\Root trusted-root store - the recommended path is Active Directory Group Policy; see the plugin README..
+        /// </summary>
+        internal static string ProxyCaExportSavedFormat {
+            get {
+                return ResourceManager.GetString("ProxyCaExportSavedFormat", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The proxy certificate is not trusted on this PC - contact your administrator..
+        /// </summary>
+        internal static string ProxyCaBannerText {
+            get {
+                return ResourceManager.GetString("ProxyCaBannerText", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Fix certificate trust.
+        /// </summary>
+        internal static string ProxyCaFixButtonLabel {
+            get {
+                return ResourceManager.GetString("ProxyCaFixButtonLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Starts the bundled elevated helper to import this proxy&apos;s certificate authority into this machine&apos;s Trusted Root store. Windows will show its elevation prompt and its own root-store warning - import this certificate only if you trust the VMS administrator who deployed the proxy..
+        /// </summary>
+        internal static string ProxyCaFixButtonToolTip {
+            get {
+                return ResourceManager.GetString("ProxyCaFixButtonToolTip", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Dismiss this notice for the rest of this Smart Client session. It reappears in the next session while the certificate is still not trusted..
+        /// </summary>
+        internal static string ProxyCaDismissButtonToolTip {
+            get {
+                return ResourceManager.GetString("ProxyCaDismissButtonToolTip", resourceCulture);
+            }
+        }
     }
 }

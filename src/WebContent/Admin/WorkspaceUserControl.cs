@@ -114,6 +114,55 @@ namespace WebContent.Admin
             set => _page.EnableDevTools = value;
         }
 
+        public bool ProxyEnabled
+        {
+            get => _page.ProxyEnabled;
+            set => _page.ProxyEnabled = value;
+        }
+
+        /// <summary>
+        /// #85: forwards the Proxy tab's max-response-size field (whole-MB text) to the item
+        /// manager for fill and validated save.
+        /// </summary>
+        internal string ProxyResponseCapText
+        {
+            get => _page.ProxyResponseCapText;
+            set => _page.ProxyResponseCapText = value;
+        }
+
+        /// <summary>
+        /// #81: forwards the structured allowlist grid's row surface to the item manager. The
+        /// free-text ProxyTargetsText property left with the txtProxyTargets box it served.
+        /// </summary>
+        internal System.Collections.Generic.IReadOnlyList<ProxyTargetEditorRow> ProxyTargetRows => _page.ProxyTargetRows;
+
+        internal int LoadProxyTargets(System.Collections.Generic.IEnumerable<ProxyTargetConfiguration> stored)
+        {
+            return _page.LoadProxyTargets(stored);
+        }
+
+        // #86: the "Advanced: headers" grids' row surface, forwarded to the item manager exactly
+        // like the allowlist grid's.
+        internal System.Collections.Generic.IReadOnlyList<ProxyHeaderEditorRow> ProxyRequestHeaderRows => _page.ProxyRequestHeaderRows;
+
+        internal System.Collections.Generic.IReadOnlyList<ProxyHeaderEditorRow> ProxyResponseHeaderRows => _page.ProxyResponseHeaderRows;
+
+        internal int LoadProxyHeaderPolicies(
+            System.Collections.Generic.IEnumerable<ProxyHeaderRuleConfiguration> requestStored,
+            System.Collections.Generic.IEnumerable<ProxyHeaderRuleConfiguration> responseStored)
+        {
+            return _page.LoadProxyHeaderPolicies(requestStored, responseStored);
+        }
+
+        // #78: the "Rule triggers" grid's row surface, forwarded to the item manager exactly like
+        // the other Proxy-tab grids.
+        internal System.Collections.Generic.IReadOnlyList<ProxyTriggerEditorRow> ProxyTriggerRows => _page.ProxyTriggerRows;
+
+        internal int LoadProxyTriggers(System.Collections.Generic.IEnumerable<ProxyTriggerConfiguration> stored)
+        {
+            return _page.LoadProxyTriggers(stored);
+        }
+
         internal void ClearUserControl()
         {
             _page.ClearUserControl();
@@ -150,6 +199,31 @@ namespace WebContent.Admin
         internal void ClearConfigurationError()
         {
             _page.ClearConfigurationError();
+        }
+
+        /// <summary>
+        /// #74: forwards the Status tab role-gate decision to the WPF page.
+        /// </summary>
+        internal void SetStatusTabVisible(bool visible)
+        {
+            _page.SetStatusTabVisible(visible);
+        }
+
+        /// <summary>
+        /// #84: forwards the Diagnostics tab role-gate decision (same edit-rights check) to the
+        /// WPF page.
+        /// </summary>
+        internal void SetDiagnosticsTabVisible(bool visible)
+        {
+            _page.SetDiagnosticsTabVisible(visible);
+        }
+
+        /// <summary>
+        /// #76: tells the Status tab which workspace item to ask the Event Server about.
+        /// </summary>
+        internal void SetWorkspaceItemId(string workspaceItemId)
+        {
+            _page.SetWorkspaceItemId(workspaceItemId);
         }
 
         private void OnPageChanged(object sender, EventArgs e)

@@ -1,21 +1,24 @@
-﻿using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Input;
+
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
+
 using VideoOS.Platform;
 
 namespace WebContent.Client
 {
     class BrowserCommand : ICommand, IDisposable
     {
-        private BrowserAction _action;
-        private WebContentViewModel _viewModel;
+        private readonly BrowserAction _action;
+        private readonly WebContentViewModel _viewModel;
         private BrowserInstance _instance;
         private WebView2 _subscribedWebView;
 
         private bool _enabled = true;
-        public bool Enabled {
+        public bool Enabled
+        {
             get => _enabled;
             set
             {
@@ -108,27 +111,44 @@ namespace WebContent.Client
             CanExecuteChanged?.Invoke(this, e);
         }
 
+        private void LogUninitialized(BrowserAction action)
+        {
+            EnvironmentManager.Instance.Log(
+                true,
+                nameof(BrowserCommand),
+                $"Refused {action} on browser {_instance?.Id}: the view has no CoreWebView2 " +
+                "(initialization failed); the WebView recreates when the view is re-selected.");
+        }
+
+        /// <summary>
+        /// #87: the Refresh route for an errored PROXIED view. A proxied browser in the failed-
+        /// init state (NeedsRecreation while proxied) recreates on the next view Init anyway,
+        /// so a Refresh click routes to that same re-creation path instead of Reload.
+        /// </summary>
+        private static bool CanRecreateProxiedProfile(BrowserInstance instance)
+        {
+            return instance != null && instance.IsProxied && instance.NeedsRecreation;
+        }
+
+        /// <summary>Re-queries the toolbar button after a state change the WebView events never report (e.g. a failed init).</summary>
+        internal void RaiseCanExecuteChanged()
+        {
+            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         public bool CanExecute(object parameter)
         {
             if (!Enabled) return false;
 
-            switch (_action)
-            {
-                case BrowserAction.NavigateBack:
-                    return _instance?.WebView?.CanGoBack ?? false;
-                case BrowserAction.NavigateForward:
-                    return _instance?.WebView?.CanGoForward ?? false;
-                case BrowserAction.NavigateHome:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                case BrowserAction.NavigateTo:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                case BrowserAction.Refresh:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                case BrowserAction.Print:
-                    return _instance?.WebView?.IsLoaded ?? false;
-                default:
-                    throw new InvalidOperationException($"BrowserAction not supported: {_action}");
-            }
+            var webView = _instance?.WebView;
+            // The wrapper's own CanGoBack/CanGoForward getters already answer false without a
+            // CoreWebView2; pass their values anyway so the admission rule is stated once.
+            return BrowserCommandAdmission.IsAvailable(
+                _action,
+                webView?.CoreWebView2 != null,
+                webView?.CanGoBack ?? false,
+                webView?.CanGoForward ?? false,
+                CanRecreateProxiedProfile(_instance));
         }
 
         public void Execute(object parameter)
@@ -139,10 +159,12 @@ namespace WebContent.Client
                 switch (_action)
                 {
                     case BrowserAction.NavigateBack:
-                        _instance?.WebView?.GoBack();
+                        if (_instance?.WebView?.CoreWebView2 != null) _instance.WebView.GoBack();
+                        else LogUninitialized(_action);
                         break;
                     case BrowserAction.NavigateForward:
-                        _instance?.WebView?.GoForward();
+                        if (_instance?.WebView?.CoreWebView2 != null) _instance.WebView.GoForward();
+                        else LogUninitialized(_action);
                         break;
                     case BrowserAction.NavigateHome:
                         if (parameter is string address && _instance != null)
@@ -153,7 +175,29 @@ namespace WebContent.Client
                     case BrowserAction.NavigateTo:
                         break;
                     case BrowserAction.Refresh:
-                        _instance?.WebView?.Reload();
+                        // Reload() throws InvalidOperationException (VerifyCoreWebView2) when the
+                        // init failed — the crash the live user hit. Never call it without a
+                        // CoreWebView2; NeedsRecreation then recreates the WebView on next select.
+                        if (_instance?.WebView?.CoreWebView2 != null)
+                        {
+                            _instance.WebView.Reload();
+                        }
+                        else if (CanRecreateProxiedProfile(_instance))
+                        {
+                            // #87: the errored proxied view's Refresh re-attempts creation
+                            // through the existing re-creation path (it succeeds once the
+                            // owning session exits); never Reload on the dead control.
+                            EnvironmentManager.Instance.Log(
+                                false,
+                                nameof(BrowserCommand),
+                                $"Refresh on proxied browser {_instance.Id} re-attempts WebView creation (the last initialization failed; the WebView recreates instead of reloading).");
+                            _viewModel.RecreateBrowserForRefresh();
+                            RaiseCanExecuteChanged();
+                        }
+                        else
+                        {
+                            LogUninitialized(_action);
+                        }
                         break;
                     case BrowserAction.Print:
                         _instance?.WebView?.CoreWebView2?.ShowPrintUI();

@@ -28,7 +28,10 @@
                         <platformUiControls:VideoOSIconBuiltInSource Icon="Chevron_Right"/>
                     </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
                 </platformUiControls:VideoOSButtonTransparentSmall>
-                <platformUiControls:VideoOSButtonTransparentSmall Name="NavReload" Command="{Binding ReloadCommand}" Margin="1 2">
+                <!-- #87: explicit AutomationId so the live probe can drive Refresh on an errored
+                     proxied view (x:Name peers are proven for the banner/button shapes, pinned
+                     here anyway). -->
+                <platformUiControls:VideoOSButtonTransparentSmall Name="NavReload" AutomationProperties.AutomationId="NavReload" Command="{Binding ReloadCommand}" Margin="1 2">
                     <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
                         <platformUiControls:VideoOSIconBuiltInSource Icon="Refresh"/>
                     </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
@@ -43,11 +46,58 @@
                         <platformUiControls:VideoOSIconBuiltInSource Icon="Print"/>
                     </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
                 </platformUiControls:VideoOSButtonTransparentSmall>
+                <!-- #83: setup-mode blocked-resources indicator. Collapsed while the tally is
+                     zero or the client is in runtime mode; click opens the per-page-load list.
+                     VideoOSButtonTransparentSmall is an icon-only control: its template never
+                     presents text Content, so the first live SC-7 run (2026-11-03) proved the
+                     "N resources blocked" label rendered nothing and surfaced no UIA peer. The
+                     label is a sibling TextBlock in the same toolbar row, toggled in lockstep
+                     with the button (UpdateBlockedIndicator); its AutomationId is set explicitly
+                     because x:Name alone has no proven peer on a bare TextBlock. -->
+                <platformUiControls:VideoOSButtonTransparentSmall Name="blockedIndicator" DockPanel.Dock="Right" Visibility="Collapsed" Click="blockedIndicator_Click" Margin="2">
+                    <platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                        <platformUiControls:VideoOSIconBuiltInSource Icon="Warning_Combined"/>
+                    </platformUiControls:VideoOSButtonTransparentSmall.IconSource>
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <TextBlock Name="blockedIndicatorText" DockPanel.Dock="Right" Visibility="Collapsed" VerticalAlignment="Center" Margin="2 4 4 4" Foreground="White" AutomationProperties.AutomationId="blockedIndicatorText" />
                 <platformUiControls:VideoOSTextBoxSmall Name="addressBar" VerticalContentAlignment="Center" Visibility="{Binding AddressVisibility}" Text="{Binding Address, Mode=OneWay}" KeyDown="addressBar_KeyDown" Margin="0 2 2 2" IsEnabled="{Binding IsAddressEnabled}" />
             </DockPanel>
             <platformUiControls:VideoOSInlineMessageSmall Name="addressWarning" Appearance="Error" Visibility="Collapsed" MinLines="1" MaxLines="2" Margin="0 0 0 2" />
+            <!-- #83: per-view-instance list of what the loopback listener refused this page load:
+                 canonical origin (selectable for copying), refusal category, hit count. -->
+            <Border Name="blockedResourcesPanel" Visibility="Collapsed" Margin="0 0 0 2" Padding="4" BorderThickness="1" BorderBrush="Gray" Background="#33000000">
+                <StackPanel Name="blockedResourcesRows" />
+            </Border>
         </StackPanel>
-        <DockPanel Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown">
+        <!-- #72: untrusted deployment-CA banner, shown for ALL users of a proxied view whose
+             loopback leaf chains to a CA this machine's trusted-root stores do not hold (the
+             browser itself shows its own certificate error under this strip). Informational for
+             ordinary users: dismiss for this session only. The "Fix certificate trust" button is
+             setup-mode-only and launches the bundled elevated helper (WebContentTrustHelper.exe);
+             Windows' elevation prompt and crypt32's root-store warning both ride it, unsuppressed.
+             Collapsed while the CA is trusted, unknown (no mint yet), or dismissed this session. -->
+        <Border Name="proxyCaBanner" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0 2" Padding="6 4" BorderThickness="1" BorderBrush="#80C8860E" Background="#40C8860E">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Name="proxyCaBannerText" Grid.Column="0" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="White" />
+                <platformUiControls:VideoOSButtonTransparentSmall Name="proxyCaFixButton" Grid.Column="1" Visibility="Collapsed" Click="proxyCaFixButton_Click" Margin="8 0 2 0">
+                    <TextBlock Name="proxyCaFixButtonText" VerticalAlignment="Center" Margin="2 0" />
+                </platformUiControls:VideoOSButtonTransparentSmall>
+                <platformUiControls:VideoOSButtonTransparentSmall Name="proxyCaDismissButton" Grid.Column="2" Click="proxyCaDismissButton_Click" Margin="2 0 0 0">
+                    <TextBlock Text="&#x2715;" VerticalAlignment="Center" Margin="2 0" />
+                </platformUiControls:VideoOSButtonTransparentSmall>
+            </Grid>
+        </Border>
+        <!-- #87: the browser host is a Grid (was a DockPanel) so the profile-ownership notice
+             below can occupy the SAME area the WebView fills instead of competing for a docked
+             slot: while the notice stands, the blank control is collapsed and the notice is
+             what the user reads. Children order (hence z-order) is unchanged in spirit:
+             placeholder, error notice, then the WebView added by code on top. -->
+        <Grid Name="Panel" Background="DimGray" MouseDown="ViewItemWpfUserControl_MouseDown">
             <TextBlock Name="FloatingPlaceholder" Visibility="{Binding IsWorkspaceFloating, Converter={StaticResource BooleanToVisibilityConverter}}"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
                        TextAlignment="Center" Foreground="LightGray" FontSize="14">
@@ -58,6 +108,27 @@
                     </MultiBinding>
                 </TextBlock.Text>
             </TextBlock>
-        </DockPanel>
+            <!-- #87 interim contract (ADR-0004): a PROXIED browser whose CoreWebView2 failed to
+                 initialize because another Smart Client session on this machine owns the boundary
+                 profile shows this honest in-view notice instead of a blank WebView. Collapsed
+                 whenever there is no recorded failure; the texts come from the shared
+                 ProxyErrorPage wording layer (distinct browser-profile-owned cause) and the
+                 AutomationIds are what the live two-client probe asserts. -->
+            <Border Name="profileOwnershipError" Visibility="Collapsed" Background="#F5F5F5"
+                    BorderBrush="#C8860E" BorderThickness="1" CornerRadius="6"
+                    MaxWidth="680" Margin="24" Padding="28 22"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock Name="profileOwnershipCause" AutomationProperties.AutomationId="profileOwnershipCause"
+                               Foreground="#6C3C00" FontSize="13" TextWrapping="Wrap" />
+                    <TextBlock Name="profileOwnershipHeadline" AutomationProperties.AutomationId="profileOwnershipHeadline"
+                               Foreground="#1B1B1B" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0 8 0 10" />
+                    <TextBlock Name="profileOwnershipText" AutomationProperties.AutomationId="profileOwnershipText"
+                               Foreground="#1B1B1B" FontSize="14" TextWrapping="Wrap" />
+                    <TextBlock Name="profileOwnershipDetail" AutomationProperties.AutomationId="profileOwnershipDetail"
+                               Foreground="#5A5A5A" FontSize="12" TextWrapping="Wrap" Margin="0 14 0 0" />
+                </StackPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </client:ViewItemWpfUserControl>

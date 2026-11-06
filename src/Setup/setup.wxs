@@ -1,14 +1,72 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-    xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+    xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+    xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
     <Package Name="Cascadia Web Content Plugin" Manufacturer="Cascadia Technology"
         Version="$(Version)"
         UpgradeCode="3AE48765-7EE5-454C-A804-3106ACE585B7">
-        <MajorUpgrade AllowDowngrades="yes" />
+        <!-- #70: the old product's files are torn out only after the new ones land, so the
+             WixCloseApplications kill below (seq 1501, right after InstallInitialize) always
+             precedes any file removal - Smart Client/Management Client hold the drop DLLs.
+             Shared component ids survive the late removal via MSI reference counting. -->
+        <MajorUpgrade AllowDowngrades="yes" Schedule="afterInstallExecute" />
         <MediaTemplate EmbedCab="yes" />
+
+        <!-- #70: Smart Client and Management Client are not RestartManager-cooperative, and
+             WiX v7 removed the CloseApplications element anyway, so force-close the plugin
+             hosts with util:CloseApplication: the immediate CA scans at InstallInitialize+1
+             and its deferred (SYSTEM) leg TerminateProcess-es any still-running target before
+             RemoveFiles/InstallFiles run. Full-UI installs (MUILevel=5) get a plain
+             Abort/Retry/Ignore warning naming the app first (default button: keep going);
+             scripted installs kill silently. Never enable PromptToContinue without the
+             MUILevel guard - with no UI to answer it the CA errors out and fails the install.
+             VideoOS.OAuth2TokenGenerator.exe is closed too: Smart Client is observed hosting
+             plugin views in that process, which locks the drop DLLs. -->
+        <util:CloseApplication Id="CloseSmartClient" Target="Client.exe"
+            Description="XProtect Smart Client is running and must be closed to update the Web Content Plugin. Any unsaved Smart Client configuration will be lost."
+            TerminateProcess="0" RebootPrompt="no" PromptToContinue="yes" Condition="MUILevel=5" Sequence="1" />
+        <util:CloseApplication Id="CloseSmartClientQuiet" Target="Client.exe"
+            TerminateProcess="0" RebootPrompt="no" Condition="MUILevel&lt;&gt;5" Sequence="2" />
+        <util:CloseApplication Id="CloseManagementClient" Target="VideoOS.Administration.exe"
+            Description="XProtect Management Client is running and must be closed to update the Web Content Plugin. Any unsaved Management Client configuration will be lost."
+            TerminateProcess="0" RebootPrompt="no" PromptToContinue="yes" Condition="MUILevel=5" Sequence="3" />
+        <util:CloseApplication Id="CloseManagementClientQuiet" Target="VideoOS.Administration.exe"
+            TerminateProcess="0" RebootPrompt="no" Condition="MUILevel&lt;&gt;5" Sequence="4" />
+        <util:CloseApplication Id="CloseTokenGenerator" Target="VideoOS.OAuth2TokenGenerator.exe"
+            TerminateProcess="0" RebootPrompt="no" Sequence="5" />
 
         <Icon Id="CascadiaIcon" SourceFile="..\WebContent\Resources\icon.ico" />
         <Property Id="ARPPRODUCTICON" Value="CascadiaIcon" />
+
+        <!-- #82: Event Server service flow detection.
+             EVENTSERVERSERVICEPRESENT: the MilestoneEventServerService key in the service
+             control manager's registry view. One property gates BOTH halves of the feature -
+             the dialog hop to the restart-choice page (setupui.wxs) and the two service
+             custom actions below - so a machine without an Event Server never sees any of
+             it. Type="raw" on ImagePath: the key exists exactly when the service is installed.
+             WEBCONTENTPLUGINPRESENT: plugin files already on disk from any earlier route
+             (MSI upgrade OR the dev Copy-Item deploy), i.e. the drop DLLs may be locked by
+             a running Event Server and the stop action is required. A genuine first-time
+             install on an ES machine has neither, so nothing is ever stopped there.
+             RESTART_EVENT_SERVER: the finish-page checkbox, checked by default; public so
+             the UI value flows into the execute sequence and so scripted installs can pass
+             RESTART_EVENT_SERVER=0 on the command line to leave the service stopped.
+              PROXY_SUPPORT (#77): the proxy opt-in checkbox on the same page, checked by
+              default; gates the install-time deployment-CA custom action below. Scripted
+              installs decline with PROXY_SUPPORT=0 - one public property shared by the
+              dialog checkbox and the action condition, like everything else here. -->
+        <Property Id="EVENTSERVERSERVICEPRESENT">
+            <RegistrySearch Id="EventServerServiceImagePath" Root="HKLM"
+                Key="SYSTEM\CurrentControlSet\Services\MilestoneEventServerService"
+                Name="ImagePath" Type="raw" Bitness="always64" />
+        </Property>
+        <Property Id="WEBCONTENTPLUGINPRESENT">
+            <DirectorySearch Id="PluginDropDir" Path="C:\Program Files\VideoOS\MIPPlugins\CascadiaWebContentPlugin">
+                <FileSearch Id="PluginDropWebContentDll" Name="WebContent.dll" />
+            </DirectorySearch>
+        </Property>
+        <Property Id="RESTART_EVENT_SERVER" Value="1" />
+        <Property Id="PROXY_SUPPORT" Value="1" />
 
         <StandardDirectory Id="ProgramFiles64Folder">
             <Directory Name="VideoOS">
@@ -34,15 +92,80 @@
         <CustomAction Id="InvokeStandalone" BinaryRef="MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
             Execute="deferred" ExeCommand=" /silent /install" Return="check" />
 
+        <!-- #82: Event Server service handling, exactly the three ticket branches:
+             1. ES present + plugin files already installed (upgrade or post-Copy-Item):
+                StopEventServerService (deferred, SYSTEM) stops MilestoneEventServerService
+                and polls the SCM until it really reports Stopped - its stop is slow and a
+                still-stopping service keeps the drop DLLs locked, which is the 1603 race.
+                No fixed sleep anywhere.
+             2. ES present + first-time plugin install: NEITHER action fires (the stop
+                condition requires WIX_UPGRADE_DETECTED or WEBCONTENTPLUGINPRESENT); only
+                the restart-choice page runs.
+             3. No ES: EVENTSERVERSERVICEPRESENT is false, so neither action is ever
+                scheduled and the choice page never shows.
+             RestartEventServerService implements the finish-page choice: Yes (the default,
+             or RESTART_EVENT_SERVER=1 scripted) (re)starts the service right after the new
+             files land; No leaves it wherever the flow left it and the installer's exit
+             page text tells the admin to start it. Both run from the same streamed exe
+             (built by src/WebContentServiceCtl), Return="check" so a failed wait fails the
+             install instead of copying locked files. -->
+        <Binary Id="WebContentServiceCtl.exe"
+            SourceFile="$(var.ServiceCtlExePath)" />
+        <CustomAction Id="StopEventServerService" BinaryRef="WebContentServiceCtl.exe"
+            ExeCommand="stop MilestoneEventServerService" Execute="deferred" Return="check" />
+        <CustomAction Id="RestartEventServerService" BinaryRef="WebContentServiceCtl.exe"
+            ExeCommand="restart MilestoneEventServerService" Execute="deferred" Return="check" />
+
+        <!-- #77: the install-time deployment CA (ADR-0003 as amended; inverts the ADR's
+              original "not a WiX custom action" ordering objection - creation runs ON the
+              Event Server machine DURING install, not from the client package). Gated on
+              ES present AND the proxy opt-in: a machine without an Event Server, or an
+              admin who left the box unticked, never has LocalMachine\Personal touched.
+              The action runs AFTER InstallFiles because the helper drives the plugin's
+              OWN load-or-create by reflection into the just-installed WebContent.dll -
+              identical CA shape, no second minting recipe to drift. Reuse of an existing
+              valid CA is untouched (the plugin path reuses it; the grant step is
+              idempotent), so upgrade re-runs preserve thumbprint and DACL. Return="check":
+              an opted-in proxy whose CA or key grant failed is exactly the loud, rolled-
+              back failure the epic demands, never a half-provisioned deployment. -->
+        <Binary Id="WebContentProxyCa.exe"
+            SourceFile="$(var.ProxyCaExePath)" />
+        <CustomAction Id="CreateProxyAuthority" BinaryRef="WebContentProxyCa.exe"
+            ExeCommand="provision MilestoneEventServerService" Execute="deferred" Return="check" />
+
         <InstallExecuteSequence>
+            <!-- #70: pin the Util CloseApplications scan right after InstallInitialize (its
+                 deferred kill leg must be scheduled inside the script); upstream Util tests
+                 pin it the same way. -->
+            <Custom Action="override Wix4CloseApplications_$(sys.BUILDARCHSHORT)" After="InstallInitialize" />
             <Custom Action="InvokeStandalone" Before="InstallFinalize"
                 Condition="NOT(REMOVE OR WVRTINSTALLED)" />
+            <!-- #82: stop AFTER the #70 client kills (same inside-the-script window, before
+                 RemoveFiles/InstallFiles) so the Event Server is quiesced before any file is
+                 touched; restart directly after InstallFiles so the service comes back up
+                 on the new drop. #77: the CA action slots between the file copy and the
+                 service (re)start - the drop must be on disk (the helper reflects into it)
+                 and the service coming up on a provisioned CA is the tidy ordering. -->
+            <Custom Action="StopEventServerService" After="Wix4CloseApplications_$(sys.BUILDARCHSHORT)"
+                Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT)" />
+            <Custom Action="CreateProxyAuthority" After="InstallFiles"
+                Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND PROXY_SUPPORT=&quot;1&quot;" />
+            <Custom Action="RestartEventServerService" After="CreateProxyAuthority"
+                Condition="NOT REMOVE AND EVENTSERVERSERVICEPRESENT AND RESTART_EVENT_SERVER=&quot;1&quot;" />
         </InstallExecuteSequence>
 
-        <ui:WixUI Id="WixUI_Minimal" InstallDirectory="INSTALLFOLDER" />
-        <WixVariable
-            Id="WixUILicenseRtf"
-            Value="license.rtf"
-        />
+        <!-- #82: when the admin declined the restart, the finish page itself states that
+             the stopped Event Server must be started for the new plugin files to load
+             (stop branch only - a first-time install never stopped anything). ExitDialog
+             is a termination pseudo-action with no schedulable position, so the property
+             is set just before ProgressDlg - the checkbox value is fixed long before. -->
+        <SetProperty Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+            Value="!(loc.WebContentEsExitText)" Sequence="ui" Before="ProgressDlg"
+            Condition="EVENTSERVERSERVICEPRESENT AND (WIX_UPGRADE_DETECTED OR WEBCONTENTPLUGINPRESENT) AND NOT RESTART_EVENT_SERVER" />
+
+        <!-- #82: replaces WixUI_Minimal (forked in setupui.wxs) so the install can carry
+             the Event Server restart choice; the license agreement itself now binds
+             directly to src/WebContent/license.rtf from the fork. -->
+        <ui:WixUI Id="WebContentMinimal" InstallDirectory="INSTALLFOLDER" />
     </Package>
 </Wix>

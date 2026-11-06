@@ -101,6 +101,28 @@
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
 
+  <!-- #81: full-host-wildcard advisory: a loud amber, one step below the red error banner. -->
+  <SolidColorBrush x:Key="Brush.Warning.Background" Color="#FFFDF3E0" />
+  <SolidColorBrush x:Key="Brush.Warning.Border" Color="#FFB26A00" />
+  <SolidColorBrush x:Key="Brush.Warning.Foreground" Color="#FF7A4A00" />
+
+  <Style x:Key="WarningBannerStyle" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource Brush.Warning.Background}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Brush.Warning.Border}" />
+    <Setter Property="BorderThickness" Value="4,0,0,0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="Margin" Value="0,0,0,10" />
+  </Style>
+
+  <Style x:Key="WarningBannerTextStyle" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="Segoe UI" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource Brush.Warning.Foreground}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
   <Style x:Key="StepNumberStyle" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="Segoe UI" />
     <Setter Property="FontSize" Value="13" />

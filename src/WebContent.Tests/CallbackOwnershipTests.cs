@@ -1,8 +1,10 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Xunit;
+
 using WebContent.Client;
+
+using Xunit;
 
 namespace WebContent.Tests
 {

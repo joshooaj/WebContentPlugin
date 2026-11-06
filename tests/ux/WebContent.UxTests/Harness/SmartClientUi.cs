@@ -1,3 +1,6 @@
+using System.IO;
+using System.Text;
+
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 
@@ -70,6 +73,25 @@ public static class SmartClientUi
             }
             Thread.Sleep(1000);
         }
+        Artifacts.Window(mainWindow, "sc-select-workspace-fail");
+        try
+        {
+            var dump = new StringBuilder();
+            dump.AppendLine($"select-workspace-fail for '{workspaceName}' {DateTime.Now:HH:mm:ss}");
+            foreach (var w in session.Windows())
+            {
+                static string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
+                dump.AppendLine($"  window aid='{Safex(() => w.AutomationId)}' class='{Safex(() => w.ClassName)}' name='{Safex(() => w.Name)}'");
+            }
+            var blocks = mainWindow.FindAllDescendants(cf => cf.ByAutomationId("_textTextBlock"))
+                .Select(t => "'" + t.Name + "'");
+            var texts = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Text))
+                .Take(40).Select(t => "'" + t.Name + "'");
+            dump.AppendLine("  _textTextBlock strip: " + string.Join(", ", blocks));
+            dump.AppendLine("  Text elements: " + string.Join(", ", texts));
+            File.AppendAllText(Artifacts.PathOf("sc-select-workspace-fail.txt"), dump + Environment.NewLine);
+        }
+        catch { }
         throw new TimeoutException($"Workspace '{workspaceName}' is neither a strip tab nor an overflow entry. Overflow saw: {string.Join(", ", seen)}");
     }
 
@@ -141,6 +163,42 @@ public static class SmartClientUi
         FlaUI.Core.Input.Keyboard.Type(url);
         Thread.Sleep(300);
         FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.RETURN);
+    }
+
+    /// <summary>
+    /// Selects the named workspace tab WITHOUT input injection (no mouse, no keyboard): a
+    /// disconnected desktop session rejects SendInput with ERROR_ACCESS_DENIED while every
+    /// UIA pattern keeps working. Walks up from the tab's text block and tries Invoke,
+    /// SelectionItem.Select, then legacy select on the first ancestor that supports one.
+    /// Returns whether a pattern fired.
+    /// </summary>
+    public static bool TrySelectWorkspaceWithoutInput(Window mainWindow, ClientSession session, string workspaceName)
+    {
+        mainWindow = session.Windows().FirstOrDefault(w => w.AutomationId == "_mainApplicationWindow") ?? mainWindow;
+        var label = mainWindow.FindAllDescendants(cf => cf.ByAutomationId("_textTextBlock"))
+            .FirstOrDefault(t => string.Equals(t.Name, workspaceName, StringComparison.OrdinalIgnoreCase));
+        if (label == null) return false;
+        AutomationElement current = label;
+        for (var hop = 0; hop < 4 && current != null; hop++)
+        {
+            try
+            {
+                if (current.Patterns.Invoke.IsSupported) { current.Patterns.Invoke.Pattern.Invoke(); Thread.Sleep(2500); return true; }
+            }
+            catch { }
+            try
+            {
+                if (current.Patterns.SelectionItem.IsSupported) { current.Patterns.SelectionItem.Pattern.Select(); Thread.Sleep(2500); return true; }
+            }
+            catch { }
+            try
+            {
+                if (current.Patterns.LegacyIAccessible.IsSupported) { current.Patterns.LegacyIAccessible.Pattern.Select(9); Thread.Sleep(2500); return true; }
+            }
+            catch { }
+            current = current.Parent;
+        }
+        return false;
     }
 
     public static AutomationElement WaitForMipViewItem(Window mainWindow, int timeoutSeconds = 60)

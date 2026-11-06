@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
              mc:Ignorable="d"
              d:DesignHeight="560" d:DesignWidth="760"
              Background="White">
@@ -11,82 +12,685 @@
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/WebContent;component/Admin/AdminPageStyles.xaml" />
       </ResourceDictionary.MergedDictionaries>
+      <!-- #81: the one scheme set the grid dropdown offers - exactly what ProxyPolicy accepts. -->
+      <x:Array x:Key="ProxySchemes" Type="{x:Type sys:String}">
+        <sys:String>http</sys:String>
+        <sys:String>https</sys:String>
+      </x:Array>
+      <!-- #78: the one method set the trigger grid's dropdown offers - exactly the verbs the
+           proxy fetch path relays (any-method "*" first). A trigger naming another verb could
+           never match real traffic, so the dropdown never offers it; the grammar itself stays
+           ProxyTriggerPolicy's. -->
+      <x:Array x:Key="ProxyTriggerMethods" Type="{x:Type sys:String}">
+        <sys:String>*</sys:String>
+        <sys:String>GET</sys:String>
+        <sys:String>HEAD</sys:String>
+        <sys:String>POST</sys:String>
+        <sys:String>PUT</sys:String>
+        <sys:String>DELETE</sys:String>
+        <sys:String>OPTIONS</sys:String>
+        <sys:String>PATCH</sys:String>
+      </x:Array>
+      <!-- #84: the stock bool→Visibility converter behind the promote button's per-row visibility.
+           Built-in WPF type on purpose: anything custom in this page's XAML risks the whole-page
+           BAML load failure learned live in the MC-13 walk. -->
+      <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     </ResourceDictionary>
   </UserControl.Resources>
 
-  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <StackPanel MaxWidth="760" Margin="20,16,20,24">
+  <!--
+    Ticket #74: the workspace config page is now a tabbed shell. The Settings tab carries the
+    existing content verbatim; Proxy/Diagnostics are landing panels for the epic tickets (#81,
+    #85, #86, #84) and hold NO input controls - a placeholder tab must never dirty the pane. Status
+    is live since #76 and is strictly read-only. Status AND Diagnostics (#84) start collapsed: the
+    item manager shows them only after the workspace item's SecurityActions Manage (edit-rights)
+    check passes for the current MC user.
+    #81 took the Proxy tab live: the whole proxy section (routing toggle, the structured allowlist
+    grid, the wildcard warning, the fetch harness) now lives there - the Settings tab keeps no
+    proxy controls. #84 took the Diagnostics tab live: the Event Server's recently-blocked list
+    with one-click exact-origin promotion into the Proxy tab's allowlist grid.
+    Tab x:Names are UIA AutomationIds - the ux probes and later tickets select tabs by them.
+  -->
+  <TabControl x:Name="workspaceTabs" Background="White"
+              BorderBrush="{StaticResource Brush.Card.Border}" BorderThickness="0,1,0,0">
+    <TabControl.Resources>
+      <Style TargetType="TabItem">
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Padding" Value="14,6" />
+      </Style>
+    </TabControl.Resources>
 
-      <!-- Ticket #27: broken-definition banner, shown by SignalLoadDefect. -->
-      <Border x:Name="configError" Style="{StaticResource ErrorBannerStyle}" Visibility="Collapsed">
-        <TextBlock x:Name="configErrorText" Style="{StaticResource ErrorBannerTextStyle}" />
-      </Border>
+    <TabItem x:Name="tabSettings" Header="Settings">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="760" Margin="20,16,20,24">
 
-      <Border Style="{StaticResource CardStyle}">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="150" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-          </Grid.RowDefinitions>
+          <!-- Ticket #27: broken-definition banner, shown by SignalLoadDefect. -->
+          <Border x:Name="configError" Style="{StaticResource ErrorBannerStyle}" Visibility="Collapsed">
+            <TextBlock x:Name="configErrorText" Style="{StaticResource ErrorBannerTextStyle}" />
+          </Border>
 
-          <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Name:" />
-          <TextBox x:Name="txtName" Grid.Row="0" Grid.Column="1"
-                   Style="{StaticResource FormTextBoxStyle}" Text="New Workspace"
-                   MaxLength="128" TextChanged="OnUserChanged" />
+          <Border Style="{StaticResource CardStyle}">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
 
-          <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Home address:" />
-          <TextBox x:Name="txtHomeAddress" Grid.Row="1" Grid.Column="1"
-                   Style="{StaticResource FormTextBoxStyle}"
-                   MaxLength="2048" TextChanged="OnUserChanged" />
-        </Grid>
-      </Border>
+              <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Name:" />
+              <TextBox x:Name="txtName" Grid.Row="0" Grid.Column="1"
+                       Style="{StaticResource FormTextBoxStyle}" Text="New Workspace"
+                       MaxLength="128" TextChanged="OnUserChanged" />
 
-      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Display" />
-      <CheckBox x:Name="chkHideToolbar" Content="Hide toolbar"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnHideToolbarChanged" Unchecked="OnHideToolbarChanged" />
-      <CheckBox x:Name="chkHideAddress" Content="Hide address"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-        <TextBlock x:Name="lblZoomLevel" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Zoom level:" Margin="0,6,12,6" />
-        <TextBox x:Name="txtZoomLevel" Grid.Column="1" Style="{StaticResource FormTextBoxStyle}"
-                 Width="70" Text="100" TextAlignment="Right"
-                 MaxLength="4" TextChanged="OnZoomLevelTextChanged" />
-        <Slider x:Name="zoomSlider" Grid.Column="2" Minimum="25" Maximum="500" Value="100"
-                TickFrequency="25" TickPlacement="BottomRight" IsSnapToTickEnabled="False"
-                LargeChange="25" SmallChange="5" VerticalAlignment="Center"
-                Margin="12,0,0,0" MaxWidth="360" HorizontalAlignment="Left" Width="360"
-                ValueChanged="OnZoomSliderValueChanged" />
+              <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Home address:" />
+              <TextBox x:Name="txtHomeAddress" Grid.Row="1" Grid.Column="1"
+                       Style="{StaticResource FormTextBoxStyle}"
+                       MaxLength="2048" TextChanged="OnUserChanged" />
+            </Grid>
+          </Border>
+
+          <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Display" />
+          <CheckBox x:Name="chkHideToolbar" Content="Hide toolbar"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnHideToolbarChanged" Unchecked="OnHideToolbarChanged" />
+          <CheckBox x:Name="chkHideAddress" Content="Hide address"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="lblZoomLevel" Grid.Column="0" Style="{StaticResource FieldLabelStyle}" Text="Zoom level:" Margin="0,6,12,6" />
+            <TextBox x:Name="txtZoomLevel" Grid.Column="1" Style="{StaticResource FormTextBoxStyle}"
+                     Width="70" Text="100" TextAlignment="Right"
+                     MaxLength="4" TextChanged="OnZoomLevelTextChanged" />
+            <Slider x:Name="zoomSlider" Grid.Column="2" Minimum="25" Maximum="500" Value="100"
+                    TickFrequency="25" TickPlacement="BottomRight" IsSnapToTickEnabled="False"
+                    LargeChange="25" SmallChange="5" VerticalAlignment="Center"
+                    Margin="12,0,0,0" MaxWidth="360" HorizontalAlignment="Left" Width="360"
+                    ValueChanged="OnZoomSliderValueChanged" />
+          </Grid>
+
+          <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Behavior" />
+          <CheckBox x:Name="chkRememberLastAddress" Content="Remember last address"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+          <CheckBox x:Name="chkAllowBackgroundBrowser" Content="Allow browser to run in background"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+          <CheckBox x:Name="chkAllowAudioNotifications" Content="Allow audio notifications"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+          <CheckBox x:Name="chkMuteAudio" Content="Mute audio"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+
+          <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Privacy" />
+          <CheckBox x:Name="chkClearBrowsingDataOnExit" Content="Clear history on exit"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+
+          <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Advanced" />
+          <CheckBox x:Name="chkIsolateBrowserInstances" Content="Isolate this browser instance"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+          <CheckBox x:Name="chkEnableDevTools" Content="Enable developer tools (F12)"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+
+        </StackPanel>
+      </ScrollViewer>
+    </TabItem>
+
+    <TabItem x:Name="tabProxy" Header="Proxy">
+      <!--
+        Ticket #81: the proxy section lives here in full - the routing toggle, the structured
+        allowlist grid that replaces the free-text one-line-per-entry box, the full-host-wildcard
+        warning banner, and the #53 fetch harness the admin uses to prove a gate decision. Every
+        entry is a row: scheme dropdown, wildcard-aware host, optional port, accept-untrusted
+        checkbox (the old free-text "accept-untrusted" token is gone from the UI), plus an inline
+        Problem cell so a refused entry is flagged on its row and its save refused by name -
+        never silently dropped. Entries load from either stored shape (#73) and save structured.
+      -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="760" Margin="20,16,20,24">
+          <TextBlock x:Name="txtProxyTabHeading" Style="{StaticResource SectionHeaderStyle}" Margin="0,0,0,6" Text="Proxy" />
+          <CheckBox x:Name="chkProxyEnabled" Content="Route web traffic through the VMS server proxy"
+                    Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+
+          <!--
+            Ticket #85: the workspace's max proxied response size, in whole MB. The Event Server
+            clamps the stored value server-side (5 MB default, 20 MB ceiling); the page validates
+            the same range at save time and refuses an out-of-range entry by name rather than
+            silently rewriting what the admin typed. The cap governs fetch-mode responses only -
+            the hint says so, tunnels/websockets stay uncapped.
+          -->
+          <TextBlock x:Name="lblProxyResponseCap" Style="{StaticResource FieldLabelStyle}" Text="Max proxied response size (MB):" Margin="0,10,0,2" />
+          <StackPanel Orientation="Horizontal">
+            <TextBox x:Name="txtProxyResponseCapMB" AutomationProperties.AutomationId="proxyResponseCapMB"
+                     Style="{StaticResource FormTextBoxStyle}" Width="80" MaxLength="8"
+                     TextAlignment="Right" VerticalAlignment="Center" TextChanged="OnProxyResponseCapTextChanged" />
+            <TextBlock x:Name="lblProxyResponseCapHint" Style="{StaticResource SecondaryTextStyle}"
+                       TextWrapping="Wrap" Margin="12,0,0,0" MaxWidth="560" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <TextBlock x:Name="lblProxyTargets" Style="{StaticResource FieldLabelStyle}" Text="Proxy targets:" Margin="0,10,0,2" />
+
+          <Border x:Name="proxyWildcardWarning" Style="{StaticResource WarningBannerStyle}" Visibility="Collapsed">
+            <TextBlock x:Name="txtProxyWildcardWarning" Style="{StaticResource WarningBannerTextStyle}" TextWrapping="Wrap" />
+          </Border>
+
+          <!--
+            Every cell is a live editor (template columns, no grid edit mode) so the row's Problem
+            cell always shows why a half-typed entry is refused. Virtualization is off: the list is
+            a handful of rows, and a probe (or a admin) must see every row realized.
+          -->
+          <DataGrid x:Name="dgProxyTargets" AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="72" MaxHeight="260" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="Scheme" Width="100">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!--
+                      UpdateSourceTrigger=PropertyChanged is load-bearing here, not decoration: a
+                      DataGrid defers the source update of any cell-content binding that does not
+                      ask for it (learned live on #81 - picking http in this dropdown changed the
+                      row's display and silently stored https; the accept-untrusted checkbox fell
+                      into the same trap one run later). The grid's whole design is "every cell is
+                      a live editor", so every writeable cell binding says PropertyChanged.
+                    -->
+                    <ComboBox x:Name="cmbProxyRowScheme" AutomationProperties.AutomationId="proxyRowScheme"
+                              ItemsSource="{StaticResource ProxySchemes}"
+                              SelectedItem="{Binding Scheme, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Host" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyRowHost" AutomationProperties.AutomationId="proxyRowHost"
+                             Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="253" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Port" Width="70">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyRowPort" AutomationProperties.AutomationId="proxyRowPort"
+                             Text="{Binding PortText, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="5" TextAlignment="Right" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Accept untrusted" Width="110">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox x:Name="chkProxyRowUntrusted" AutomationProperties.AutomationId="proxyRowUntrusted"
+                              IsChecked="{Binding AcceptUntrusted, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="170">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyRowProblem" AutomationProperties.AutomationId="proxyRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyRowRemove" AutomationProperties.AutomationId="proxyRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyRowRemove" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <Button x:Name="btnProxyTargetAdd" Content="Add target" Padding="10,4" Click="OnProxyTargetAdd" />
+            <TextBlock x:Name="lblProxyRowCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
+          <TextBlock x:Name="lblProxyTargetsHint" Style="{StaticResource SecondaryTextStyle}"
+                     TextWrapping="Wrap" Margin="0,4,0,0" />
+
+          <!--
+            Ticket #86: the per-workspace header policy on BOTH fetch legs. Two grids of simple
+            name/value/strip rows: the request grid rewrites what the Event Server replays at the
+            target (after the browser's hop-by-hop headers are already stripped), the response grid
+            rewrites what comes back to the plugin client (before the framer). The forbidden set -
+            Connection, Keep-Alive, TE, Trailer, Transfer-Encoding, Upgrade, Proxy-*, Host,
+            Content-Length - is FIXED: the proxy strips those unconditionally on both legs and no
+            configuration can add, override or remove them. The same guardrail runs at save (row
+            highlighted, whole save refused by name) and at the Event Server's snapshot build
+            (row refused with a MIP.log audit line), so even a hand-edited stored definition never
+            puts one on the wire. Via:/X-Forwarded-For are NOT added by default: the proxy's
+            topology stays invisible to the target unless the admin configures it deliberately.
+          -->
+          <TextBlock x:Name="lblProxyHeaders" Style="{StaticResource SectionHeaderStyle}" Margin="0,14,0,2" Text="Advanced: headers" />
+          <TextBlock x:Name="lblProxyHeadersHint" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,0,0,2" />
+
+          <TextBlock x:Name="lblProxyRequestHeaders" Style="{StaticResource FieldLabelStyle}" Text="Request headers:" Margin="0,6,0,2" />
+          <DataGrid x:Name="dgProxyRequestHeaders" AutomationProperties.AutomationId="proxyRequestHeadersGrid"
+                    AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="60" MaxHeight="180" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="Header" Width="180">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!-- PropertyChanged like every other live-editor cell (#81 lesson). -->
+                    <TextBox x:Name="txtProxyHeaderRowName" AutomationProperties.AutomationId="proxyHeaderRowName"
+                             Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="128" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Value" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyHeaderRowValue" AutomationProperties.AutomationId="proxyHeaderRowValue"
+                             Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="1024" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Strip" Width="70">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox x:Name="chkProxyHeaderRowStrip" AutomationProperties.AutomationId="proxyHeaderRowStrip"
+                              IsChecked="{Binding Remove, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="190">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyHeaderRowProblem" AutomationProperties.AutomationId="proxyHeaderRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyHeaderRowRemove" AutomationProperties.AutomationId="proxyHeaderRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyHeaderRowRemoveRequest" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+          <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="btnProxyHeaderAddRequest" Content="Add request header" Padding="10,4" Click="OnProxyHeaderAddRequest" />
+            <TextBlock x:Name="lblProxyHeaderRequestCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <TextBlock x:Name="lblProxyResponseHeaders" Style="{StaticResource FieldLabelStyle}" Text="Response headers:" Margin="0,10,0,2" />
+          <DataGrid x:Name="dgProxyResponseHeaders" AutomationProperties.AutomationId="proxyResponseHeadersGrid"
+                    AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="60" MaxHeight="180" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="Header" Width="180">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyHeaderRowName" AutomationProperties.AutomationId="proxyHeaderRowName"
+                             Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="128" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Value" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyHeaderRowValue" AutomationProperties.AutomationId="proxyHeaderRowValue"
+                             Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="1024" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Strip" Width="70">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox x:Name="chkProxyHeaderRowStrip" AutomationProperties.AutomationId="proxyHeaderRowStrip"
+                              IsChecked="{Binding Remove, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="190">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyHeaderRowProblem" AutomationProperties.AutomationId="proxyHeaderRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyHeaderRowRemove" AutomationProperties.AutomationId="proxyHeaderRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyHeaderRowRemoveResponse" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+          <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="btnProxyHeaderAddResponse" Content="Add response header" Padding="10,4" Click="OnProxyHeaderAddResponse" />
+            <TextBlock x:Name="lblProxyHeaderResponseCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <!--
+            Ticket #78: the per-workspace rule-trigger grid behind the #65 Event Server matcher.
+            Each row is a URL glob + method filter + response-status filter; the row is valid
+            exactly when ProxyTriggerPolicy's normalizers accept it (the SAME grammar the Event
+            Server audits stored rows against), so an invalid glob is flagged per row, its save is
+            refused by name, and nothing is silently dropped. Rows keep configuration order - the
+            matcher evaluates top-down and one fetch raises at most the FIRST matching row's event.
+            The Event column is read-only on purpose: every trigger raises the one fixed XProtect
+            event type, the exact name the admin searches for in the rule builder. Absent stored
+            section reads as zero triggers.
+          -->
+          <TextBlock x:Name="lblProxyTriggers" Style="{StaticResource SectionHeaderStyle}" Margin="0,14,0,2" Text="Rule triggers" />
+          <TextBlock x:Name="lblProxyTriggersHint" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,0,0,2" />
+
+          <DataGrid x:Name="dgProxyTriggers" AutomationProperties.AutomationId="proxyTriggersGrid"
+                    AutoGenerateColumns="False"
+                    HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                    CanUserAddRows="False" CanUserDeleteRows="False" CanUserResizeRows="False"
+                    CanUserSortColumns="False" CanUserReorderColumns="False"
+                    VirtualizingPanel.IsVirtualizing="False"
+                    HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    MinHeight="60" MaxHeight="180" Margin="0,2,0,0">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasError}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Error.Background}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Header="URL pattern" Width="*">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!-- PropertyChanged like every other live-editor cell (#81 lesson). -->
+                    <TextBox x:Name="txtProxyTriggerRowUrl" AutomationProperties.AutomationId="proxyTriggerRowUrl"
+                             Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="2048" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Method" Width="100">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <ComboBox x:Name="cmbProxyTriggerRowMethod" AutomationProperties.AutomationId="proxyTriggerRowMethod"
+                              ItemsSource="{StaticResource ProxyTriggerMethods}"
+                              SelectedItem="{Binding Method, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Status" Width="90">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBox x:Name="txtProxyTriggerRowStatus" AutomationProperties.AutomationId="proxyTriggerRowStatus"
+                             Text="{Binding Status, UpdateSourceTrigger=PropertyChanged}"
+                             MaxLength="5" TextAlignment="Right" VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Event raised" Width="170">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <!-- Read-only (one-way binding): the one fixed event type every trigger raises. -->
+                    <TextBlock x:Name="txtProxyTriggerRowEvent" AutomationProperties.AutomationId="proxyTriggerRowEvent"
+                               Text="{Binding Event}" TextWrapping="Wrap"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Problem" Width="190">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <TextBlock x:Name="txtProxyTriggerRowProblem" AutomationProperties.AutomationId="proxyTriggerRowProblem"
+                               Text="{Binding ErrorText}" TextWrapping="Wrap"
+                               Foreground="{StaticResource Brush.Error.Foreground}"
+                               VerticalAlignment="Center" Margin="2" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTemplateColumn Header="Remove" Width="80">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button x:Name="btnProxyTriggerRowRemove" AutomationProperties.AutomationId="proxyTriggerRowRemove"
+                            Content="Remove" Padding="6,2" Margin="2"
+                            VerticalAlignment="Center" Click="OnProxyTriggerRowRemove" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
+          <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="btnProxyTriggerAdd" Content="Add trigger" Padding="10,4" Click="OnProxyTriggerAdd" />
+            <TextBlock x:Name="lblProxyTriggerCounter" Style="{StaticResource SecondaryTextStyle}"
+                       Margin="12,0,0,0" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <!-- Ticket #53 demo harness: Management Client-driven proxy fetch across MIP messaging. -->
+          <TextBlock x:Name="lblProxyTestUrl" Style="{StaticResource FieldLabelStyle}" Text="Test proxy fetch:" Margin="0,14,0,2" />
+          <StackPanel Orientation="Horizontal">
+            <TextBox x:Name="txtProxyTestUrl" Style="{StaticResource FormTextBoxStyle}" Width="470"
+                     VerticalAlignment="Center" MaxLength="2048" />
+            <Button x:Name="btnProxyTestFetch" Content="Fetch via Event Server" Margin="10,0,0,0"
+                    Padding="10,4" VerticalAlignment="Center" Click="OnProxyTestFetch" />
+          </StackPanel>
+          <TextBlock x:Name="lblProxyTestHint" Style="{StaticResource SecondaryTextStyle}"
+                     TextWrapping="Wrap" Margin="0,2,0,0" />
+          <TextBlock x:Name="lblProxyTestResult" Style="{StaticResource SecondaryTextStyle}"
+                     TextWrapping="Wrap" Margin="0,4,0,0" FontWeight="Bold" Visibility="Collapsed" />
+        </StackPanel>
+      </ScrollViewer>
+    </TabItem>
+
+    <TabItem x:Name="tabDiagnostics" Header="Diagnostics" Visibility="Collapsed">
+      <!--
+        Ticket #84: the recently-blocked list from the Event Server's in-memory ring (#69),
+        pulled by the same status query pair the Status tab uses and only while this tab (or the
+        Status tab) is selected. Read the grid: it never writes configuration by itself. The one
+        write affordance is the per-row "Add to allowlist" promotion, which drops the exact-origin
+        entry into the Proxy tab's allowlist grid (marked unsaved there, like any grid edit) -
+        CertUntrusted rows never get the button (the fix there is the CA trust path). Like Status,
+        the tab starts Collapsed: the same SecurityActions Manage (edit-rights) gate decides.
+      -->
+      <Grid Margin="20,16,20,24">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="txtDiagnosticsTabHeading" Style="{StaticResource SectionHeaderStyle}"
+                   Margin="0,0,0,6" Text="Diagnostics" />
+        <TextBlock Grid.Row="1" x:Name="txtDiagnosticsSummary" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap" />
+
+        <!--
+          Ticket #80: the aggregate untrusted-CA warning. The Event Server folds every
+          client-side CertUntrusted report into ONE entry per machine; this banner says how many
+          machines report the proxy certificate untrusted, names them, and puts the #75 export
+          button right here - the admin exports the certificate from exactly where the problem
+          was reported. Starts Collapsed: no reports, no banner. The export button is the tab's
+          one read-only-but-opens-a-save-dialog affordance; it writes no configuration, so the
+          pane never dirties.
+        -->
+        <Border Grid.Row="2" x:Name="caUntrustedBanner" Style="{StaticResource WarningBannerStyle}"
+                Visibility="Collapsed" Margin="0,8,0,0">
+          <StackPanel>
+            <TextBlock x:Name="txtCaUntrustedSummary" AutomationProperties.AutomationId="caUntrustedBannerText"
+                       Style="{StaticResource WarningBannerTextStyle}" TextWrapping="Wrap" />
+            <TextBlock x:Name="txtCaUntrustedMachines" AutomationProperties.AutomationId="caUntrustedMachines"
+                       Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+              <Button x:Name="btnCaUntrustedExport" AutomationProperties.AutomationId="proxyCaExportFromDiagnostics"
+                      Content="Export proxy certificate" Padding="10,4" Click="OnCaUntrustedExport" />
+              <TextBlock x:Name="txtCaUntrustedExportResult" Style="{StaticResource SecondaryTextStyle}"
+                         TextWrapping="Wrap" Margin="12,0,0,0" MaxWidth="430" VerticalAlignment="Center" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,8">
+          <Button x:Name="btnDiagnosticsRefresh" Content="Refresh now" Padding="10,4" Click="OnDiagnosticsRefresh" />
+          <TextBlock x:Name="txtDiagnosticsCadence" Style="{StaticResource SecondaryTextStyle}" Margin="10,0,0,0"
+                     VerticalAlignment="Center" TextWrapping="Wrap"
+                     Text="Blocked resources refresh on their own while this tab is open; polling stops the moment you leave it. The list lives in the Event Server's memory and resets when the Event Server service restarts." />
+        </StackPanel>
+
+        <DataGrid Grid.Row="4" x:Name="dgDiagnosticsBlocked" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False"
+                  CanUserResizeRows="False" CanUserSortColumns="False" CanUserReorderColumns="False"
+                  GridLinesVisibility="Horizontal" SelectionMode="Single"
+                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Origin" Binding="{Binding Origin}" Width="*" />
+            <DataGridTextColumn Header="Reason" Binding="{Binding ReasonLabel}" Width="180" />
+            <DataGridTextColumn Header="Hits" Binding="{Binding Hits}" Width="60" />
+            <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="110" />
+            <DataGridTextColumn x:Name="colDiagnosticsStatus" Header="Status" Binding="{Binding StatusText}" Width="180" />
+            <DataGridTemplateColumn Header="" Width="150">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <!-- Per-row promotion: exact scheme+host+port entry into the Proxy tab grid.
+                       The stock converter hides the button for cert-trust and already-covered rows -
+                       an absent button, not a disabled one. -->
+                  <Button x:Name="btnDiagnosticsRowPromote" AutomationProperties.AutomationId="diagnosticsRowPromote"
+                          Content="Add to allowlist" Padding="6,2" Margin="2"
+                          VerticalAlignment="Center" Click="OnDiagnosticsPromote"
+                          Visibility="{Binding CanPromote, Converter={StaticResource BoolToVisibility}}" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <Border Grid.Row="5" x:Name="diagnosticsError" Style="{StaticResource ErrorBannerStyle}"
+                Visibility="Collapsed" Margin="0,10,0,0">
+          <TextBlock x:Name="txtDiagnosticsError" Style="{StaticResource ErrorBannerTextStyle}" TextWrapping="Wrap" />
+        </Border>
       </Grid>
+    </TabItem>
 
-      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Behavior" />
-      <CheckBox x:Name="chkRememberLastAddress" Content="Remember last address"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
-      <CheckBox x:Name="chkAllowBackgroundBrowser" Content="Allow browser to run in background"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
-      <CheckBox x:Name="chkAllowAudioNotifications" Content="Allow audio notifications"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
-      <CheckBox x:Name="chkMuteAudio" Content="Mute audio"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+    <TabItem x:Name="tabStatus" Header="Status" Visibility="Collapsed">
+      <!--
+        Ticket #76: live proxy sessions for this workspace, pulled from the Event Server's status
+        snapshot (#69) every few seconds while this tab is the selected one - and never outside the
+        role gate that made the tab visible at all (#74). The grid is read-only: the tab reports,
+        it writes no configuration, so walking it can never dirty the pane.
+      -->
+      <Grid Margin="20,16,20,24">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Privacy" />
-      <CheckBox x:Name="chkClearBrowsingDataOnExit" Content="Clear history on exit"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+        <TextBlock Grid.Row="0" x:Name="txtStatusTabHeading" Style="{StaticResource SectionHeaderStyle}"
+                   Margin="0,0,0,6" Text="Status" />
+        <TextBlock Grid.Row="1" x:Name="txtStatusSummary" Style="{StaticResource BodyTextStyle}" TextWrapping="Wrap" />
 
-      <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Advanced" />
-      <CheckBox x:Name="chkIsolateBrowserInstances" Content="Isolate this browser instance"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
-      <CheckBox x:Name="chkEnableDevTools" Content="Enable developer tools (F12)"
-                Style="{StaticResource OptionCheckBoxStyle}" Checked="OnUserChanged" Unchecked="OnUserChanged" />
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,8">
+          <Button x:Name="btnStatusRefresh" Content="Refresh now" Padding="10,4" Click="OnStatusRefresh" />
+          <TextBlock x:Name="txtStatusCadence" Style="{StaticResource SecondaryTextStyle}" Margin="10,0,0,0"
+                     VerticalAlignment="Center" TextWrapping="Wrap"
+                     Text="Live sessions refresh on their own while this tab is open; polling stops the moment you leave it." />
+        </StackPanel>
 
-    </StackPanel>
-  </ScrollViewer>
+        <DataGrid Grid.Row="3" x:Name="dgStatusSessions" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False"
+                  CanUserResizeRows="False" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="XProtect user" Binding="{Binding UserName}" Width="160" />
+            <DataGridTextColumn Header="Client machine" Binding="{Binding ClientMachine}" Width="160" />
+            <DataGridTextColumn Header="Open for" Binding="{Binding Duration}" Width="90" />
+            <DataGridTextColumn Header="Idle" Binding="{Binding IdleFor}" Width="80" />
+            <DataGridTextColumn Header="Requests" Binding="{Binding Requests}" Width="90" />
+            <DataGridTextColumn Header="Requests/min" Binding="{Binding RequestsPerMinute}" Width="110" />
+            <DataGridTextColumn Header="Sent" Binding="{Binding BytesSent}" Width="90" />
+            <DataGridTextColumn Header="Received" Binding="{Binding BytesReceived}" Width="90" />
+            <DataGridTextColumn Header="Send rate" Binding="{Binding SendRate}" Width="100" />
+            <DataGridTextColumn Header="Receive rate" Binding="{Binding ReceiveRate}" Width="110" />
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <Border Grid.Row="4" x:Name="statusError" Style="{StaticResource ErrorBannerStyle}"
+                Visibility="Collapsed" Margin="0,10,0,0">
+          <TextBlock x:Name="txtStatusError" Style="{StaticResource ErrorBannerTextStyle}" TextWrapping="Wrap" />
+        </Border>
+      </Grid>
+    </TabItem>
+  </TabControl>
 </UserControl>

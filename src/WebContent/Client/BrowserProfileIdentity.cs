@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+
 using VideoOS.Platform;
 using VideoOS.Platform.Login;
 
@@ -40,6 +41,79 @@ namespace WebContent.Client
             }
 
             return string.Empty;
+        }
+
+        /// <summary>
+        /// Derives the VMS-server leg of the proxied boundary (ADR-0004) from the MasterSite
+        /// this client logged into. Returns <see cref="string.Empty"/> when the server leg
+        /// cannot be resolved; <see cref="GetProxiedUserDataFolder"/> then uses the placeholder
+        /// server segment and logs the degradation.
+        /// </summary>
+        internal static string GetCurrentServerKey()
+        {
+            try
+            {
+                var serverUri = EnvironmentManager.Instance != null && EnvironmentManager.Instance.MasterSite != null
+                    ? EnvironmentManager.Instance.MasterSite.ServerId != null
+                        ? EnvironmentManager.Instance.MasterSite.ServerId.Uri
+                        : null
+                    : null;
+                if (serverUri != null)
+                {
+                    return BrowserProfileKey.DeriveServerKey(serverUri.Host, serverUri.Port);
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.ExceptionHandler(nameof(BrowserProfileIdentity) + "." + nameof(GetCurrentServerKey), ex);
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Returns the WebView2 <c>UserDataFolder</c> for a PROXIED browser profile: keyed to the
+        /// full proxied boundary (Windows user, implicit in the per-user root, plus XProtect
+        /// identity, plus VMS server) per ADR-0004, so two Smart Clients logged into different
+        /// servers never share a proxied profile or fetch channel even when the identity value
+        /// itself collides. The NON-proxied folder (<see cref="GetUserDataFolder"/>) stays as it
+        /// is; ADR-0004 scopes the server leg to proxied state.
+        /// </summary>
+        internal static string GetProxiedUserDataFolder(Guid browserId)
+        {
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                BrowserProfileKey.DataFolderRootName);
+
+            var userKey = GetCurrentUserKey();
+            var serverKey = GetCurrentServerKey();
+            if (string.IsNullOrWhiteSpace(serverKey))
+            {
+                EnvironmentManager.Instance.Log(
+                    true,
+                    nameof(BrowserProfileIdentity),
+                    $"Could not resolve the VMS server for proxied browser {browserId}; its profile lands under the " +
+                    $"'{BrowserProfileKey.ServerFolderPrefix}{BrowserProfileKey.UnknownServerKey}' placeholder segment. " +
+                    "Proxied profiles on different VMS servers are not separated until the server is known.");
+            }
+
+            return BrowserProfileKey.ComposeProxiedProfilePath(root, userKey, serverKey, browserId);
+        }
+
+        /// <summary>
+        /// ADR-0004 (#95): the listener-claim slot for a proxied browser - the SAME boundary legs
+        /// as <see cref="GetProxiedUserDataFolder"/> (Windows user, XProtect identity, VMS server),
+        /// composed by <see cref="BrowserProfileKey.ComposeListenerClaimPath"/> as the profile
+        /// folder's <c>.claim</c> sibling. Deriving both from identical legs is what fences a
+        /// joined process to the very profile folder its browser attaches to.
+        /// </summary>
+        internal static string GetListenerClaimPath(Guid browserId)
+        {
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                BrowserProfileKey.DataFolderRootName);
+
+            return BrowserProfileKey.ComposeListenerClaimPath(root, GetCurrentUserKey(), GetCurrentServerKey(), browserId);
         }
 
         /// <summary>

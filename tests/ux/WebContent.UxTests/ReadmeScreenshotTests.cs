@@ -1,8 +1,11 @@
+using System.Diagnostics;
+
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
-using System.Diagnostics;
+
 using WebContent.UxTests.Harness;
+
 using Xunit;
 using Xunit.Abstractions;
 

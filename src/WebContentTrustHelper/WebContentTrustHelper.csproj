@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Ticket #72: the bundled elevated trust helper of the Web Content plugin drop. A separate
+    exe (never a store-writing path inside the plugin) so Smart Client - always an unprivileged
+    process - can only reach a trust store by ShellExecute'ing this with the runas verb, i.e.
+    through the UAC gate, and crypt32's own trusted-root warning still rides the interactive
+    add. Dumb and auditable by design: exactly one certificate, thumbprint-verified against the
+    caller's claim before any store is touched; no UI of its own beyond the OS dialogs.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>WebContent.TrustHelper</RootNamespace>
+    <AssemblyName>WebContentTrustHelper</AssemblyName>
+    <Deterministic>true</Deterministic>
+    <!-- Lands beside the plugin in the MIP drop harvested by src/Setup. -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>..\..\output\WebContent\</OutputPath>
+    <DefineConstants>DEBUG;TRACE;NETFRAMEWORK</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>..\..\output\WebContent\</OutputPath>
+    <DefineConstants>TRACE;NETFRAMEWORK</DefineConstants>
+  </PropertyGroup>
+
+  <!--
+    #89: stamp the exe with the same Nerdbank.GitVersioning build version as the plugin from
+    the same build (root version.json, same version as the plugin project's reference). An
+    unstamped 1.0.0.0 helper outranks every 0.1.y payload under MSI's file-copy rules, so a
+    Copy-Item stray shadowed upgrades forever; with the stamp, any upgrade to a newer build
+    replaces a drifted older helper and the drop self-heals. Pinned by
+    TrustHelperVersionStampingGuardTests (lockstep with the plugin project's nbgv version).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Nerdbank.GitVersioning">
+      <Version>3.10.94</Version>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

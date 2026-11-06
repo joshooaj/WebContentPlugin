@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
+
 using VideoOS.Platform;
 using VideoOS.Platform.Admin;
 using VideoOS.Platform.Messaging;
+
 using WebContent;
+
 using Message = VideoOS.Platform.Messaging.Message;
 
 namespace WebContent.Admin
@@ -97,7 +100,12 @@ namespace WebContent.Admin
 
         public override void ClearUserControl()
         {
-            _userControl?.ClearUserControl();
+            if (_userControl == null) return;
+            _userControl.ClearUserControl();
+            // #74/#84: no item context after a clear, so the Status/Diagnostics role gate cannot
+            // grant anything.
+            _userControl.SetStatusTabVisible(false);
+            _userControl.SetDiagnosticsTabVisible(false);
         }
 
         public override void ReleaseUserControl()
@@ -108,9 +116,23 @@ namespace WebContent.Admin
         public override void FillUserControl(Item item)
         {
             if (_userControl == null) return;
-            
+
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Filling UserControl for workspace item: {item.Name} (FQID: {item.FQID}).");
             CurrentItem = item;
+
+            // #74 role gate: the Status tab renders only when this user holds the workspace's
+            // Manage security action; every denial or failed lookup hides the whole tab.
+            var managePermission = WorkspaceManagePermissionEvaluator.Check(item);
+            _userControl.SetStatusTabVisible(WorkspaceTabPolicy.ShowStatusTab(managePermission));
+
+            // #84: the Diagnostics tab rides the same gate - status-derived data plus the one
+            // allowlist-writing affordance, both for edit-rights holders only.
+            _userControl.SetDiagnosticsTabVisible(WorkspaceTabPolicy.ShowDiagnosticsTab(managePermission));
+
+            // #76: the Status tab queries the Event Server for this item's live sessions, and the
+            // id has to travel in the same form the Smart Client reports blocks under.
+            _userControl.SetWorkspaceItemId(item?.FQID != null ? item.FQID.ObjectId.ToString() : null);
+
             var properties = item?.Properties;
             var configError = WorkspaceConfiguration.DetectError(properties);
 
@@ -133,6 +155,42 @@ namespace WebContent.Admin
                     _userControl.MuteAudio = settings.MuteAudio;
                     _userControl.IsolateBrowserInstances = settings.IsolateBrowserInstances;
                     _userControl.EnableDevTools = settings.EnableDevTools;
+                    _userControl.ProxyEnabled = settings.ProxyEnabled;
+                    // #85: the cap field fills from the stored wire value (0 = never stored),
+                    // displayed in whole MB inside the admin range; the server-side clamp keeps
+                    // even a hand-edited huge value honest.
+                    _userControl.ProxyResponseCapText =
+                        WebContentConfiguration.ResolveProxyResponseCapMegabytes(settings.ProxyMaxResponseBytes)
+                            .ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
+                    // #81: the structured grid renders stored entries from either shape (legacy
+                    // host, structured pattern) forever; records too corrupt to render are
+                    // dropped here exactly as the old text-box fill dropped them - with a log line.
+                    var droppedStoredTargets = _userControl.LoadProxyTargets(settings.ProxyTargets);
+                    if (droppedStoredTargets > 0)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredTargets} stored proxy target record(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
+                    }
+
+                    // #86: the two "Advanced: headers" grids render the stored policy rows for
+                    // both legs; rows the shared grammar refuses (forbidden names, junk tokens)
+                    // are not shown, and the next Save rewrites the definition without them —
+                    // the same posture as unrenderable target records.
+                    var droppedStoredHeaderRules = _userControl.LoadProxyHeaderPolicies(settings.ProxyRequestHeaders, settings.ProxyResponseHeaders);
+                    if (droppedStoredHeaderRules > 0)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredHeaderRules} stored proxy header rule(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
+                    }
+
+                    // #78: the "Rule triggers" grid renders the stored proxyTriggers section; an
+                    // absent section is the zero-triggers reading (definitions predating #65 read
+                    // null with no error). Rows the shared grammar refuses, or that name a verb
+                    // the proxy never relays, are not shown - the next Save rewrites the
+                    // definition without them, same posture as the other grids.
+                    var droppedStoredTriggers = _userControl.LoadProxyTriggers(settings.ProxyTriggers);
+                    if (droppedStoredTriggers > 0)
+                    {
+                        EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Workspace '{item.Name}' (FQID: {item.FQID}) has {droppedStoredTriggers} stored proxy trigger row(s) too malformed to render; they are not shown and a Save will rewrite the definition without them.");
+                    }
                     _userControl.FillContent();
                     if (configError != WorkspaceConfigError.None)
                     {
@@ -158,6 +216,11 @@ namespace WebContent.Admin
             _userControl.MuteAudio = WebContentConfiguration.GetBoolean(properties, false, "MuteAudio");
             _userControl.IsolateBrowserInstances = WebContentConfiguration.GetBoolean(properties, false, "IsolateBrowserInstances");
             _userControl.EnableDevTools = WebContentConfiguration.GetBoolean(properties, false, "EnableDevTools");
+            _userControl.ProxyEnabled = false;
+            _userControl.ProxyResponseCapText = WebContentConfiguration.DefaultProxyResponseCapMegabytes.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
+            _userControl.LoadProxyTargets(null);
+            _userControl.LoadProxyHeaderPolicies(null, null);
+            _userControl.LoadProxyTriggers(null);
             _userControl.FillContent();
 
             if (configError != WorkspaceConfigError.None)
@@ -208,7 +271,7 @@ namespace WebContent.Admin
         public override bool ValidateAndSaveUserControl()
         {
             if (CurrentItem == null) return false;
-            
+
             EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Saving workspace configuration for item: {CurrentItem.Name} (FQID: {CurrentItem.FQID}).");
 
             var name = _userControl?.WorkspaceName;
@@ -240,6 +303,116 @@ namespace WebContent.Admin
             var hideToolbar = _userControl?.HideToolbar ?? false;
             var hideAddress = !hideToolbar && (_userControl?.HideAddress ?? false);
 
+            var proxyEnabled = _userControl?.ProxyEnabled ?? false;
+            // #81: the save reads the structured grid rows, not free text. An invalid row
+            // refuses the save by name (the grid already highlights it); duplicates collapse
+            // onto one canonical record with any flagged duplicate flagging the entry; and an
+            // enabled proxy with no targets at all stays refused, exactly as the old text-box
+            // path had it. A disabled proxy keeps its targets parsed and stored anyway -
+            // turning the proxy off must not erase the allowlist (MC-9 in the verification matrix).
+            if (!ProxyAllowlistEditor.TryBuildStoredTargets(
+                    _userControl?.ProxyTargetRows ?? new List<ProxyTargetEditorRow>(),
+                    out var proxyTargets,
+                    out var rejectedTargetRows))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy target row(s): {string.Join(" | ", rejectedTargetRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyTargetMessage, string.Join("; ", rejectedTargetRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (proxyEnabled && proxyTargets.Count == 0)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): proxy enabled but no target allowlisted.");
+                MessageBox.Show(Strings.MissingProxyTargetsMessage, Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            // #85: the per-workspace response-size cap validated from the Proxy tab's whole-MB
+            // field. An out-of-range or non-numeric entry refuses the save by name - the page
+            // never silently rewrites what the admin typed. The Event Server clamps stored
+            // values server-side regardless, so this UI is convenience, not the enforcement.
+            if (!WebContentConfiguration.TryParseProxyResponseCapMegabytes(_userControl?.ProxyResponseCapText, out var capMegabytes, out var rejectedCapText))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy response cap '{rejectedCapText}'.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyCapMessage, rejectedCapText), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            // #86: the "Advanced: headers" grids for BOTH fetch legs. An invalid row (bad token,
+            // CR/LF value, or a FORBIDDEN hop-by-hop/framing name like Host or Content-Length)
+            // refuses the whole save by name - the same posture as an invalid allowlist row, and
+            // the exact same grammar the Event Server applies to stored rows at snapshot time, so
+            // a row this UI refuses is a row the server would refuse (and audit) anyway. Header
+            // rules are additive: an empty grid stores no section, and a proxy without rules keeps
+            // the pre-#86 wire shape.
+            if (!ProxyHeaderEditor.TryBuildStoredRules(
+                    _userControl?.ProxyRequestHeaderRows ?? new List<ProxyHeaderEditorRow>(),
+                    out var proxyRequestHeaders,
+                    out var rejectedRequestHeaderRows))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy request header row(s): {string.Join(" | ", rejectedRequestHeaderRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyHeaderMessage, string.Join("; ", rejectedRequestHeaderRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (!ProxyHeaderEditor.TryBuildStoredRules(
+                    _userControl?.ProxyResponseHeaderRows ?? new List<ProxyHeaderEditorRow>(),
+                    out var proxyResponseHeaders,
+                    out var rejectedResponseHeaderRows))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy response header row(s): {string.Join(" | ", rejectedResponseHeaderRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyHeaderMessage, string.Join("; ", rejectedResponseHeaderRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            // #78: the "Rule triggers" grid. An invalid row (url glob, method filter, or status
+            // filter outside the grammar) refuses the whole save by name - the same posture as the
+            // other grids, and the exact same grammar the Event Server's matcher applies to stored
+            // rows on every refresh, so a row this UI refuses is a row the server would refuse
+            // (and audit) anyway. Triggers are additive: an empty grid stores no section, and a
+            // workspace without triggers keeps the pre-#65 wire shape. Configuration order is
+            // stored as-is: the matcher evaluates top-down and raises at most the FIRST matching
+            // row's event, here and on the Event Server.
+            if (!ProxyTriggerEditor.TryBuildStoredTriggers(
+                    _userControl?.ProxyTriggerRows ?? new List<ProxyTriggerEditorRow>(),
+                    out var proxyTriggers,
+                    out var rejectedTriggerRows))
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WorkspaceItemManager), $"Rejected save for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): invalid proxy trigger row(s): {string.Join(" | ", rejectedTriggerRows)}.");
+                MessageBox.Show(string.Format(Strings.InvalidProxyTriggerMessage, string.Join("; ", rejectedTriggerRows)), Strings.InvalidAddressTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            // What the grid actually stored, in the admin's own entry shape. The MC MIP.log is the
+            // storage-side view of the allowlist editor that does not depend on how the WPF grid
+            // surfaces through accessibility, so it is what the #81 probe compares against.
+            EnvironmentManager.Instance.Log(false, nameof(WorkspaceItemManager), $"Stored proxy targets for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): routing {(proxyEnabled ? "on" : "off")}; {ProxyAllowlistEditor.DescribeStoredTargets(proxyTargets)}.");
+
+            // The stored cap, again the MC's own storage-side statement for the #85 probe to
+            // compare against a reloaded-pane readback.
+            var capBytes = WebContentConfiguration.ProxyResponseCapBytes(capMegabytes);
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WorkspaceItemManager),
+                $"Stored proxy response cap for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): {WebContentConfiguration.ResolveProxyResponseCapMegabytes(capBytes)} MB{(capBytes == 0 ? " (default)" : string.Empty)}.");
+
+            // #86: the stored header policy, in the admin's own row shape - the MC-side storage
+            // statement a probe compares against a reloaded-pane readback without depending on
+            // how the grids surface through accessibility.
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WorkspaceItemManager),
+                $"Stored proxy header policy for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): request {proxyRequestHeaders.Count} rule(s) [{ProxyHeaderEditor.DescribeStoredRules(proxyRequestHeaders)}]; response {proxyResponseHeaders.Count} rule(s) [{ProxyHeaderEditor.DescribeStoredRules(proxyResponseHeaders)}].");
+
+            // #78: the stored trigger list, in the admin's own row shape - the same two-channel
+            // contract as the header grids: the audit line names the count AND the verbatim row
+            // renderings, so a probe can pin what was stored without depending on how the WPF
+            // grid surfaces through accessibility.
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WorkspaceItemManager),
+                $"Stored proxy triggers for workspace '{CurrentItem.Name}' (FQID: {CurrentItem.FQID}): {proxyTriggers.Count} row(s) [{ProxyTriggerEditor.DescribeStoredTriggers(proxyTriggers)}].");
+
             SetOrRemoveProperty(CurrentItem, "Address", homeAddress);
             SetOrRemoveProperty(CurrentItem, "HomeAddress", homeAddress);
             SetOrRemoveProperty(CurrentItem, "RememberLastAddress", WebContentConfiguration.FormatBoolean(_userControl?.RememberLastAddress ?? false));
@@ -267,6 +440,24 @@ namespace WebContent.Admin
                 settings.MuteAudio = _userControl?.MuteAudio ?? false;
                 settings.IsolateBrowserInstances = _userControl?.IsolateBrowserInstances ?? false;
                 settings.EnableDevTools = _userControl?.EnableDevTools ?? false;
+                settings.ProxyEnabled = proxyEnabled;
+                settings.ProxyTargets = proxyTargets;
+                // #85: the wire cap in bytes; the default stores 0 so the optional member stays
+                // omitted and pre-#85 stored shapes never grow a redundant member.
+                settings.ProxyMaxResponseBytes = capBytes;
+
+                // #86: empty grids store NO section (the optional members stay omitted, so a
+                // workspace without header rules keeps the pre-#86 wire shape). Configuration
+                // order is stored as-is: for one header name the LAST rule wins, here and on the
+                // Event Server.
+                settings.ProxyRequestHeaders = proxyRequestHeaders.Count == 0 ? null : proxyRequestHeaders;
+                settings.ProxyResponseHeaders = proxyResponseHeaders.Count == 0 ? null : proxyResponseHeaders;
+
+                // #78: an empty trigger grid stores NO section (the optional member stays
+                // omitted, so a workspace without triggers keeps the pre-#65 wire shape, and
+                // readers treat the absence as zero triggers). Configuration order is stored
+                // as-is: the matcher raises at most the FIRST matching row's event.
+                settings.ProxyTriggers = proxyTriggers.Count == 0 ? null : proxyTriggers;
             }
 
             SetOrRemoveProperty(CurrentItem, WorkspaceConfiguration.WorkspaceConfigKey, config.Serialize());

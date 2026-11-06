@@ -42,6 +42,8 @@ namespace WebContent.Client
                 properties["MuteAudio"] = WebContentConfiguration.FormatBoolean(settings.MuteAudio);
                 properties["IsolateBrowserInstances"] = WebContentConfiguration.FormatBoolean(settings.IsolateBrowserInstances);
                 properties["EnableDevTools"] = WebContentConfiguration.FormatBoolean(settings.EnableDevTools);
+                properties["ProxyEnabled"] = WebContentConfiguration.FormatBoolean(settings.ProxyEnabled);
+                properties["ProxyTargets"] = BuildProxyTargetsProperty(settings.ProxyTargets);
 
                 return properties;
             }
@@ -79,7 +81,43 @@ namespace WebContent.Client
             properties["EnableDevTools"] = WebContentConfiguration.FormatBoolean(
                 WebContentConfiguration.GetBoolean(sourceProperties, false, "EnableDevTools"));
 
+            properties["ProxyEnabled"] = WebContentConfiguration.FormatBoolean(false);
+            properties["ProxyTargets"] = string.Empty;
+
             return properties;
+        }
+
+        /// <summary>
+        /// Ticket #52: flattens the admin proxy allowlist to the canonical, comma-separated
+        /// origin list the view item consumes. Invalid entries (bad scheme/host/port) are
+        /// dropped; duplicates collapse. #73: the flattening goes through the entry's
+        /// <c>EffectivePattern</c>, so wildcard pattern entries seed as their canonical
+        /// wildcard form and legacy host records seed exactly as before.
+        /// </summary>
+        private static string BuildProxyTargetsProperty(List<ProxyTargetConfiguration> targets)
+        {
+            if (targets == null || targets.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var canonical = new List<string>();
+            var seenOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var target in targets)
+            {
+                if (target == null)
+                {
+                    continue;
+                }
+
+                if (ProxyPolicy.TryNormalizeTargetParts(target.Scheme, target.EffectivePattern, target.Port, out var origin) &&
+                    seenOrigins.Add(origin))
+                {
+                    canonical.Add(origin);
+                }
+            }
+
+            return string.Join(",", canonical);
         }
     }
 }

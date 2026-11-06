@@ -10,52 +10,59 @@
      <UserControl.DataContext>
          <local:WebContentSettings />
      </UserControl.DataContext>
+     <UserControl.Resources>
+         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+     </UserControl.Resources>
      <Grid>
          <StackPanel>
              <TextBlock Margin="5" FontWeight="Bold" Text="{Binding HomeLabel, Mode=OneTime}"/>
-             <TextBox Margin="5" Text="{Binding HomeAddress, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"/>
+             <TextBox x:Name="txtHomeAddress" Margin="5" Text="{Binding HomeAddress, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
+                      IsEnabled="{Binding IsHomeAddressEditable}"
+                      ToolTip="{Binding HomeAddressToolTip}"/>
+             <TextBlock x:Name="managedHomeNotice" Margin="5,0,5,5" FontStyle="Italic" Foreground="Gray"
+                        Text="{Binding ManagedByAdministratorLabel, Mode=OneTime}"
+                        Visibility="{Binding IsManagedWorkspace, Converter={StaticResource BoolToVisibility}}"/>
 
-            <CheckBox Margin="5" IsChecked="{Binding RememberLastAddress, Mode=TwoWay}"
+            <CheckBox x:Name="chkRememberLastAddress" Margin="5" IsChecked="{Binding RememberLastAddress, Mode=TwoWay}"
                       Content="{Binding RememberLastAddressLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding RememberLastAddressToolTip}"/>
             
-            <CheckBox Margin="5" IsChecked="{Binding HideToolbar, Mode=TwoWay}"
+            <CheckBox x:Name="chkHideToolbar" Margin="5" IsChecked="{Binding HideToolbar, Mode=TwoWay}"
                       Content="{Binding HideToolbarLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding HideToolbarToolTip}"/>
             
-            <CheckBox Margin="5" IsChecked="{Binding HideAddress, Mode=TwoWay}"
-                      Content="{Binding HideAddressLabel,Mode=OneTime}" FontWeight="Bold"
+            <CheckBox x:Name="chkHideAddress" Margin="5" IsChecked="{Binding HideAddress,Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding HideAddressToolTip}"/>
             
-            <CheckBox Margin="5" IsChecked="{Binding ClearBrowsingDataOnExit, Mode=TwoWay}"
+            <CheckBox x:Name="chkClearBrowsingDataOnExit" Margin="5" IsChecked="{Binding ClearBrowsingDataOnExit, Mode=TwoWay}"
                       Content="{Binding ClearBrowsingDataOnExitLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding ClearBrowsingDataOnExitToolTip}"/>
 
-            <CheckBox Margin="5" IsChecked="{Binding MuteAudio, Mode=TwoWay}"
+            <CheckBox x:Name="chkMuteAudio" Margin="5" IsChecked="{Binding MuteAudio, Mode=TwoWay}"
                       Content="{Binding MuteAudioLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding MuteAudioToolTip}"/>
             
-            <CheckBox Margin="5" IsChecked="{Binding AllowAudioNotifications, Mode=TwoWay}"
+            <CheckBox x:Name="chkAllowAudioNotifications" Margin="5" IsChecked="{Binding AllowAudioNotifications, Mode=TwoWay}"
                       Content="{Binding AllowAudioNotificationsLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding AllowAudioNotificationsToolTip}"/>
             
-            <CheckBox Margin="5" IsChecked="{Binding AllowBackgroundBrowser, Mode=TwoWay}"
+            <CheckBox x:Name="chkAllowBackgroundBrowser" Margin="5" IsChecked="{Binding AllowBackgroundBrowser, Mode=TwoWay}"
                       Content="{Binding AllowBackgroundBrowserLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding AllowBackgroundBrowserToolTip}"/>
             
-            <CheckBox Margin="5" IsChecked="{Binding IsolateBrowserInstances, Mode=TwoWay}"
+            <CheckBox x:Name="chkIsolateBrowserInstances" Margin="5" IsChecked="{Binding IsolateBrowserInstances, Mode=TwoWay}"
                       Content="{Binding IsolateBrowserInstancesLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding IsolateBrowserInstancesToolTip}"/>
             
-            <CheckBox Margin="5" IsChecked="{Binding EnableDevTools, Mode=TwoWay}"
+            <CheckBox x:Name="chkEnableDevTools" Margin="5" IsChecked="{Binding EnableDevTools, Mode=TwoWay}"
                       Content="{Binding EnableDevToolsLabel, Mode=OneTime}" FontWeight="Bold"
                       ToolTip="{Binding EnableDevToolsToolTip}"/>
             
             <TextBlock Margin="5" FontWeight="Bold" Text="{Binding ZoomLevelLabel, Mode=OneTime}"/>
             <DockPanel VerticalAlignment="Center">
-                <TextBox DockPanel.Dock="Right" Margin="5" Text="{Binding ElementName=zoomSlider, Path=Value, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:#}}" MinWidth="30" MaxWidth="60" />
+                <TextBox x:Name="txtZoomLevel" DockPanel.Dock="Right" Margin="5" Text="{Binding ElementName=zoomSlider, Path=Value, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:#}}" MinWidth="30" MaxWidth="60" />
                 <Slider
-                    Name="zoomSlider"
+                    x:Name="zoomSlider"
                     Value="{Binding ZoomLevel}"
                     Minimum="25" Maximum="500"
                     Interval="5"
@@ -63,7 +70,12 @@
                     TickFrequency="25"
                     IsSnapToTickEnabled="True"/>
             </DockPanel>
-            <Button Margin="5" Content="{Binding ClearBrowsingDataNowLabel}" Click="ClearBrowsingDataButton_Click"/>
+            <TextBlock Margin="5" FontWeight="Bold" Text="{Binding ProxyLabel, Mode=OneTime}"/>
+            <TextBlock x:Name="managedProxyNotice" Margin="5,0,5,0" FontStyle="Italic" Foreground="Gray"
+                       Text="{Binding ManagedByAdministratorLabel, Mode=OneTime}"
+                       Visibility="{Binding IsManagedWorkspace, Converter={StaticResource BoolToVisibility}}"/>
+            <TextBlock Margin="5,0,5,5" TextWrapping="Wrap" Text="{Binding ProxyDisplay}"/>
+            <Button x:Name="btnClearBrowsingData" Margin="5" Content="{Binding ClearBrowsingDataNowLabel}" Click="ClearBrowsingDataButton_Click"/>
         </StackPanel>
     </Grid>
 </client:PropertiesWpfUserControl>

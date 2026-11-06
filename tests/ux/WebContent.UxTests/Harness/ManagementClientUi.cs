@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Text;
+
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 
@@ -29,23 +32,6 @@ public static class ManagementClientUi
             Thread.Sleep(250);
         }
         throw new TimeoutException($"Tree item '{name}' never appeared.");
-    }
-
-    /// <summary>
-    /// Finds a node under the currently selected tree node by walking DOWN with the keyboard.
-    /// The WinForms tree only realizes visible rows, so a newly expanded node's children
-    /// below the fold are invisible to UIA until the selection scrolls them into view.
-    /// </summary>
-    public static AutomationElement FindChildByWalkingDown(Window mainWindow, string name, int maxSteps = 40)
-    {
-        for (var step = 0; step < maxSteps; step++)
-        {
-            var item = FindTreeItem(mainWindow, name);
-            if (item != null) return item;
-            FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.DOWN);
-            Thread.Sleep(50);
-        }
-        return FindTreeItem(mainWindow, name);
     }
 
     /// <summary>Finds a tree node whose name contains the fragment (the Home root carries the version suffix).</summary>
@@ -153,20 +139,20 @@ public static class ManagementClientUi
         var item = FindTreeItem(mainWindow, name)
             ?? throw new InvalidOperationException($"Tree item '{name}' not found.");
         try { if (item.Patterns.ScrollItem.IsSupported) item.Patterns.ScrollItem.Pattern.ScrollIntoView(); } catch { }
-        Thread.Sleep(300);
+        Thread.Sleep(150);
         try
         {
             if (item.Patterns.SelectionItem.IsSupported) item.Patterns.SelectionItem.Pattern.Select();
         }
         catch { }
-        Thread.Sleep(400);
+        Thread.Sleep(200);
         ClickLabel(mainWindow, item);
         // MC's tree has LabelEdit active: clicking the label of an already-selected node arms
         // the inline rename editor. ESC on the freshly focused tree cancels that arming; without
         // this, the captured node renders in edit mode and rename commits can even raise
         // "ItemName.set ...: Not valid to set dirty state at the line!!!" error dialogs.
         FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ESCAPE);
-        Thread.Sleep(300);
+        Thread.Sleep(150);
     }
 
     /// <summary>Closes any leftover login/connection dialog that would steal keyboard focus from the tree.</summary>
@@ -277,58 +263,141 @@ public static class ManagementClientUi
     }
 
     /// <summary>
-    /// Ensures the named tree node is expanded. MC tree items expose NO ExpandCollapse pattern,
-    /// but LegacyIAccessible.DoDefaultAction() (and a real double-click on the label) toggle the
-    /// node, and collapsing un-realizes the subtree in UIA — so expansion state is verified by
-    /// the expected children being realized, toggling the node whenever they are missing.
+    /// Ensures the named tree node is expanded. Navigation is enumerate-and-click: the realized
+    /// rows are listed, the target's label is double-clicked, and the wheel scrolls when the node
+    /// or its children sit below the fold (MC tree rows are only realized while visible).
+    /// Expansion state is read from geometry — the MC tree exposes NO ExpandCollapse pattern, but
+    /// a node is expanded exactly when the next realized row is indented deeper, the same trick
+    /// CollapseTreeToRoot uses. The old keyboard walk (O(index) DOWN presses per attempt, re-walked
+    /// on every retry, plus fixed 800–1500 ms sleeps) was the source of the 10+ second stalls.
     /// </summary>
     public static void EnsureExpanded(Window mainWindow, string name, params string[] expectedChildNames)
     {
-        for (var attempt = 0; attempt < 6; attempt++)
+        var deadline = DateTime.UtcNow.AddSeconds(45);
+        var strategy = 0;
+        var scrollPass = 0;
+        var ancestorsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (DateTime.UtcNow < deadline)
         {
-            if (ChildrenAppeared(mainWindow, expectedChildNames)) return;
-            var items = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem)).ToList();
+            if (expectedChildNames.Length > 0 && ChildrenAppeared(mainWindow, expectedChildNames)) return;
+
+            var items = RealizedTreeItems(mainWindow);
             var node = items.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+
             if (node == null)
             {
-                // Possibly the whole tree (or Home) is collapsed: open Home once and retry.
-                var home = items.FirstOrDefault(t => (t.Name ?? string.Empty).StartsWith("Home", StringComparison.OrdinalIgnoreCase));
-                if (home != null && items.Count <= 2)
+                // Target not realized: wheel-scroll the whole list looking for it, then open
+                // collapsed level-1 ancestors one at a time until the subtree materializes.
+                if (scrollPass < MaxTreeScrollPasses)
                 {
-                    ClickLabel(mainWindow, home);
-                    Thread.Sleep(800);
-                    FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.RIGHT);
-                    Thread.Sleep(1500);
+                    WheelTree(mainWindow, +4);
+                    scrollPass++;
                     continue;
                 }
-                throw new InvalidOperationException($"Tree node '{name}' not found (attempt {attempt}).");
+                WheelTree(mainWindow, -30);
+                scrollPass = 0;
+                if (!ExpandOneCollapsedLevel1(mainWindow, ancestorsTouched)) break;
+                continue;
             }
 
-            if (attempt < 3)
+            var expanded = IsExpandedIn(items, node);
+            if (expanded && expectedChildNames.Length == 0) return;
+
+            if (!expanded)
             {
-                // Keyboard route: walk DOWN to the node's visible index, press RIGHT. This is what
-                // plugin-injected nodes honour (DoDefaultAction / double-click just open a page).
-                var home = items.FirstOrDefault(t => (t.Name ?? string.Empty).StartsWith("Home", StringComparison.OrdinalIgnoreCase));
-                if (home != null)
+                if (items.IndexOf(node) + 1 >= items.Count && scrollPass < MaxTreeScrollPasses)
                 {
-                    var idx = items.IndexOf(node);
-                    KeyboardWalkTo(mainWindow, home, idx);
-                    FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.RIGHT);
-                    Thread.Sleep(1200);
+                    // Last realized row: its children may simply sit unrealized below the fold.
+                    WheelTree(mainWindow, +4);
+                    scrollPass++;
                     continue;
                 }
+                ToggleNode(node, strategy++ % 3);
+                Thread.Sleep(250);
+                continue;
             }
-            ToggleNode(node, Math.Min(attempt, 2));
-            Thread.Sleep(1200);
+
+            // Expanded but the expected children never showed up in any scan: below the fold.
+            if (scrollPass < MaxTreeScrollPasses)
+            {
+                WheelTree(mainWindow, +4);
+                scrollPass++;
+                continue;
+            }
+            ToggleNode(node, strategy++ % 3);
+            Thread.Sleep(250);
         }
-        if (expectedChildNames.Length > 0)
+
+        if (expectedChildNames.Length > 0 && !ChildrenAppeared(mainWindow, expectedChildNames))
             throw new InvalidOperationException($"Could not expand '{name}': none of [{string.Join(", ", expectedChildNames)}] appeared.");
+        if (expectedChildNames.Length == 0)
+            throw new InvalidOperationException($"Could not expand '{name}': geometry never showed a deeper-indented row under it.");
+    }
+
+    /// <summary>Tree rows the WinForms tree currently realizes, in visual (top-to-bottom) order.</summary>
+    private static List<AutomationElement> RealizedTreeItems(Window mainWindow)
+    {
+        var treeNav = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TreeNavigation"));
+        var items = (treeNav ?? (AutomationElement)mainWindow)
+            .FindAllDescendants(cf => cf.ByControlType(ControlType.TreeItem))
+            .Where(t => { try { return t.BoundingRectangle.Height > 0; } catch { return false; } })
+            .ToList();
+        items.Sort((x, y) => x.BoundingRectangle.Y.CompareTo(y.BoundingRectangle.Y));
+        return items;
+    }
+
+    /// <summary>True exactly when the next realized row is indented deeper than the node.</summary>
+    private static bool IsExpandedIn(List<AutomationElement> items, AutomationElement node)
+    {
+        var idx = items.IndexOf(node);
+        if (idx < 0 || idx + 1 >= items.Count) return false;
+        var a = items[idx].BoundingRectangle;
+        var b = items[idx + 1].BoundingRectangle;
+        if (a.Width <= 0 || b.Width <= 0) return false;
+        return b.X > a.X + 5;
+    }
+
+    private const int MaxTreeScrollPasses = 12;
+
+    /// <summary>
+    /// Double-clicks the first realized, collapsed level-1 row (Home and already-tried rows are
+    /// skipped) so the subtree that should contain the target becomes realized. One ancestor per
+    /// call keeps the search verifiable; the touched-set stops the next round re-collapsing it.
+    /// </summary>
+    private static bool ExpandOneCollapsedLevel1(Window mainWindow, HashSet<string> touched)
+    {
+        var items = RealizedTreeItems(mainWindow);
+        var home = items.FirstOrDefault(t => (t.Name ?? string.Empty).StartsWith("Home", StringComparison.OrdinalIgnoreCase));
+        if (home == null) return false;
+        if (items.Count == 1)
+        {
+            ToggleNode(home, 0); // MC persists tree state: the whole tree can start collapsed at Home.
+            Thread.Sleep(300);
+            return true;
+        }
+        var homeIdx = items.IndexOf(home);
+        if (homeIdx + 1 >= items.Count) return false;
+        var level1X = items[homeIdx + 1].BoundingRectangle.X;
+        for (var i = homeIdx + 1; i < items.Count; i++)
+        {
+            var node = items[i];
+            if (Math.Abs(node.BoundingRectangle.X - level1X) > 1) continue;
+            if (i + 1 < items.Count && items[i + 1].BoundingRectangle.X > node.BoundingRectangle.X + 5) continue;
+            if (!touched.Add(node.Name ?? string.Empty)) continue;
+            ToggleNode(node, 1);
+            Thread.Sleep(300);
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
     /// Toggles expand/collapse of a node. Strategy 0 uses LegacyIAccessible.DoDefaultAction
     /// (works for most nodes), strategy 1 does a real double-click on the label (proven for nodes
     /// where DoDefaultAction is a silent no-op), strategy 2 selects the node first, then double-clicks.
+    /// EnsureExpanded verifies the toggle by geometry and escalates strategies, so no keyboard
+    /// fallback is needed here.
     /// </summary>
     private static void ToggleNode(AutomationElement node, int strategy = 0)
     {
@@ -520,12 +589,80 @@ public static class ManagementClientUi
     }
 
     /// <summary>
+    /// Raises the Management Client window over the rest of the desktop. Every tree route in this
+    /// harness is mouse input at absolute screen points (the tree ignores keyboard scrolling and its
+    /// selection state is often unreadable), so a click lands on whatever window overlaps the tree -
+    /// and a login performed through the Value pattern never raises the window by itself.
+    /// </summary>
+    public static void BringToFront(Window mainWindow)
+    {
+        try
+        {
+            // Windows refuses SetForegroundWindow for a background process unless it just received
+            // input; automation is exactly that case. Two routes, because a Management Client that
+            // is not the topmost window silently swallows every mouse route in this harness: the
+            // click lands on whatever overlaps the tree.
+            //   1. attach to the foreground thread and set the foreground window, and
+            //   2. make the window topmost, which is enough for absolute mouse input regardless of
+            //      which window the shell considers foreground.
+            var hwnd = new IntPtr(mainWindow.Properties.NativeWindowHandle.Value);
+            if (hwnd == IntPtr.Zero) return;
+            ShowWindow(hwnd, SW_MAXIMIZE);
+
+            var fgThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+            var ownThread = GetCurrentThreadId();
+            if (fgThread != 0 && fgThread != ownThread)
+            {
+                AttachThreadInput(ownThread, fgThread, true);
+                SetForegroundWindow(hwnd);
+                AttachThreadInput(ownThread, fgThread, false);
+            }
+            else
+            {
+                SetForegroundWindow(hwnd);
+            }
+            SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_TOPMOST);
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            Artifacts.WriteText("mc-front.txt", $"hwnd={hwnd:x} foregroundNow={ForegroundDebugInfo()} want pid {mainWindow.Properties.ProcessId.Value}");
+        }
+        catch { }
+        Thread.Sleep(400);
+    }
+
+    public static string ForegroundDebugInfo()
+    {
+        try
+        {
+            var fg = GetForegroundWindow();
+            GetWindowThreadProcessId(fg, out var pid);
+            return $"hwnd={fg:x} pid={pid}";
+        }
+        catch (Exception ex) { return "ERR:" + ex.GetType().Name; }
+    }
+
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_TOPMOST = 0x0008;
+    private const uint SWP_NOMOVE = 0x0002, SWP_NOSIZE = 0x0001;
+    private const int SW_MAXIMIZE = 3;
+
+    /// <summary>
     /// Polls until the navigation tree exists and its first TreeItem (the Home root) is realized.
     /// MC realizes the tree some time AFTER the main window appears, so this replaces fixed
     /// startup sleeps: it proceeds as soon as CollapseTreeToRoot can actually do work.
     /// </summary>
     public static bool WaitForTreeReady(Window mainWindow, int timeoutSeconds = 30)
     {
+        BringToFront(mainWindow);
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
         while (DateTime.UtcNow < deadline)
         {
@@ -654,6 +791,217 @@ public static class ManagementClientUi
     }
 
     /// <summary>
+    /// Replace the full contents of a detail-pane Edit through the keyboard route the login
+    /// harness proved reliable: focus (VERIFIED), select-all, CF_UNICODETEXT clipboard paste.
+    /// The verification is not decoration - an ungated run pasted the proxy-target list into
+    /// whatever field held focus (txtName), and the next Save renamed the workspace item to
+    /// 'http://httpforever.com' (MIP.log 19:12:31). Returns false when focus could not be
+    /// proven or the clipboard was unavailable; it NEVER types into an unproven control.
+    /// </summary>
+    public static bool PasteIntoControl(Window mainWindow, string automationId, string value)
+    {
+        var box = ExpectControl(mainWindow, automationId);
+        if (!FocusVerified(mainWindow, box, automationId)) return false;
+        if (!LoginFlow.TryClipboardSetText(value)) return false;
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                      FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
+        System.Threading.Thread.Sleep(150);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                      FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_V);
+        System.Threading.Thread.Sleep(300);
+        return true;
+    }
+
+    /// <summary>
+    /// Focus an element and prove it took: UIA FocusedElement must carry the expected
+    /// AutomationId before any keystroke is sent. Retries the focus call once.
+    /// </summary>
+    public static bool FocusVerified(Window mainWindow, AutomationElement element, string expectedAutomationId)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try { element.Focus(); } catch { }
+            System.Threading.Thread.Sleep(300);
+            try
+            {
+                var focused = mainWindow.Automation.FocusedElement();
+                if (focused != null && string.Equals(focused.AutomationId, expectedAutomationId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Dirty the detail pane through the checkbox's Checked/Unchecked handlers: two Toggle
+    /// pattern flips leave the state as it was but fire the page's change events twice.
+    /// Programmatic TextBox writes proved not to raise the shell's dirty chain in a freshly
+    /// logged-in MC, while Toggle-driven changes do.
+    /// </summary>
+    public static bool DirtyPaneViaCheckbox(Window mainWindow, string automationId)
+    {
+        try
+        {
+            var box = ExpectControl(mainWindow, automationId, 10);
+            if (!box.Patterns.Toggle.IsSupported) return false;
+            var toggle = box.Patterns.Toggle.Pattern;
+            var wasOn = toggle.ToggleState == FlaUI.Core.Definitions.ToggleState.On;
+            toggle.Toggle();
+            System.Threading.Thread.Sleep(300);
+            toggle.Toggle();
+            System.Threading.Thread.Sleep(300);
+            return toggle.ToggleState == (wasOn ? FlaUI.Core.Definitions.ToggleState.On : FlaUI.Core.Definitions.ToggleState.Off);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>True once the shell exposes an enabled, invokable "Save".</summary>
+    public static bool WaitForSaveEnabled(Window mainWindow, int seconds)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            try { if (FindSaveButton(mainWindow, -1) != null) return true; }
+            catch { }
+            Thread.Sleep(400);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Focus the Edit (verified) and press END, SPACE, BACK: a real keyboard round-trip through
+    /// WPF input that fires TextChanged even when a programmatic write left the shell's dirty
+    /// state cold. The box contents end up unchanged; nothing is typed without the focus gate.
+    /// </summary>
+    public static void NudgeControlWithKeystroke(Window mainWindow, string automationId)
+    {
+        var box = ExpectControl(mainWindow, automationId, 10);
+        if (!FocusVerified(mainWindow, box, automationId)) return;
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.END);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.SPACE);
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.BACK);
+        System.Threading.Thread.Sleep(300);
+    }
+
+    /// <summary>
+    /// Name of the single workspace item under the workspaces node when the expected name is
+    /// gone - an item renamed by a stray paste still shows up in the tree under its bad name.
+    /// Null when the node has no deeper-indented child at all.
+    /// </summary>
+    public static string OrphanWorkspaceName(Window mainWindow, string workspacesNodeName)
+    {
+        var items = RealizedTreeItems(mainWindow);
+        var node = items.FirstOrDefault(t => string.Equals(t.Name, workspacesNodeName, StringComparison.OrdinalIgnoreCase));
+        if (node == null) return null;
+        var idx = items.IndexOf(node);
+        for (var i = idx + 1; i < items.Count; i++)
+        {
+            try
+            {
+                if (items[i].BoundingRectangle.X > node.BoundingRectangle.X) return items[i].Name;
+                break;
+            }
+            catch { break; }
+        }
+        return null;
+    }
+
+    /// <summary>Every realized tree row (name, indent X, Y) - so a "no children appeared"
+    /// failure says what the tree ACTUALLY shows.</summary>
+    public static void DumpWorkspaceChildren(Window mainWindow, StringBuilder log)
+    {
+        try
+        {
+            var items = RealizedTreeItems(mainWindow);
+            var idx = items.FindIndex(t => string.Equals(t.Name, WorkspacesNodeName, StringComparison.OrdinalIgnoreCase));
+            log.AppendLine($"tree rows={items.Count}, workspaces-node idx={(idx < 0 ? "ABSENT" : idx.ToString())}");
+            foreach (var t in items)
+            {
+                var r = t.BoundingRectangle;
+                log.AppendLine($"  '{t.Name}' x={r.X} y={r.Y}");
+            }
+        }
+        catch (Exception ex) { log.AppendLine("tree dump threw " + ex.GetType().Name); }
+    }
+
+    /// <summary>
+    /// Create a new item of the kind via the shell's 'Add New ...' menu entry (the tree
+    /// right-click opens no usable context menu on this shell - the menu bar census proved
+    /// 'Add New ...' is the real affordance). Every window/dialog that shows up afterwards is
+    /// logged so the follow-up dialog's shape is recorded, not guessed.
+    /// </summary>
+    public static bool NewItemUnderNode(Window mainWindow, ClientSession session, string nodeName, StringBuilder log)
+    {
+        var addNew = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem))
+            .FirstOrDefault(mi => (mi.Name ?? string.Empty).IndexOf("add new", StringComparison.OrdinalIgnoreCase) >= 0);
+        if (addNew == null)
+        {
+            log.AppendLine("no 'Add New ...' menu-bar entry found");
+            return false;
+        }
+        try { addNew.Patterns.Invoke.Pattern.Invoke(); }
+        catch (Exception ex) { log.AppendLine("Add New invoke threw " + ex.GetType().Name); try { addNew.Click(); } catch { } }
+        Thread.Sleep(2500);
+
+        // What did it open? Log windows, their edits/buttons, and any menu items left over.
+        try
+        {
+            foreach (var w in session.Windows())
+            {
+                static string Safex(Func<string> f) { try { return f() ?? ""; } catch { return "<threw>"; } }
+                log.AppendLine($"after AddNew window aid='{Safex(() => w.AutomationId)}' name='{Safex(() => w.Name)}' class='{Safex(() => w.ClassName)}'");
+                try
+                {
+                    foreach (var b in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit)).Take(10))
+                        log.AppendLine($"   edit aid='{Safex(() => b.AutomationId)}' name='{Safex(() => b.Name)}'");
+                    foreach (var b in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).Take(15))
+                        log.AppendLine($"   button aid='{Safex(() => b.AutomationId)}' name='{Safex(() => b.Name)}'");
+                    foreach (var b in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Text)).Take(15))
+                        log.AppendLine($"   text name='{Safex(() => b.Name)}'");
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex) { log.AppendLine("AddNew aftermath dump threw " + ex.GetType().Name); }
+
+        // If the shell opened a kind-picker, select our kind before accepting the dialog.
+        try
+        {
+            foreach (var w in session.Windows())
+            {
+                foreach (var kind in w.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                            .Concat(w.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem)))
+                            .Where(e => (e.Name ?? string.Empty).IndexOf("Web Content", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    log.AppendLine($"AddNew picker: choosing '{kind.Name}'");
+                    try { kind.Patterns.Invoke.Pattern.Invoke(); } catch { try { kind.Click(); } catch { } }
+                    Thread.Sleep(1500);
+                    break;
+                }
+            }
+        }
+        catch { }
+        return true;
+    }
+
+    /// <summary>
+    /// Re-type the pane's Name field (focus-verified keyboard only): select-all, then plain
+    /// ASCII typing. Throws when focus cannot be proven - the field is never typed blind.
+    /// </summary>
+    public static void RenameWorkspacePane(Window mainWindow, string newName)
+    {
+        var box = ExpectControl(mainWindow, "txtName", 15);
+        if (!FocusVerified(mainWindow, box, "txtName"))
+            throw new InvalidOperationException("Cannot verify focus on txtName; refusing to type the workspace rename.");
+        FlaUI.Core.Input.Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
+                                                      FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
+        System.Threading.Thread.Sleep(150);
+        FlaUI.Core.Input.Keyboard.Type(newName);
+        System.Threading.Thread.Sleep(300);
+    }
+
+    /// <summary>
     /// Drives a checkbox in the detail pane (WPF hosted control: AutomationId is the x:Name)
     /// to the requested state using the UIA Toggle pattern.
     /// </summary>
@@ -701,6 +1049,260 @@ public static class ManagementClientUi
                 return true;
             }
             Thread.Sleep(500);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Session-aware Save: clicking Save on the proxy-target page raises a shell confirmation
+    /// modal ("Save changes?"). UIA Invoke BLOCKS for the whole modal lifetime — a harness
+    /// thread inside Invoke cannot clear the modal it is waiting on, which is exactly how the
+    /// #56 row hung until a human clicked Yes. So the click runs on a side thread while this
+    /// thread sweeps modals; a modal that is already up before the click is swept first.
+    /// </summary>
+    public static bool Save(ClientSession session, Window mainWindow, int timeoutSeconds = 20)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        var attempt = 0;
+        while (DateTime.UtcNow < deadline)
+        {
+            AcceptPendingModal(session, 1);
+            AutomationElement button = null;
+            try
+            {
+                button = FindSaveButton(mainWindow, attempt);
+            }
+            catch (Exception ex)
+            {
+                LogSaveAttempt(attempt, "locator threw " + ex.GetType().Name + ": " + ex.Message);
+            }
+            if (button != null)
+            {
+                try
+                {
+                    var invoke = System.Threading.Tasks.Task.Run(() => button.Patterns.Invoke.Pattern.Invoke());
+                    if (!invoke.Wait(3000))
+                    {
+                        // Still blocked: a modal owns the click. Accept it, then the click returns.
+                        AcceptPendingModal(session, 10);
+                        invoke.Wait(TimeSpan.FromSeconds(20));
+                    }
+                    else
+                    {
+                        AcceptPendingModal(session, 4);
+                    }
+                }
+                catch (AggregateException agg) when (IsStaleButton(agg))
+                {
+                    // MC re-renders the pane after an edit and disables Save for a moment;
+                    // IsEnabled raced the Invoke. Re-find the button and retry inside the deadline.
+                    Thread.Sleep(500);
+                    continue;
+                }
+
+                Thread.Sleep(2500);
+                AcceptPendingModal(session, 2);
+                return true;
+            }
+            attempt++;
+            Thread.Sleep(500);
+        }
+        DumpSaveCandidates(mainWindow);
+        return false;
+    }
+
+    /// <summary>
+    /// The shell's enabled "Save" affordance. Name match is any control type: the MC toolbar
+    /// renders Save as a button, but a toolbar element surfacing through the WinForms/WPF
+    /// bridge can report as Text or Custom, and insisting on ControlType.Button hid a live,
+    /// enabled Save from the harness. Each poll records what every name-matching candidate
+    /// looked like, because "never became enabled" without the toolbar's actual state was a
+    /// guess-and-recheck loop across several runs.
+    /// </summary>
+    private static AutomationElement FindSaveButton(Window mainWindow, int attempt)
+    {
+        var candidates = mainWindow.FindAllDescendants(cf => cf.ByName("Save"));
+        var described = new List<string>();
+        AutomationElement chosen = null;
+        foreach (var b in candidates)
+        {
+            var ct = TryGet(() => b.ControlType.ToString());
+            var enabled = TryGet(() => b.IsEnabled.ToString());
+            var invoke = TryGet(() => b.Patterns.Invoke.IsSupported.ToString());
+            described.Add($"ct={ct} enabled={enabled} invoke={invoke}");
+            if (enabled != "True" || invoke != "True") continue;
+            // Prefer the VISIBLE toolbar affordance; an application-menu 'Save' MenuItem
+            // (zero rect) enumerates first but is the riskier click target.
+            var visible = TryGet(() => b.BoundingRectangle.Width.ToString()) != "0";
+            var chosenVisible = chosen != null && TryGet(() => chosen.BoundingRectangle.Width.ToString()) != "0";
+            if (chosen == null || (visible && !chosenVisible)) chosen = b;
+        }
+        if (attempt >= 0 && attempt < 40)
+        {
+            LogSaveAttempt(attempt, described.Count == 0 ? "no ByName('Save') candidates" : string.Join(" | ", described));
+        }
+        return chosen;
+    }
+
+    private static string TryGet(Func<object> read)
+    {
+        try { return Convert.ToString(read()); }
+        catch (Exception ex) { return "<threw " + ex.GetType().Name + ">"; }
+    }
+
+    private static void LogSaveAttempt(int attempt, string line)
+    {
+        try
+        {
+            File.AppendAllText(Artifacts.PathOf("mc-save-attempts.txt"),
+                $"{DateTime.Now:HH:mm:ss} attempt={attempt} {line}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Failure evidence for "Save never became enabled": every element in the shell whose name
+    /// mentions save/discard/revert, with control type and enabled state - so the next run
+    /// says WHAT the toolbar actually exposes instead of guessing.
+    /// </summary>
+    private static void DumpSaveCandidates(Window mainWindow)
+    {
+        try
+        {
+            var all = mainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Custom)
+                .Or(cf.ByControlType(ControlType.Button))
+                .Or(cf.ByControlType(ControlType.Text))
+                .Or(cf.ByControlType(ControlType.MenuItem))
+                .Or(cf.ByControlType(ControlType.Hyperlink)));
+            var hits = all.Where(e =>
+            {
+                var n = e.Name ?? string.Empty;
+                return n.IndexOf("save", StringComparison.OrdinalIgnoreCase) >= 0
+                    || n.IndexOf("discard", StringComparison.OrdinalIgnoreCase) >= 0
+                    || n.IndexOf("revert", StringComparison.OrdinalIgnoreCase) >= 0;
+            });
+            var sb = new StringBuilder();
+            sb.AppendLine($"save-census {DateTime.Now:HH:mm:ss} candidates={hits.Count()}");
+            foreach (var e in hits)
+            {
+                sb.AppendLine($"  ct={TryGet(() => e.ControlType.ToString())} aid={TryGet(() => e.AutomationId)} name={TryGet(() => e.Name)} enabled={TryGet(() => e.IsEnabled)} invoke={TryGet(() => e.Patterns.Invoke.IsSupported)}");
+            }
+            File.AppendAllText(Artifacts.PathOf("mc-save-census.txt"), sb + Environment.NewLine);
+        }
+        catch { }
+    }
+
+    /// <summary>True when the aggregate carries only "element not enabled" UIA failures (0x80040200).</summary>
+    private static bool IsStaleButton(AggregateException aggregate)
+    {
+        foreach (var inner in aggregate.Flatten().InnerExceptions)
+        {
+            var code = (inner as System.Runtime.InteropServices.COMException)?.ErrorCode;
+            var stale = inner.GetType().Name == "ElementNotEnabledException" || code == unchecked((int)0x80040200);
+            if (!stale)
+            {
+                return false;
+            }
+        }
+
+        return aggregate.InnerExceptions.Count > 0;
+    }
+
+    /// <summary>
+    /// Clicks the affirmative button of any pending MC modal dialog (the "Save changes?"
+    /// shell confirmation, a #32770 MessageBox, or a similar notice) that is not the main
+    /// window. Returns true when a modal was accepted. Button preference: Yes, Save, OK.
+    /// </summary>
+    public static bool AcceptPendingModal(ClientSession session, int timeoutSeconds = 5)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (var window in session.Windows())
+            {
+                try
+                {
+                    // The save-changes confirmation carries the SAME title as the main window
+                    // ("Milestone XProtect Management Client <version>"), so titles cannot tell
+                    // them apart; structure can: the main window has the application AutomationId,
+                    // and a confirmation is any other window pairing an affirmative button with a
+                    // negative one (Yes/No/Cancel) or wearing the dialog window class.
+                    if (string.Equals(window.AutomationId ?? string.Empty, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var cls = window.ClassName ?? string.Empty;
+                    var buttons = window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).ToList();
+                    if (buttons.Count == 0) continue;
+
+                    var hasNegative = buttons.Any(b =>
+                        string.Equals((b.Name ?? string.Empty).Trim(), "No", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals((b.Name ?? string.Empty).Trim(), "Cancel", StringComparison.OrdinalIgnoreCase));
+                    if (!cls.Contains("#32770") && !hasNegative) continue;
+
+                    foreach (var wanted in new[] { "Yes", "Save", "OK" })
+                    {
+                        var hit = buttons.FirstOrDefault(b =>
+                            string.Equals((b.Name ?? string.Empty).Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+                        if (hit != null)
+                        {
+                            hit.Patterns.Invoke.Pattern.Invoke();
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+            }
+            Thread.Sleep(400);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Answer any pending MC modal NEGATIVELY: the "Save changes?" shell confirmation gets No/Cancel
+    /// (a probe that died mid-edit must never persist its unsaved pane state on teardown - live on
+    /// #84, where AcceptPendingModal at close accepted exactly such a leftover promotion), while a
+    /// plain #32770 notice still gets its dismiss button (OK/Close) so the process can exit.
+    /// Returns true when a modal was answered.
+    /// </summary>
+    public static bool RejectPendingModal(ClientSession session, int timeoutSeconds = 5)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (var window in session.Windows())
+            {
+                try
+                {
+                    if (string.Equals(window.AutomationId ?? string.Empty, "_mainApplicationWindow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var cls = window.ClassName ?? string.Empty;
+                    var buttons = window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).ToList();
+                    if (buttons.Count == 0) continue;
+
+                    var hasNegative = buttons.Any(b =>
+                        string.Equals((b.Name ?? string.Empty).Trim(), "No", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals((b.Name ?? string.Empty).Trim(), "Cancel", StringComparison.OrdinalIgnoreCase));
+                    if (!cls.Contains("#32770") && !hasNegative) continue;
+
+                    foreach (var wanted in new[] { "No", "Cancel", "OK", "Close" })
+                    {
+                        var hit = buttons.FirstOrDefault(b =>
+                            string.Equals((b.Name ?? string.Empty).Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+                        if (hit != null)
+                        {
+                            hit.Patterns.Invoke.Pattern.Invoke();
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+            }
+            Thread.Sleep(400);
         }
         return false;
     }

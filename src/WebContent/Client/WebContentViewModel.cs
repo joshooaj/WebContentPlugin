@@ -1,11 +1,14 @@
-﻿using Microsoft.Web.WebView2.Wpf;
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+
+using Microsoft.Web.WebView2.Wpf;
+
 using VideoOS.Platform;
 using VideoOS.Platform.Messaging;
+
 using WebContent;
 
 namespace WebContent.Client
@@ -21,14 +24,24 @@ namespace WebContent.Client
             get => _viewItemManager?.Settings.HomeAddress ?? Strings.HomeAddress;
         }
 
-        private string _address = Strings.HomeAddress;
+        private readonly string _address = Strings.HomeAddress;
         public string Address
         {
             get => Browser?.Address ?? Strings.HomeAddress;
         }
 
-        public bool IsAddressEnabled {
+        public bool IsAddressEnabled
+        {
             get => (ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal) == WorkSpaceState.Normal ? true : false;
+        }
+
+        /// <summary>
+        /// #83: whether the client currently sits in setup mode. Raised by ApplyWorkspaceState on
+        /// every workspace-state transition; the blocked-resources indicator only renders true here.
+        /// </summary>
+        public bool IsSetupState
+        {
+            get => (ClientControl.Instance?.WorkSpaceState ?? WorkSpaceState.Normal) == WorkSpaceState.Setup;
         }
 
         private Visibility _toolbarVisibility = Visibility.Visible;
@@ -59,7 +72,7 @@ namespace WebContent.Client
 
         public Guid Id => _viewItemManager?.Settings.InstanceId ?? (_designerMode ? Guid.NewGuid() : Guid.Empty);
 
-        
+
         private object _workspaceStateChangedReceiver;
 
         private bool _isWorkspaceFloating;
@@ -73,8 +86,28 @@ namespace WebContent.Client
             }
         }
 
-        private bool _designerMode;
+        private readonly bool _designerMode;
         private BrowserInstance _browser;
+
+        /// <summary>
+        /// #73: the VMS's own host name for the wildcard SSRF floor - the Management Server /
+        /// API Gateway host the platform itself knows from <c>EnvironmentManager</c>. Wildcard
+        /// allowlist entries never match it; explicit exact entries still may. A null/absent
+        /// value (offline, designer) just leaves the matcher's syntactic floor (IPs, localhost).
+        /// </summary>
+        private static string[] VmsFloorHosts()
+        {
+            try
+            {
+                var host = EnvironmentManager.Instance?.MasterSite?.ServerId?.Uri?.Host;
+                return string.IsNullOrWhiteSpace(host) ? null : new[] { host };
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         public BrowserInstance Browser
         {
             get
@@ -86,15 +119,52 @@ namespace WebContent.Client
                 // current address equals home. Wait for the manager; the designer path is exempt.
                 if (_browser == null && (_viewItemManager != null || _designerMode))
                 {
+                    // Ticket #54: a proxied workspace resolves a proxy profile from the admin-seeded
+                    // properties; the browser manager then fronts its profile with a loopback
+                    // forwarding listener. Standalone/disabled workspaces pass no profile.
+                    var settings = ViewItemManager?.Settings;
+                    ProxyWorkspaceProfile proxyProfile;
+                    ProxyWorkspaceProfile.TryCreate(
+                        settings != null && settings.ProxyEnabled,
+                        settings?.ProxyTargetsProperty,
+                        settings?.WorkspaceItemId,
+                        settings?.DefinitionFingerprint,
+                        out proxyProfile,
+                        VmsFloorHosts());
+
                     _browser = BrowserManager.GetBrowser(
                         Id,
                         WebContentConfiguration.CreateNavigationUri(Home, Strings.HomeAddress),
-                        ViewItemManager?.Settings.IsolateBrowserInstances ?? false);
+                        settings?.IsolateBrowserInstances ?? false,
+                        proxyProfile);
+                }
+                else if (_browser != null && _viewItemManager != null)
+                {
+                    // The admin toggled this workspace's proxy since the browser was created
+                    // (background-retained browsers outlive view items): reconcile, and recreate
+                    // the WebView when the routing itself changed (#54, "never direct").
+                    var settings = _viewItemManager.Settings;
+                    ProxyWorkspaceProfile proxyProfile;
+                    ProxyWorkspaceProfile.TryCreate(
+                        settings.ProxyEnabled,
+                        settings.ProxyTargetsProperty,
+                        settings.WorkspaceItemId,
+                        settings.DefinitionFingerprint,
+                        out proxyProfile,
+                        VmsFloorHosts());
+
+                    if (BrowserManager.ApplyProxyProfile(_browser, proxyProfile))
+                    {
+                        var address = _viewItemManager.Settings.ResolveRestoreAddress() ?? Home;
+                        _browser.RecreateWebView(
+                            WebContentConfiguration.CreateNavigationUri(address, Home),
+                            settings.IsolateBrowserInstances);
+                    }
                 }
 
                 return _browser;
             }
-        } 
+        }
 
         private BrowserCommand _backCommand;
         public ICommand BackCommand
@@ -242,7 +312,7 @@ namespace WebContent.Client
                     _reloadCommand.Init();
                     _printCommand.Init();
                     _homeCommand.Init();
-                    
+
                     // Can't set this here because the damn corewebview2 isn't available yet
                     // Browser.WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 }
@@ -278,6 +348,40 @@ namespace WebContent.Client
 
                 _viewItemManager.Settings.RecordSessionAddress(Address);
             }
+            else if (e.PropertyName == nameof(BrowserInstance.InitFailure) || e.PropertyName == nameof(BrowserInstance.WebView))
+            {
+                // #87: a failed (or freshly retried) initialization changes what the toolbar
+                // commands may do; no WebView navigation event fires in that state, so the
+                // gate is re-queried here.
+                _reloadCommand?.RaiseCanExecuteChanged();
+            }
+        }
+
+        /// <summary>
+        /// #87: the Refresh route for an errored proxied view — re-attempt creation through the
+        /// SAME re-creation path the view's Init uses on re-selection (restore address, same
+        /// isolation rule). Kept here so the command never touches view/layout plumbing; the
+        /// open view picks the fresh WebView2 control up from the browser's WebView property
+        /// change.
+        /// </summary>
+        internal void RecreateBrowserForRefresh()
+        {
+            // Resolve the tracked instance only: the Browser getter re-runs proxy reconciliation
+            // and could itself recreate, doubling the work of a Refresh click.
+            if (!BrowserManager.TryGetBrowser(Id, out var browser) || browser == null)
+            {
+                EnvironmentManager.Instance.Log(true, nameof(WebContentViewModel), $"Refresh-recreation refused for view item {Id}: no browser instance.");
+                return;
+            }
+
+            var address = ResolveRestoreAddress() ?? Home;
+            EnvironmentManager.Instance.Log(
+                false,
+                nameof(WebContentViewModel),
+                $"Refresh-recreation for view item {Id}: recreating the browser WebView at '{address}'.");
+            browser.RecreateWebView(
+                WebContentConfiguration.CreateNavigationUri(address, Home),
+                _viewItemManager?.Settings.IsolateBrowserInstances ?? false);
         }
 
         private object WorkspaceStateChangeHandler(Message message, FQID destination, FQID sender)
@@ -420,6 +524,7 @@ namespace WebContent.Client
         private void ApplyWorkspaceState(WorkSpaceState state)
         {
             OnPropertyChanged(nameof(IsAddressEnabled));
+            OnPropertyChanged(nameof(IsSetupState));
             switch (state)
             {
                 case WorkSpaceState.Normal:

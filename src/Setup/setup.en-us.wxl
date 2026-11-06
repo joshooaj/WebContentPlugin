@@ -1,4 +1,18 @@
 <WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl"
                  Culture="en-US" Codepage="1252">
     <String Id="DowngradeError" Value="A newer version of [ProductName] is already installed." />
+    <!-- #82: the Event Server restart-choice page (setupui.wxs EventServerOptionsDlg). -->
+    <String Id="WebContentEsOptionsWindowTitle" Value="[ProductName] Setup" Overridable="yes" />
+    <String Id="WebContentEsOptionsTitle" Value="{\WixUI_Font_Title}Event Server" Overridable="yes" />
+    <String Id="WebContentEsOptionsStopStory" Value="An Event Server was detected on this machine. Its service will be stopped while the plugin files are replaced." Overridable="yes" />
+    <String Id="WebContentEsOptionsFreshStory" Value="An Event Server was detected on this machine. The plugin is loaded when the Event Server service (re)starts." Overridable="yes" />
+    <String Id="WebContentEsOptionsRestart" Value="Restart the Event Server now" Overridable="yes" />
+    <String Id="WebContentEsOptionsWarning" Value="Restarting the Event Server disconnects the plugin connections held by every running XProtect client. Restart Smart Client and Management Client afterwards, or plugin messaging in those sessions will fail." Overridable="yes" />
+    <!-- #77: the proxy opt-in on the same Event Server page. The checkbox gates the
+         install-time deployment-CA custom action (setup.wxs CreateProxyAuthority). -->
+    <String Id="WebContentEsOptionsProxy" Value="Enable web content proxy support (creates the proxy certificate; an existing certificate is reused)" Overridable="yes" />
+    <String Id="WebContentEsOptionsProxyNote" Value="The proxy certificate is created on this machine only: its private key never leaves here, and the Event Server service account is granted read access to it. Every Smart Client machine must still trust the certificate once - see the plugin README (Management Client export, or Group Policy)." Overridable="yes" />
+    <!-- #82: ExitDialog tail shown when the admin declined the restart (the finish page
+         must state that the Event Server needs starting for the new files to load). -->
+    <String Id="WebContentEsExitText" Value="The Event Server service was left stopped. Start it to load the new plugin files." Overridable="yes" />
 </WixLocalization>

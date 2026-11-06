@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Ticket #77: the MSI's deployment-CA provisioning custom action. Like the #82 service
+    helper this exe is NOT part of the installed drop - it rides inside the MSI as a
+    Binary stream and only ever runs as a deferred (SYSTEM) custom action when the
+    Event Server service is present AND the admin ticked the proxy opt-in. It drives
+    the plugin's OWN load-or-create path (reflection into the just-installed
+    WebContent.dll, the same posture the legacy provision script uses) so the CA it
+    writes is byte-for-byte the shape the plugin loads by, then grants the Event
+    Server's service account read access to the CA private key.
+    Default bin path (NOT the drop): src/Setup/setup.wxs references it as a Binary.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>WebContent.ProxyCa</RootNamespace>
+    <AssemblyName>WebContentProxyCa</AssemblyName>
+    <Deterministic>true</Deterministic>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Explicit path: the wixproj passes Platform=x64 through the ProjectReference, and
+         the default bin layout would then insert an x64 segment the Binary SourceFile
+         would not know about. (Same reason WebContent/WebContentServiceCtl pin their
+         OutputPath.) -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+
+</Project>

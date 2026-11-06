@@ -231,4 +231,271 @@
   <data name="WorkspaceLabel" xml:space="preserve">
     <value>Workspace</value>
   </data>
+  <data name="ProxyEnabledLabel" xml:space="preserve">
+    <value>Route web traffic through the VMS server proxy</value>
+  </data>
+  <data name="ProxyTargetsLabel" xml:space="preserve">
+    <value>Proxy targets</value>
+  </data>
+  <data name="ProxyTargetsHint" xml:space="preserve">
+    <value>One row per allowlisted target: pick the scheme, enter the host, and add a port only when the target is not on the scheme default. Wildcards: *.foo.bar.com allows that domain's subdomains (never the apex itself), and a lone * allows any host of that scheme except literal IP addresses, localhost and this VMS's own hosts - list those explicitly. Only allowlisted targets can be reached through the proxy.</value>
+  </data>
+  <data name="ProxyAddTargetButton" xml:space="preserve">
+    <value>Add target</value>
+  </data>
+  <data name="ProxyColumnScheme" xml:space="preserve">
+    <value>Scheme</value>
+  </data>
+  <data name="ProxyColumnHost" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="ProxyColumnPort" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="ProxyColumnAcceptUntrusted" xml:space="preserve">
+    <value>Accept untrusted</value>
+  </data>
+  <data name="ProxyColumnProblem" xml:space="preserve">
+    <value>Problem</value>
+  </data>
+  <data name="ProxyRowCounterFormat" xml:space="preserve">
+    <value>{0} row(s) in the allowlist</value>
+  </data>
+  <data name="ProxyWildcardWarning" xml:space="preserve">
+    <value>The allowlist contains the full-host wildcard (*): the Event Server will fetch ANY host on that scheme - every host except literal IP addresses, localhost and this VMS's own hosts. Use *.domain.com to bound a wildcard to one domain.</value>
+  </data>
+  <data name="ProxyRowErrorHostRequired" xml:space="preserve">
+    <value>A host or wildcard pattern is required.</value>
+  </data>
+  <data name="ProxyRowErrorPortInvalid" xml:space="preserve">
+    <value>Port must be a number between 0 and 65535; leave it empty for the scheme default.</value>
+  </data>
+  <data name="ProxyRowErrorHostInvalid" xml:space="preserve">
+    <value>'{0}' is not a valid host or wildcard pattern.</value>
+  </data>
+  <data name="InvalidProxyTargetMessage" xml:space="preserve">
+    <value>{0} is not a valid proxy target. Fix the highlighted row or remove it before saving.</value>
+  </data>
+  <data name="MissingProxyTargetsMessage" xml:space="preserve">
+    <value>The proxy is enabled but no target is allowlisted. Add at least one proxy target or disable the proxy.</value>
+  </data>
+  <data name="ProxyCapLabel" xml:space="preserve">
+    <value>Max proxied response size (MB)</value>
+  </data>
+  <data name="ProxyCapHint" xml:space="preserve">
+    <value>Bigger responses are refused with a "response too large" page. Default 5 MB, maximum 20 MB; leave empty for the default. Applies to proxied fetch traffic only - streamed traffic like websockets is not size-capped.</value>
+  </data>
+  <data name="InvalidProxyCapMessage" xml:space="preserve">
+    <value>'{0}' is not a valid proxy response size. Enter a whole number of megabytes between 1 and 20, or leave the field empty for the default 5 MB.</value>
+  </data>
+  <data name="ProxyHeadersSectionLabel" xml:space="preserve">
+    <value>Advanced: headers</value>
+  </data>
+  <data name="ProxyHeadersHint" xml:space="preserve">
+    <value>Add, override or strip headers on each leg of the proxied traffic: the request list rewrites what the VMS Event Server sends to the target, the response list rewrites what comes back. Connection-level headers (Connection, Keep-Alive, TE, Trailer, Transfer-Encoding, Upgrade, any Proxy- header, Host, Content-Length) are always stripped by the proxy and can never be configured here. Nothing is added by default - the proxy adds no Via or X-Forwarded-For of its own, so the VMS topology stays invisible to the target unless you choose to disclose it.</value>
+  </data>
+  <data name="ProxyRequestHeadersLabel" xml:space="preserve">
+    <value>Request headers</value>
+  </data>
+  <data name="ProxyResponseHeadersLabel" xml:space="preserve">
+    <value>Response headers</value>
+  </data>
+  <data name="ProxyHeaderAddRequestButton" xml:space="preserve">
+    <value>Add request header</value>
+  </data>
+  <data name="ProxyHeaderAddResponseButton" xml:space="preserve">
+    <value>Add response header</value>
+  </data>
+  <data name="ProxyColumnHeaderName" xml:space="preserve">
+    <value>Header</value>
+  </data>
+  <data name="ProxyColumnHeaderValue" xml:space="preserve">
+    <value>Value</value>
+  </data>
+  <data name="ProxyColumnHeaderStrip" xml:space="preserve">
+    <value>Strip</value>
+  </data>
+  <data name="ProxyHeaderRowCounterFormat" xml:space="preserve">
+    <value>{0} rule(s)</value>
+  </data>
+  <data name="ProxyHeaderRowErrorNameRequired" xml:space="preserve">
+    <value>A header name is required.</value>
+  </data>
+  <data name="ProxyHeaderRowErrorNameInvalid" xml:space="preserve">
+    <value>'{0}' is not a valid header name (letters, digits and the characters ! # $ % &amp; ' * + - . ^ _ ` | ~ are allowed).</value>
+  </data>
+  <data name="ProxyHeaderRowErrorForbidden" xml:space="preserve">
+    <value>'{0}' is reserved for the proxy connection and cannot be configured.</value>
+  </data>
+  <data name="ProxyHeaderRowErrorValueRequired" xml:space="preserve">
+    <value>Enter a value for '{0}', or tick Strip to remove the header instead.</value>
+  </data>
+  <data name="ProxyHeaderRowErrorValueLineBreak" xml:space="preserve">
+    <value>The header value must not contain a line break.</value>
+  </data>
+  <data name="InvalidProxyHeaderMessage" xml:space="preserve">
+    <value>The proxy header policy has invalid row(s): {0}. Fix the highlighted rows or remove them before saving.</value>
+  </data>
+  <data name="ProxyTriggersSectionLabel" xml:space="preserve">
+    <value>Rule triggers</value>
+  </data>
+  <data name="ProxyTriggersHint" xml:space="preserve">
+    <value>One row per trigger: when proxied traffic matches the URL pattern, the method, and the response status, the VMS Event Server raises the XProtect event type shown in the Event raised column ("WebContent proxy request"). Find that event type in the XProtect rule builder to react to it. URL pattern: scheme://host[:port][/path-glob] - * matches any run of characters (including /), ? exactly one; *.foo.bar.com covers that domain's subdomains (never the apex), and a lone * matches any host. Method * means any method; the status filter is blank (any), a class like 4xx, or an exact code. Triggers never widen access - they only decorate traffic the allowlist already admits - and rows are evaluated top-down: one request raises at most the first matching row's event.</value>
+  </data>
+  <data name="ProxyColumnTriggerUrl" xml:space="preserve">
+    <value>URL pattern</value>
+  </data>
+  <data name="ProxyColumnTriggerMethod" xml:space="preserve">
+    <value>Method</value>
+  </data>
+  <data name="ProxyColumnTriggerStatus" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="ProxyColumnTriggerEvent" xml:space="preserve">
+    <value>Event raised</value>
+  </data>
+  <data name="ProxyTriggerAddButton" xml:space="preserve">
+    <value>Add trigger</value>
+  </data>
+  <data name="ProxyTriggerRowCounterFormat" xml:space="preserve">
+    <value>{0} trigger(s)</value>
+  </data>
+  <data name="ProxyTriggerRowErrorUrlRequired" xml:space="preserve">
+    <value>A trigger URL pattern is required.</value>
+  </data>
+  <data name="ProxyTriggerRowErrorUrlInvalid" xml:space="preserve">
+    <value>'{0}' is not a valid trigger URL pattern (scheme://host[:port][/path-glob], or the lone *).</value>
+  </data>
+  <data name="ProxyTriggerRowErrorMethodInvalid" xml:space="preserve">
+    <value>'{0}' is not a method filter (one verb, or * for any method).</value>
+  </data>
+  <data name="ProxyTriggerRowErrorStatusInvalid" xml:space="preserve">
+    <value>'{0}' is not a status filter (blank for any, a class like 4xx, or an exact code 100-599).</value>
+  </data>
+  <data name="InvalidProxyTriggerMessage" xml:space="preserve">
+    <value>The proxy trigger list has invalid row(s): {0}. Fix the highlighted rows or remove them before saving.</value>
+  </data>
+  <data name="ProxyLabel" xml:space="preserve">
+    <value>Proxy:</value>
+  </data>
+  <data name="ManagedByAdministratorLabel" xml:space="preserve">
+    <value>Managed by Administrator</value>
+  </data>
+  <data name="ProxyDisplayDisabled" xml:space="preserve">
+    <value>Disabled - browser connects directly</value>
+  </data>
+  <data name="ProxyDisplayEnabledNoTargets" xml:space="preserve">
+    <value>Enabled - no targets allowlisted</value>
+  </data>
+  <data name="ProxyDisplayEnabledPrefix" xml:space="preserve">
+    <value>Enabled - allowlisted targets:</value>
+  </data>
+  <data name="ProxyTestFetchLabel" xml:space="preserve">
+    <value>Test proxy fetch</value>
+  </data>
+  <data name="ProxyTestFetchHint" xml:space="preserve">
+    <value>Sends a proxy-fetch request from this Management Client across MIP messaging to the Event Server and reports what came back. Requires the Web Content plugin loaded on the Event Server (restart the Event Server service after deployment).</value>
+  </data>
+  <data name="ProxyTestFetchRunning" xml:space="preserve">
+    <value>Fetching through the Event Server...</value>
+  </data>
+  <data name="ProxyTestFetchNotConnected" xml:space="preserve">
+    <value>The proxy fetch harness is not connected. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment.</value>
+  </data>
+  <data name="ProxyTestFetchSuccessFormat" xml:space="preserve">
+    <value>HTTP {0} - {1} bytes fetched in {2:0.0}s</value>
+  </data>
+  <data name="ProxyTestFetchFailureFormat" xml:space="preserve">
+    <value>Proxy fetch {0} after {1:0.0}s - {2}</value>
+  </data>
+  <data name="StatusSummaryFormat" xml:space="preserve">
+    <value>{0} live proxy session(s) - {1:0.0} requests/min, sent {2}/s, received {3}/s</value>
+  </data>
+  <data name="StatusNoSessions" xml:space="preserve">
+    <value>No live proxy sessions on this workspace right now. Open a Web Content workspace tab in a Smart Client to see it here.</value>
+  </data>
+  <data name="StatusNotConnected" xml:space="preserve">
+    <value>No status from the Event Server: this Management Client has no proxy messaging channel to it. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment.</value>
+  </data>
+  <data name="StatusWorkspaceGone" xml:space="preserve">
+    <value>The Event Server does not know this workspace any more, so it has no proxy sessions to report.</value>
+  </data>
+  <data name="StatusQueryFailedFormat" xml:space="preserve">
+    <value>Proxy status query failed ({0}) - {1}</value>
+  </data>
+  <data name="StatusNoItemContext" xml:space="preserve">
+    <value>No workspace item context: this page cannot ask the Event Server for a status snapshot.</value>
+  </data>
+  <data name="DiagnosticsSummaryFormat" xml:space="preserve">
+    <value>{0} blocked proxy origin(s) reported for this workspace since the Event Server started tracking. Newest refusal first. The list lives in the Event Server's memory only - it resets when the Event Server service restarts.</value>
+  </data>
+  <data name="DiagnosticsEmpty" xml:space="preserve">
+    <value>Nothing has been blocked on this workspace since the Event Server started tracking. As Smart Clients open proxied views and the proxy refuses their requests, every refused origin appears here with its cause and hit count. The list lives in the Event Server's memory only - it resets when the Event Server service restarts.</value>
+  </data>
+  <data name="DiagnosticsStatusAllowlisted" xml:space="preserve">
+    <value>on allowlist</value>
+  </data>
+  <data name="DiagnosticsStatusCertTrust" xml:space="preserve">
+    <value>certificate trust, not the allowlist</value>
+  </data>
+  <data name="DiagnosticsPromotionRefusedFormat" xml:space="preserve">
+    <value>Could not add '{0}' to the allowlist: it is not an exact proxy origin the allowlist can name.</value>
+  </data>
+  <data name="CaUntrustedBannerFormat" xml:space="preserve">
+    <value>{0} client machine(s) report that the proxy certificate is NOT trusted on their PC. Export it here and distribute it to those machines - their users see a warning banner, and proxied HTTPS pages show a certificate error, until the certificate sits in those machines' trusted roots.</value>
+  </data>
+  <data name="CaUntrustedMachinesFormat" xml:space="preserve">
+    <value>Machines: {0}</value>
+  </data>
+  <data name="CaUntrustedMachineFormat" xml:space="preserve">
+    <value>{0} ({1} report(s))</value>
+  </data>
+  <data name="BlockedResourcesIndicatorOne" xml:space="preserve">
+    <value>1 resource blocked</value>
+  </data>
+  <data name="BlockedResourcesIndicatorMany" xml:space="preserve">
+    <value>{0} resources blocked</value>
+  </data>
+  <data name="BlockedResourcesToolTip" xml:space="preserve">
+    <value>The proxy refused page resources during this page load. Click to list them.</value>
+  </data>
+  <data name="BlockedResourcesHeader" xml:space="preserve">
+    <value>Blocked page resources (this page load):</value>
+  </data>
+  <data name="ProxyCaExportRunning" xml:space="preserve">
+    <value>Asking the Event Server for its proxy authority certificate…</value>
+  </data>
+  <data name="ProxyCaExportNotConnected" xml:space="preserve">
+    <value>No answer from the Event Server: this Management Client has no proxy messaging channel to it. Check the Event Server log (MIP.log) and restart the Management Client after a plugin deployment.</value>
+  </data>
+  <data name="ProxyCaExportMissing" xml:space="preserve">
+    <value>The proxy authority certificate does not exist yet on the Event Server. It is created the first time a proxied HTTPS target is used, or you can provision it once on the Event Server machine - see the plugin README.</value>
+  </data>
+  <data name="ProxyCaExportFailedFormat" xml:space="preserve">
+    <value>Proxy certificate export failed ({0}) - {1}</value>
+  </data>
+  <data name="ProxyCaExportSaveTitle" xml:space="preserve">
+    <value>Save the proxy authority certificate</value>
+  </data>
+  <data name="ProxyCaExportSaveFilter" xml:space="preserve">
+    <value>X.509 certificate (DER)|*.cer</value>
+  </data>
+  <data name="ProxyCaExportCancelled" xml:space="preserve">
+    <value>Export cancelled - nothing was written.</value>
+  </data>
+  <data name="ProxyCaExportSavedFormat" xml:space="preserve">
+    <value>Saved {0} (thumbprint {1}). Distribute it to Smart Client machines' LocalMachine\Root trusted-root store - the recommended path is Active Directory Group Policy; see the plugin README.</value>
+  </data>
+  <data name="ProxyCaBannerText" xml:space="preserve">
+    <value>The proxy certificate is not trusted on this PC - contact your administrator.</value>
+  </data>
+  <data name="ProxyCaFixButtonLabel" xml:space="preserve">
+    <value>Fix certificate trust</value>
+  </data>
+  <data name="ProxyCaFixButtonToolTip" xml:space="preserve">
+    <value>Starts the bundled elevated helper to import this proxy's certificate authority into this machine's Trusted Root store. Windows will show its elevation prompt and its own root-store warning - import this certificate only if you trust the VMS administrator who deployed the proxy.</value>
+  </data>
+  <data name="ProxyCaDismissButtonToolTip" xml:space="preserve">
+    <value>Dismiss this notice for the rest of this Smart Client session. It reappears in the next session while the certificate is still not trusted.</value>
+  </data>
 </root>
