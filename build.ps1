@@ -129,7 +129,7 @@ try {
             throw "Installer service-flow guard (#82): $action missing from InstallExecuteSequence."
         }
     }
-    $stopCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'StopEventServerService' } | ForEach-Object { $_.Count -ge 2 ? $_[1] : '' }) -join ';'
+    $stopCondition = ($ies | Where-Object { $_.Count -ge 1 -and $_[0] -eq 'StopEventServerService' } | ForEach-Object { if ($_.Count -ge 2) { $_[1] } else { '' } }) -join ';'
     foreach ($needle in 'NOT REMOVE', 'EVENTSERVERSERVICEPRESENT', 'WIX_UPGRADE_DETECTED', 'WEBCONTENTPLUGINPRESENT') {
         if ($stopCondition -notlike "*$needle*") {
             throw "Installer service-flow guard (#82): StopEventServerService condition '$stopCondition' lost '$needle' - the stop must fire only on install/upgrade, only when the Event Server service exists, and only when plugin files are already installed."
